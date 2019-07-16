@@ -54,7 +54,10 @@ The tag table must match the following schema and be saved as a comma delimited 
 |MortRate    |Float      |(not required) if equipped, seconds between tag pulses if fish has died   |
 |CapLoc      |String     |(required) capture location of fish                                       |
 |RelLoc      |String     |(required) release location of fish                                       |
-|TagType     |String     |(required) either 'Study' or 'Beacon
+|TagType     |String     |(required) either 'Study' or 'Beacon                                      |
+|Length      |Integer    |(not required) - mm                                                       |
+|Sex         |String     |(not required) - either 'M' or 'F'                                        |
+
 
 
 
