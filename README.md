@@ -18,5 +18,27 @@ This repository includes sample scripts that guide a user through a telemetry pr
 # Project Set Up
 The simple 4-line script “project_setup.py” will create a standard file structure and project database in a directory of your choosing.  **It is recommended that the directory does not contain any spaces or special characters.**  For example, if our study was of fish migration in the Connecticut River our initial directory could appear as (if saved to your desktop):
 > C:\Users\UserName\Desktop\Connecticut_River_Study
+
 When a directory has been created, insert it into the script in line 2 (highlighted below).  Then, edit line 3 to name the database.  **It is recommended to avoid using spaces in the name of the database.**  Once lines 2 and 4 have been edited, run the script.  
+
+projct_setup.py example:
+```
+import abtas
+proj_dir = 'J:\1210\005\Calcs\Studies\3_3_19\2019'
+dbName = 'ultrasound_2019.db'
+abtas.createTrainDB(proj_dir, dbName)  # create project database
+```
+
+Before proceeding to the next step, investigate the folder structure that was created.  The folders should appear as:
+
+* Project_Name
+    * Data *for storing raw data and project set up files*
+	    * Training Files *for storing raw receiver files the station you are currently working up*
+	* Output *for storing figures, modeling files, and scratch data*
+	    * Scratch *holds intermediate files that are managed by the software* - **never delete the contents of this folder**
+		* Figures *holds figures exported by the software*
+
+**Do not alter the structure of the directory.** Both the sample scripts provided and ABTAS expect that the directory is structured exactly as created.
+
+# Initializing the Project Database
 
