@@ -5,6 +5,10 @@ Code to allow us to use actual study tags as beacons---work in progress
 @author: tcastrosantos
 """
 
+<<<<<<< HEAD
+=======
+# adding this line to test a source tree push
+>>>>>>> 43b4897849e52f480787dacce96a930e95921cbc
 
 # import modules required for function dependencies
 import multiprocessing as mp
@@ -20,7 +24,11 @@ sys.path.append(r"D:\a\Projects\Eel Telemetry\Shetucket\Program")
 import telemetryAnalysis_5_multiprocessing as telem
 import warnings
 warnings.filterwarnings('ignore')
+<<<<<<< HEAD
 print ("Modules Imported")
+=======
+print "Modules Imported"
+>>>>>>> 43b4897849e52f480787dacce96a930e95921cbc
 
 '''train data - we can run function in serial or multiprocessing over cores in a
 computer.  this script uses multiprocessing, which is why we call the process 
@@ -70,7 +78,11 @@ if __name__ == "__main__":
     # Do we want to use an informed prior?
     prior = True
     
+<<<<<<< HEAD
     print ("Set Up Complete, Creating Histories")
+=======
+    print "Set Up Complete, Creating Histories"
+>>>>>>> 43b4897849e52f480787dacce96a930e95921cbc
     # get the fish to iterate through using SQL 
     conn = sqlite3.connect(projectDB)
     c = conn.cursor()
@@ -79,13 +91,18 @@ if __name__ == "__main__":
     histories = pd.read_sql_query(sql,con = conn).FreqCode.values
     c.close()
 
+<<<<<<< HEAD
     print ("There are %s fish to iterate through at site %s" %(len(histories),site))
+=======
+    print "There are %s fish to iterate through at site %s" %(len(histories),site)
+>>>>>>> 43b4897849e52f480787dacce96a930e95921cbc
     
     # create list of training data objects to iterate over with a Pool multiprocess
     iters = []
     for i in histories:
         iters.append(telem.classify_data(i,site,fields,projectDB,outputScratch,informed_prior = prior,class_iter=class_iter))
 
+<<<<<<< HEAD
     print ("Start Multiprocessing")
     print ("This will take a while")
     print ("Grab a coffee, call your mother.")
@@ -93,11 +110,24 @@ if __name__ == "__main__":
     pool = mp.Pool(processes = 10)                                               # the number of processes equals the number of processors you have
     pool.map(telem.calc_class_params_map, iters)                                # map the parameter functions over each training data object 
     print ("Predictors values calculated, proceeding to classification")
+=======
+    print "Start Multiprocessing"
+    print "This will take a while"
+    print "Grab a coffee, call your mother."
+
+    pool = mp.Pool(processes = 10)                                               # the number of processes equals the number of processors you have
+    pool.map(telem.calc_class_params_map, iters)                                # map the parameter functions over each training data object 
+    print "Predictors values calculated, proceeding to classification"
+>>>>>>> 43b4897849e52f480787dacce96a930e95921cbc
      
     telem.classDatAppend(site,outputScratch,projectDB,class_iter)
     
      
+<<<<<<< HEAD
     print ("process took %s to compile"%(round(time.time() - tS,3)))
+=======
+    print "process took %s to compile"%(round(time.time() - tS,3))
+>>>>>>> 43b4897849e52f480787dacce96a930e95921cbc
     
     # get data you just classified, run some statistics and make some plots
     # get the fish to iterate through using SQL 
@@ -112,6 +142,7 @@ if __name__ == "__main__":
     det_class_count = dat.groupby('test')['test'].count()
     trueLen = len(dat[dat.test == 1])
     falseLen = len(dat[dat.test == 0])
+<<<<<<< HEAD
     print ("The probability that a detection was classified as true was %s"%(round(trueLen/float(det_class_count.sum()),3)))
     print ("The probability that a detection was classified as false was %s"%(round(falseLen/float(det_class_count.sum()),3)))
     print ("The number of detections at receiver %s was %s"%(site,len(dat)))
@@ -120,6 +151,16 @@ if __name__ == "__main__":
     print (seriesHit)
     consDet = pd.crosstab(dat.test,dat.consDet)
     print (consDet)
+=======
+    print "The probability that a detection was classified as true was %s"%(round(trueLen/float(det_class_count.sum()),3))
+    print "The probability that a detection was classified as false was %s"%(round(falseLen/float(det_class_count.sum()),3))
+    print "The number of detections at receiver %s was %s"%(site,len(dat))
+    # cross tab of series hit and consecutive detection by known detection class
+    seriesHit = pd.crosstab(dat.test,dat.seriesHit)
+    print seriesHit
+    consDet = pd.crosstab(dat.test,dat.consDet)
+    print consDet
+>>>>>>> 43b4897849e52f480787dacce96a930e95921cbc
 
     # plot hit ratio histograms by detection class
     hitRatio = sns.FacetGrid(dat,col = "test") 
