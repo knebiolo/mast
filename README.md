@@ -41,4 +41,21 @@ Before proceeding to the next step, investigate the folder structure that was cr
 **Do not alter the structure of the directory.** Both the sample scripts provided and ABTAS expect that the directory is structured exactly as created.
 
 # Initializing the Project Database
+Once the project directory has been created, we will initialize the project database by declaring parameters and importing formatted data files that describe the tags and receivers used in the study.  If one of the objectives of your study is to analyze movement or you have close-spaced receivers and overlap is an issue, then we will also need to create a Node table.  This table describes the telemetry network and helps us visualize the relationships between receivers.  Please save initial database files to the ‘Data’ folder (see directory structure above if you forgot where it was) as comma delimited text files (.csv).  
+
+## Master Tag Table
+The tag table must match the following schema and be saved as a comma delimited text file.  Field names must appear exactly as in the first column and data types must match.  Please save the file to the ‘Data’ folder and call it ‘tblMasterTag.csv’.  
+
+| Field      | Data Type |                                      Comment                             |
+|------------|-----------|--------------------------------------------------------------------------|
+|FreqCode    |String     |(required) combination of radio frequency and tag code.  **must be unique**|
+|PIT_ID      |Integer    |(not required) if tagged with RFID tag indicate ID                        |
+|PulseRate   |Float      |(required) seconds between tag pulses                                     |
+|MortRate    |Float      |(not required) if equipped, seconds between tag pulses if fish has died   |
+|CapLoc      |String     |(required) capture location of fish                                       |
+|RelLoc      |String     |(required) release location of fish                                       |
+|TagType     |String     |(required) either 'Study' or 'Beacon
+
+
+
 
