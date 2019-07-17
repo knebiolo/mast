@@ -214,6 +214,136 @@ if __name__ == "__main__":
     print ("process took %s to compile"%(round(time.time() - tS,3)))
 ```
 
+## Cross-Validate Training Data
+
+**If the end user creates their own training data, it is advised to assess the accuracy of the training data prior to classification.** ABTAS uses a k-fold cross validation procedure to assess accuracy. The cross-validation procedure randomly assigns each row of data to one of n folds.  Then, the procedure iterates over each fold, classifying data belonging to the current fold, while the remaining rows serve as training data. Then, the classifications were compared against the known states of the training data and compiled in a cross validation table (Table 5).  ABTAS calculates the positive predictive value (PPV), negative predictive value (NPV), sensitivity (TPR), and specificity (SPC).
+
+The sensitivity is the probability of the algorithm classifying a record as true positive correctly, and is given with:
+
+>TPR= TP/(TP+FN)
+
+The specificity is the probability of correctly identifying a false positive, and is given with: 
+
+>SPC= TN/(TN+FP)
+
+The PPV and NPV are the proportions of positive and negative results that are true positive and true negative results respectively.  PPV is given with:
+
+>PPV= TP/(TP + FP) 
+
+while NPV is given with:
+
+>NPV= TN/(TN + FN)
+
+Since this algorithm is concerned with identifying and removing false positives, of special interest to researchers are the SPC and NPV.  A low SPC means that the algorithm is not able to discriminate between true and false positive detections.  The lower the SPC, the more false-positive detections are expected in the classified dataset, and the more time is required for manual false positive removal.  A low NPV means that the algorithm is rejecting too many good detections, thus creating instances of false negatives.  In other words, the algorithm is too strict and rejects too many good detections.  A low NPV rate could lead to poor GOF with mark-recapture modeling.  
+
+To run the cross-validation procedure, open ‘cross_validation.py’ and update the following lines:
+
+1.	Update the receiver type (line 13) - We can either validate **lotek** or **orion** receivers. 
+2.	Update the project directory (line 14) 
+3.	Update the name of the database (line 15) 
+4.	Update the number of folds (line 18)
+5.	Update the fields you wish to classify detections (line 20)
+
+```
+import time
+import os
+import numpy as np
+import abtas
+import warnings
+warnings.filterwarnings('ignore')
+'''Script implements a k-fold cross validation procedure on a specific receiver 
+type.  This is meant to test the validity of the training data collected at a 
+specific receiver or receiver type.'''
+if __name__ == "__main__":
+    t0 = time.time()
+    # What receiver type are you assessing accuracy for?
+    recType = 'orion'                                                          # what is the receiver type?
+    proj_dir = r'J:\1210\005\Calcs\Studies\3_3_19\2018\Test'                             # what is the raw data directory
+    dbName = 'ultrasound_2018_test.db'                                                    # what is the name of the project database
+    figureWS = os.path.join(proj_dir,'Output','Figures')    
+    projectDB = os.path.join(proj_dir,'Data',dbName)
+    k = 10
+    # ['conRecLength','consDet','hitRatio','noiseRatio','seriesHit','power','lagDiff']
+    fields = ['conRecLength','hitRatio','power','lagBDiff']
+    # create cross validated data object
+    cross = abtas.cross_validated(k,recType,fields,projectDB,figureWS)
+    print ("Created a cross validated data object")
+    # perform the cross validation method
+    for i in np.arange(0,k,1):
+        cross.fold(i)
+    # print the summary
+    cross.summary()
+    # If the data has already been classified, run the classification stats
+    print ("process took %s to compile"%(round(time.time() - t0,3)))
+```
+
+## False Positive Classification
+Assuming cross validation results were favorable, you can now proceed to false positive classification.  There are three classification methods available; classify 1, 2 and 3.  Classify 1 uses the training data you just created, while classify 2 uses someone else’s training data.  Classify 3 reclassifies an already classified dataset, which is designed to proceed until no more false positives have been identified and removed from the dataset.  
+
+To run the classify_1.py script update the following lines: 
+1.	Update the receiver ID (line 15) 
+2.	Update the receiver type (line 16) – input can either be **lotek** or **orion** 
+3.	Update input workspace (line 17) 
+4.	Update project database name (line 18) 
+5.	Update the fields used in the classification (line 26)
+6.	Update the number of processors (line 44)
+
+example classify_1.py:
+```
+import multiprocessing as mp
+import time
+import os
+import sqlite3
+import pandas as pd
+import abtas
+import warnings
+warnings.filterwarnings('ignore')
+'''We can run the classification function in serial or parallel over cores.  
+This script uses multiprocessing, which is why we call the process behind the 
+main statement.'''
+if __name__ == "__main__":
+    tS = time.time()
+    #set script parameters
+    site = 't04'                                                               # what is the site/receiver ID?
+    recType = 'orion'                                                          # what is the receiver type?
+    project_dir = r'J:\1210\005\Calcs\Studies\3_3_19\2018\Test'                # what is the raw data directory
+    dbName = 'ultrasound_2018_test.db'                                         # what is the name of the project database
+    # directory creations
+    scratch_ws = os.path.join(project_dir,'Output','Scratch')  
+    figure_ws = os.path.join(project_dir,'Output','Figures')                
+    working_files = os.path.join(project_dir,'Data','TrainingFiles')
+    projectDB = os.path.join(project_dir,'Data',dbName)
+    # list fields used in likelihood classification, must be from this list:
+    # ['conRecLength','consDet','hitRatio','noiseRatio','seriesHit','power','lagDiff']
+    fields = ['conRecLength','hitRatio','power','lagDiff']                     # enter the fields you wish to classify on from list above
+    # Do we want to use an informed prior?
+    prior = True                                                               # enter whether or not you wish to use an informed prior, if not a 50/50 split is used and the classifier behaves like Maximum Likelihood                                                         
+    print ("Set Up Complete, Creating Histories")
+    # get the fish to iterate over with SQL 
+    conn = sqlite3.connect(projectDB)
+    c = conn.cursor()
+    sql = "SELECT DISTINCT tblRaw.FreqCode FROM tblRaw LEFT JOIN tblMasterTag ON tblRaw.FreqCode = tblMasterTag.FreqCode WHERE recID == '%s' AND TagType == 'Study';"%(site)
+    histories = pd.read_sql_query(sql,con = conn).FreqCode.values
+    c.close()
+    print ("There are %s fish to iterate through at site %s" %(len(histories),site))
+    # create list of training data objects to iterate over with a Pool multiprocess
+    iters = []
+    for i in histories:
+        iters.append(abtas.classify_data(i,site,fields,projectDB,scratch_ws,informed_prior = prior))
+    print ("Start Multiprocessing")
+    print ("This will take a while")
+    print ("Grab a coffee, call your mother.")
+    pool = mp.Pool(processes = 3)                                               # the number of processes equals the number of processors you have - 1
+    pool.map(abtas.calc_class_params_map, iters)                                # map the parameter functions over each training data object 
+    print ("Predictors values calculated, proceeding to classification")
+    abtas.classDatAppend(site, scratch_ws, projectDB)
+    print ("process took %s to compile"%(round(time.time() - tS,3)))
+    # generate summary statistics for classification by receiver type
+    class_stats = abtas.classification_results(recType,projectDB,figure_ws,site)
+    class_stats.classify_stats()
+```
+
+
 
 
 
