@@ -57,6 +57,24 @@ The tag table must match the following schema and be saved as a comma delimited 
 |TagType     |String     |(required) either 'Study' or 'Beacon                                      |
 |Length      |Integer    |(not required) - mm                                                       |
 |Sex         |String     |(not required) - either 'M' or 'F'                                        |
+|RelDate     |DateTime   |(required) - Date and time of release                                     |
+
+## Master Receiver Table
+The receiver file must contain the following fields and should be saved as a comma delimited text file.  Please see the schema below.  As with the master tag file, please save the master receiver file to the ‘Data’ folder.    A good name for this file is “tblMasterReceiver.csv”.  
+
+| Field      | Data Type |                                      Comment                             |
+|------------|-----------|--------------------------------------------------------------------------|
+|Name        |String     |(not required) - common name of reciever location,  e.g. 'Norse Farms'    |
+|RecType     |String     |(required) - acceptable inputs are either **'lotek'** or **'orion'**      |
+|recID       |String     |(required) - alphanumeric ID for receiver, e.g. 'T01'                     |
+|Node        |String     |(required) - alphanumeric ID for network node, e.g. 'S01'.                |
+
+## Telemetry network
+If one of your objectives is to analyze how fish move through a study area, you will need to create a table that describes relationships between receivers (single receivers or groupings) by identifying the logical pathways that exist between them.  Figure 1 depicts a telemetry network of a recent project completed by Kleinschmidt Associates.  Each point on the picture is either a single telemetry receiver or group of receivers.  These points are known as nodes and represent telemetered river reaches.  The receiver-to-node relationship is mapped in the master receiver table with the ‘Node’ column.  The lines, or edges in Figure 1 depict the relationships between nodes.  Some are double headed while others are one way.  Some edges are one way because it is impossible for a fish to swim up through a hydroelectric turbine.  This type of graph is known as a directed acyclic graph.  For now, we only need to identify the nodes and give them arbitrary XY coordinates.  
+
+
+
+
 
 
 
