@@ -418,6 +418,101 @@ Each node on a telemetry network may consist of one or more receivers (Figure 2)
 
 ![Overlap Relationships](https://i.ibb.co/m5kY2PL/overlap.png)
 
+The Russian Doll algorithm iterates over each detection at each node in Figure 8. Then, the algorithm iterates over each presence at each successor node and asks a simple question: Was the fish detected at the child node while it was also detected at the parent node? If the answer is yes, then the detection at the parent node overlaps the detection at the child node. Thus, the algorithm is nothing more than an iterative search over a directed graph that applies a simple Boolean logic statement. However, it is very powerful in its ability to simplify movement and place fish in discrete spatial locations at discrete points in time. 
+
+To run the Russian-Doll, open up overlap.py and follow these steps:
+1.	Update Line 13 with the project directory
+2.	Update line 14 with the database name
+3.	Update line 19 with the nodes that overlap or are overlapped
+4.	Update the successor relationships in line 20 as a list of tuples (‘parent node’, ’child node’) – these describe the edge relationship in the directed graph pictured in Figure 8 
+5.	Update line 30 with the number of parallel processes (n – 1, where n = number of CPU cores)
+
+example overlap.py
+```
+'''Script Intent: The Intent of this script is to identify overlapping records 
+to remove redundant detections and to positively place a fish.'''
+# import modules
+import abtas
+import os
+import warnings
+warnings.filterwarnings('ignore')
+import multiprocessing as mp
+import time
+if __name__ == "__main__":
+    tS = time.time()
+    # set up script parameters
+    project_dir = r'J:\1210\005\Calcs\Studies\3_3_19\2018\Test'
+    dbName = 'ultrasound_2018_test.db'          
+    outputWS = os.path.join(project_dir,'Output','Scratch')
+    figureWS = os.path.join(project_dir,'Output','Figures')
+    projectDB = os.path.join(project_dir,'Data',dbName)
+    # which node do you care about?
+    nodes = ['S01','S02','S03','S04','S05','S06','S07','S08','S09']
+    edges = [('S01','S05'),('S01','S06'),('S01','S07'),('S01','S08'),('S01','S09'),
+             ('S02','S05'),('S02','S06'),('S02','S07'),('S02','S08'),('S02','S09'),
+             ('S03','S05'),('S03','S06'),('S03','S07'),('S03','S08'),('S03','S09'),
+             ('S04','S05'),('S04','S06'),('S04','S07'),('S04','S08'),('S04','S09'),
+             ('S09','S05'),('S09','S06'),('S09','S07'),('S09','S08'),
+             ('S05','S08'),
+             ('S06','S08'),
+             ('S07','S08')]
+    # Step 1, create an overlap object
+    print ("Start creating overlap data objects - 1 per node")
+    iters = []
+    for i in nodes:
+        iters.append(abtas.overlap_reduction(i,nodes,edges,projectDB,outputWS,figureWS))
+        print ("Completed overlap data object for node %s"%(i))
+    print ("Start Multiprocessing")
+    print ("This will take a while")
+    print ("Grab a coffee, call your mother.")    
+    pool = mp.Pool(processes = 8)                                              # the number of processes equals the number of processors you have
+    pool.map(abtas.russian_doll, iters)                                         # map the russian doll function over each training data object 
+    print ("Overlap analysis complete proceed to data management")
+    # Step 3, Manage Data   
+    abtas.manage_node_overlap_data(outputWS,projectDB)
+    print ("Overlap Removal Process complete, took %s seconds to compile"%(round(time.time() - tS,4)))
+    del iters
+```
+
+## Fish History
+ABTAS has the ability to look at the movement of a specific fish through the telemetry network over time.  This function, known as a fish history, is critical for false positive removal as it identifies remaining false positive detections and overlap between adjacent receivers.  
+
+To run the fish_history.py script follow these steps:
+1.	Update line 8 with your project directory
+2.	Update line 9 with the name of your project’s database
+3.	Update line 11 with the list of receivers you wish to include, this defaults to all receivers in the study.
+4.	Update line 13 with specific fish history options. For an unfiltered history pass filtered = False and overlapping = False.  For a history with Naïve Bayes false positives removed pass filtered = True and overlapping = False.  For a history with Naïve Bayes false positives and overlapping detections removed pass filtered = True and overlapping = True.  
+5.	Update line 16 with the FreqCode of a specific fish.
+
+example fish_history.py:
+```
+'''Module creates a 3d plot to view fish history''' 
+# import modules
+import sys
+sys.path.append(r"J:\Jobs\1210\005\Calcs\Studies\3_3_19\2018\Program")
+import abtas
+import os
+import warnings
+warnings.filterwarnings('ignore')
+# set up script parameters
+proj_dir =  r'J:\1210\005\Calcs\Studies\3_3_19\2018\Test'                             # what is the raw data directory
+dbName = 'ultrasound_2018_test.db'                                                    # what is the name of the project database
+projectDB = os.path.join(proj_dir,'Data',dbName)
+rec_list = ['t01','t02','t03O','t03L','t04','t05','t06','t07','t08','t09','t10','t11','t13']
+# Step 1, create fish history object
+fishHistory = abtas.fish_history(projectDB,filtered = False, overlapping = False, rec_list = rec_list)
+print ("Fish History class object created, plotting now")
+# Step 2, pick a fish, make a plot
+fish = '150.500 160'
+fishHistory.fish_plot(fish)
+```
+
+The script will produce an interactive 3d plot than you can rotate and examine.  The following figure shows the fish history for a single fish migrating through the telemetry network depicted in Figure 2.  Note that the X and Y coordinates are the arbitrary coordinates provided in the Node table (see: Telemetry network), and the Z coordinates are in hours since first detection.  When all false positives are removed, it is possible to view how a fish moved through a telemetry network, and how long it spent at each node.  Note that the false positive algorithm removed detections at the onset of the study (middle panel), which reduced the time spent within the study area from over 400 hours to 200 hours.  The Naïve Bayes also removed considerable cross chatter and back and forth movements between major river reaches.  Then, the overlap removal algorithm removed considerable overlap between nodes S05, S08, S07 and S08.  This movement appeared as abrupt back and forth movement (i.e. cross-chatter) between overlapping receivers.  From here, you can identify errant detections by hand and classify them as false positive using SQL methods in your project database.
+
+![Data Removal Steps](https://i.ibb.co/q0Nzpc7/reduction.png)
+
+
+
 
 
 
