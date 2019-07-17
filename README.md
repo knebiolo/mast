@@ -74,7 +74,7 @@ If one of your objectives is to analyze how fish move through a study area, you 
 
 ![Example Telemetry Network](https://i.ibb.co/Mspcn92/telem-network.png)
 
-
+Like the tag and receiver tables, the node table will be saved as a comma delimited text file in the ‘Data’ folder.  The XY coordinate data is meant to produce a schematic of the telemetry study (Figure 1).  **We do not recommend the use of actual XY coordinate data (latitude, longitude) because relationships between near-adjacent nodes may be hard to view and aquatic networks are often sinuous.**  The node table has the following schema below: 
 
 
 
