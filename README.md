@@ -560,6 +560,62 @@ print ("Data formatting complete, proceed to MARK for live recapture modeling (C
 ```
 
 ##Competing Risks Assessment
+A multi-state model is used to understand situations where a tagged animal transitions from one state to the next (Therneau, Crowson, & Atkinson, 2016). A standard survival curve (Kaplan-Meier) can be thought of as a simple multi-state model with two states (alive and dead) and one transition between those two states (Therneau, Crowson, & Atkinson, 2016). For the purpose of radio telemetry projects, these two states can be staging and passing. Competing risks generalize the standard survival analysis of a single endpoint (as described above) into an investigation of multiple first event types (Beyersmann, Allignol, & Schumacher, 2011). Competing risks are the simplest multi-state model, where events are envisioned as transitions between states (Beyersmann, Allignol, & Schumacher, 2011). For competing risks, there is a common initial state for all models (Beyersmann, Allignol, & Schumacher, 2011). For example, with the assessment of time to move either upstream or downstream of the ultrasound array, the common initial state is within the array. When fish move upstream or downstream of the array, they enter an absorbing state. The baseline hazard is measured with the Nelson-Aalen cause specific cumulative incidence function. One can think of the hazard as the probability of experiencing an event (passage) within the next time unit conditional on still being in the initial state (Beyersmann, Allignol, & Schumacher, 2011). 
+
+ABTAS produces counting process style datasets for use in a Competing Risks assessment with the survival package in R.  The time-to-event class object has methods that can produce datasets suitable for construction of Nelson-Aalen cumulative incidence functions and with Cox Proportional-Hazards (CoxPH) regression.  The major difference between the two is that the CoxPH output expands the time series between the start of a trial and the event time is into equal interval bins so that it can be joined with time-dependent covariates in your analysis software of choice.  The default time series interval is 15 minutes.  However, the end user can pass the optional argument ‘bucket_length_min’ to line 21. If 20 is passed, the function will expand time into 20 minute segments and the end user can join each row to a covariate on the ‘FlowPeriod’ column.  
+Follow these steps to prepare your data for competing risks analysis:
+1.	Update line 7 with the project directory
+2.	Update line 8 with the project database name
+3.	Update line 15 with the node to state dictionary.  This dictionary groups nodes together into states for Competing Risks multi-state modeling.  
+4.	Update line 16 with the list of receivers used in your analysis
+5.	If your time-dependent covariates occur on intervals other than 15 minutes pass the following argument to line 21, ‘bucket_length_min = n’ where n is the number of minutes in covariate bin.  
+
+```
+# import modules
+import abtas
+import os
+import warnings
+warnings.filterwarnings('ignore')
+# set up script parameters
+proj_dir = r'J:\1210\005\Calcs\Studies\3_3_19\2018\Test'                            
+dbName = 'ultrasound_2018_test.db'                                                   
+projectDB = os.path.join(proj_dir,'Data',dbName)
+# what is the output directory?                         
+outputWS = os.path.join(proj_dir,'Output')
+o_fileName_cov = "bypass_detail_cov.csv"
+o_fileName = "bypass_detail.csv"
+# what is the Node to State relationship - use Python dictionary 
+node_to_state = {'S01':1,'S02':1,'S03':1,'S04':1,'S05':1,'S06':1,'S07':1,'S08':1,'S09':2,'S10':3,'S11':3,'S12':4}
+recList = ['t01','t02','t03O','t03L','t05','t06','t07','t08','t09','t10','t11','t13']
+# Step 1, create time to event data class - we only need to feed it the directory and file name of input data
+tte = abtas.time_to_event(recList,(node_to_state),projectDB)
+print ("Step 1 Complete, Data Class Finished")
+# Step 2, format data - with covariates
+tte.data_prep(os.path.join(outputWS,o_fileName_cov), time_dependent_covariates = True)
+print ("Time to Event data formatted for time dependent covariates")
+# Step 3, format data - without covariates
+tte.data_prep(os.path.join(outputWS,o_fileName))
+print ("Time to Event data formated without time dependent covariates")
+# Step 4, generate a summary
+tte.summary()
+print ("Data formatting complete, proceed to R for Time to Event Modeling")
+```
+
+#Bibliography
+
+Armstrup, S. C., McDonald, T. L., & Manly, B. F. (2010). Handbook of Capture-Recapture Analysis. Princeton University Press.
+Beeman, J. W., & Perry, R. W. (2012). Bias from False-Positive Detections and Strategies for their Removal in Studies Using Telemetry. In N. S. Adams, J. W. Beeman, & J. H. Eiler (Eds.). American Fisheries Society.
+Beyersmann, J., Allignol, A., & Schumacher, M. (2011). Competing Risks and Multistate Models with R. New York, NY: Springer.
+Lebreton, J.-D., Burnham, K. P., Clobert, J., & Anderson, D. R. (1992). Modeling survival and testing biological hypotheses using marked animals: a unified approach with case studies. Ecological monographs, 62, 67-118.
+Marsland, S. (2009). Machine Learning: An Algorithmic Perspective. Boca, Raton, Florida: CRC Press, Taylor and Francis Group.
+Richert, W., & Pedro-Coelho, L. (2013). Building Machine-Learning Systems with Python. Birmingham, UK: Packt Publishing.
+Sibly, R. M., Nott, H. M., & Fletcher, D. J. (1990). Splitting Behavior into bouts. Animal Behavior.
+Stone, J. V. (2013). Bayes ́Rule: A Tutorial Introduction to Bayesian Analysis. Lexington, KY: Sebtel Press.
+Therneau, T., Crowson, C., & Atkinson, E. (2016, October). Multi-state models and competing risks. Multi-state models and competing risks. Retrieved from https://cran.r-project.org/web/packages/survival/vignettes/compete.pdf
+
+
+
+
 
 
 
