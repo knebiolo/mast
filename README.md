@@ -511,6 +511,58 @@ The script will produce an interactive 3d plot than you can rotate and examine. 
 
 ![Data Removal Steps](https://i.ibb.co/q0Nzpc7/reduction.png)
 
+#Statistical Formatting
+ABTAS has functions that can format datasets appropriate for statistical assessment with Competing Risks and Mark Recapture methods.  Prior to running the formatting functions, you must merge the receiver specific recapture tables into a recaptures table consisting to valid detections only with the ABTAS function ‘the_big_merge’.  Arguments for the function are simple, just the project directory and database name are required.  The final recaptures table can be exported for use in your own analysis.  
+
+##Cormack-Jolly-Seber
+Mark-recapture survival analysis is typically used to assess passage effectiveness of fish ladders (Beeman and Perry, 2012). It has also been used to assess upstream movement of fish in river systems along the Northeastern United States (Kleinschmidt 2015, 2017, 2018, 2019).  Use of the term “survival” is standard for mark-recapture analysis, which is predominantly used to assess the actual survival of marked animals over time. However, survival in this context simply means successful passage, it does not convey mortality.  Therefore, we will use probability of arrival rather than survival to reduce confusion.  To estimate arrival parameters with radio telemetry under natural or anthropogenic conditions, one must follow individually marked animals through time (Lebreton et al., 1992). However, it is rarely possible to follow all individuals of an initial sample over time (Lebreton et al., 1992) as is evident by varying recapture rates at each telemetry receiver location. Open population mark-recapture models allow for change (emigration and mortality) during the course of a study (Armstrup, McDonald, and Manly, 2005) and can incorporate imperfect recapture histories. The Cormack-Jolly-Seber (CJS) model is based solely on recaptures of marked animals and provides estimates of arrival and capture probabilities only (Armstrup, McDonald, and Manly, 2005).  
+
+To create a dataset suitable for analysis with CJS modeling, you will first need to develop a receiver-to-recapture-occasion relationship.  CJS modeling is simple; the output is the probability of arriving at the next upstream or downstream recapture occasion.  The receiver-to-recapture-occasion relationship simply groups nodes together into logical recapture occasions like upstream-downstream or forebay-tailrace.  CJS recapture occasions can be envisioned as gates within a river system and may represent potential bottlenecks.  
+
+The input to the CJS function is a dictionary that describes a receiver to recapture occasion relationship and list of receivers used in the analysis.  Some receives may represent offshoots from the main river reach and are not used in the analysis.  Some recapture occasions may be a single receiver, while others are up of a group of receivers. 
+
+To run the CJS_data_prep.py function, follow these steps:
+1.	Update line 7 with your project directory
+2.	Update line 8 with your project database name
+3.	Update line 12 with a name for your model.
+4.	Update line 14 with your receiver to recapture occasion relationship
+5.	Update line 15 with a list of receivers used in the analysis. 
+
+The output of the function is a dataset (.ISP) appropriate for import with MARK or RMARK and produces a 1 in the recapture occasion column if it was recaptured and a 0 if it wasn’t.  
+
+example CJS_data_prep.py:
+```
+# import modules
+import abtas
+import os
+import warnings
+warnings.filterwarnings('ignore')
+# set up script parameters
+proj_dir = r'J:\1210\005\Calcs\Studies\3_3_19\2018\Test'                             # what is the raw data directory
+dbName = 'ultrasound_2018_test.db'                                                    # what is the name of the project database
+projectDB = os.path.join(proj_dir,'Data',dbName)
+# what is the output directory?                         
+outputWS = os.path.join(proj_dir,'Ouptut')
+modelName = "MontagueToSpillway"
+# what is the Node to State relationship - use Python dictionary 
+receiver_to_recap = {'t01':'R0','t02':'R0','t03O':'R1','t03L':'R1','t04':'R2',
+                     't05':'R2','t06':'R2','t07':'R2','t08':'R2','t09':'R3',
+                     't10':'R4','t11':'R4','t13':'R5','t12':'R6'}
+recList = ['t01','t02','t03O','t03L','t04','t05','t06','t07','t08','t09','t10',
+           't11','t12','t13']
+# Step 1, create time to event data class - we only need to feed it the directory and file name of input data
+cjs = abtas.cjs_data_prep(recList,receiver_to_recap,projectDB)
+print ("Step 1 Completed, Data Class Finished")
+# Step 2, Create input file for MARK
+cjs.input_file(modelName,outputWS)
+print ("Step 2 Completed, MARK Input file created")
+print ("Data formatting complete, proceed to MARK for live recapture modeling (CJS)")
+```
+
+##Competing Risks Assessment
+
+
+
 
 
 
