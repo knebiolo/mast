@@ -619,9 +619,9 @@ def createTrainDB(project_dir, dbName):
     figures_dir = os.path.join(output_dir, 'Figures')
     if not os.path.exists(figures_dir):
         os.makedirs(figures_dir)    
-    program_dir = os.path.join(project_dir, 'Program')                         # this is where we will create a local clone of the Git repository
-    if not os.path.exists(program_dir):
-        os.makedirs(program_dir)     
+#    program_dir = os.path.join(project_dir, 'Program')                         # this is where we will create a local clone of the Git repository
+#    if not os.path.exists(program_dir):
+#        os.makedirs(program_dir)     
     
     dbDir = os.path.join(data_dir,dbName)
     

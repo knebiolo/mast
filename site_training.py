@@ -25,7 +25,7 @@ if __name__ == "__main__":
     # get the fish to iterate through using SQL 
     conn = sqlite3.connect(projectDB)
     c = conn.cursor()
-    sql = "SELECT DISTINCT tblRaw.FreqCode FROM tblRaw LEFT JOIN tblMasterTag ON tblRaw.FreqCode = tblMasterTag.FreqCode WHERE recID == '%s' AND TagType IS NOT 'Study';"%(site)
+    sql = "SELECT DISTINCT tblRaw.FreqCode FROM tblRaw LEFT JOIN tblMasterTag ON tblRaw.FreqCode = tblMasterTag.FreqCode WHERE recID == '%s' AND TagType IS NOT 'Study' AND TagType IS NOT 'Test';"%(site)
     histories = pd.read_sql_query(sql,con = conn).FreqCode.values
     c.close()
     print ("Finished importing data and indexing database, there are %s fish to iterate through" %(len(histories)))
