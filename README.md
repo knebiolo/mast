@@ -124,7 +124,7 @@ Radio telemetry receivers record four types of detections based upon their binar
 
 Specifically, Bayes Rule calculates the posterior probability, or the probability of a hypothesis occurring given some information about its present state, and is written with P(θ_i |x_j); where θ_i is the hypothesis (true or false positive) and x_j is observed data. Formally, Bayes Rule is expressed as:
 
-
+![Bayes](https://i.ibb.co/DCngysX/bayes.png)
 
 
 
