@@ -416,7 +416,7 @@ After describing presences at each receiver (time of entrance, time of exit) it 
 
 Each node on a telemetry network may consist of one or more receivers (Figure 2). We described the hierarchical relationships between nested receivers with a directed graph depicted in Figure 8. Here, the edges between nodes indicate successors, or nodes with successively smaller detection zones. On this figure, we can see what nodes overlap and what nodes are overlapped.  For example, node S01 overlaps S05, S06, S07, S08 and S09, while node S06 only overlaps node S08.  
 
-
+![Overlap Relationships](https://i.ibb.co/m5kY2PL/overlap.png)
 
 
 
