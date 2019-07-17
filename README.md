@@ -343,6 +343,83 @@ if __name__ == "__main__":
     class_stats.classify_stats()
 ```
 
+In some circumstances, the end user may not have beacon tags that they can sacrifice.  In this case they can use training data from a previous project or other researcher.  The classify_2.py script is nearly identical to classify_1.py, with the exception of an extra argument in the function call on line 40.  This argument identifies a separate training database.  
+
+## Overlap Removal
+The Naïve Bayes Classifier will identify and remove false positive detections.  However, if two receivers are placed near each other, a tag may be heard on more than one at the same time.  When assessing movement, overlap is problematic because the fish cannot be in the two different places at the same time.  ABTAS employs an overlap reduction method inspired by nested Russian dolls.  The detection ranges on antennas vary greatly, but it was assumed that the regions increase in size from stripped coaxial cable up to large aerial Yagis. An algorithm inspired by nested-Russian Dolls was developed to reduce overlap and discretize positions in time and space within the telemetry network. If a fish can be placed at a receiver with a limited detection zone (stripped coaxial cables or dipole), then it can be removed from the overlapping detection zone (Yagi) if it is also recaptured there. 
+
+Fish will often visit a limited range antenna for a certain amount of time, then leave that detection zone only to return sometime later. This behavior is commonly referred to as a “bout” in the ecological literature (Sibly, Nott, and Fletcher, 1990). Following Sibly, Nott and Fletcher’s method (1990), ABTAS fits a three-process broken-stick model, which is a piecewise-linear regression with two knots (k=2). The function first calculates the lag between detections for each fish within each discrete detection zone. Then, it bins the lag into 10-second intervals, and counts the number of times a lag-interval occurs within each bin. After log-transforming the counts, ABTAS fits a three-process broken-stick model using a brute-force procedure that tests every bout-length combination with an ordinary least squares regression. The best piecewise-model is the one that minimizes the total residual error (sum of squares). 
+
+If a bout describes an entire visit to a detection zone, the lag between detections determines where a fish is in its bout.  The lags help us determine if the fish present, or if the fish is milling in and out at edge of the detection zone, or if it has left the zone completely only to return some time later.  The knots of the best piecewise regression determine the length of each bout process. 
+
+The first bout process describes a continuous string of detections indicative of a fish being continuously present, the second bout process describes milling behavior at the edge of a detection zone where lags between detections may be 20 – 30 seconds or more, and the third bout process describes the lags between detections where a fish leaves one detection zone completely for another only to come back sometime later. 
+
+After deriving the bout criteria for each discrete telemetry location, presences were enumerated. ABTAS assumes that a fish has left a detection zone only to come back at the start of the third process. Therefore, the second knot of the broken-stick model describes the time between detections that signify a new presence at this location. If the lag between detections is equal to or greater than this duration, a fish has left the telemetry location only to return much later. The bout process iterates over every detection, for every fish, at every receiver, applies this logic to each lag time, and then enumerates and describes presences at each location with start and end time statistics. Depending upon the number of fish in the study and receivers identified, the algorithm may take a long time to complete.  
+
+To run ‘bouts.py’ follow these steps:
+1.	Update line 11 with the project directory
+2.	Update line 12 with the database name
+3.	Update line 18 with the nodes of interest (typically the entire network)
+
+example bouts.py:
+```
+'''Script Intent: the intent of this script is to find the bout length at each 
+node within our telemetry network.  
+
+Currently our bout procedure uses a broken stick model, however there is literature 
+that suggests the data can be assessed with a maximum likelihood procedure rather than 
+our brute force method in current use'''
+# import modules
+import os
+import warnings
+import abtas
+warnings.filterwarnings('ignore')
+# set up script parameters
+project_dir = r'J:\1210\005\Calcs\Studies\3_3_19\2018\Test'                # what is the raw data directory
+dbName = 'ultrasound_2018_test.db'                                         # what is the name of the project database
+inputWS = os.path.join(project_dir,'Data')                             
+scratchWS = os.path.join(project_dir,'Output','Scratch')
+figureWS = os.path.join(project_dir,'Output','Figures')
+projectDB = os.path.join(inputWS,dbName)
+# which node do you care about?
+nodes = ['S00','S01','S02','S03','S04','S05','S06','S09','S10','S11','S12','S13']
+#nodes = ['S13']
+bout_len_dict = dict()
+for i in nodes:   
+    # Step 1, initialize the bout class object
+    bout = abtas.bout(i,projectDB,lag_window = 15, time_limit = 3600)
+    # Step 2: get fishes - we only care about test = 1 and hitRatio > 0.3
+    fishes = bout.fishes    
+    print ("Got a list of tags at this node")
+    print ("Start Calculating Bout Length for node %s"%(i))
+    # Step 3, find the knot if by site - 
+    '''more appropriate to use bouts by site because the small lags we see within a 
+    fish are are more than likely due to pulse randomization than a fish leaving 
+    and coming back.  Perhaps when we get more precise clocks on the orion receivers
+    we can we can calculate bouts by fish, but for now, use bouts per site'''
+    boutLength_s = bout.broken_stick_3behavior(figureWS) 
+    bout_len_dict[i] = boutLength_s
+    # step 4 enumerate presence at this receiver for each fish
+    for j in fishes:
+        # Step 5i, enumerate presence at this receiver
+        #boutLength_s = bout.broken_stick_fish(j)
+        print ("Fish %s had a bout length of %s seconds at node %s"%(j,boutLength_s,i))
+        bout.presence(j,boutLength_s,projectDB,scratchWS)      
+    print ("Completed bout length calculation and enumerating presences for node %s"%(i))    
+    # clean up your mess
+    del bout
+# manage all of that data, there's a lot of it!
+abtas.manage_node_presence_data(scratchWS,projectDB)
+```
+
+After describing presences at each receiver (time of entrance, time of exit) it is possible to reduce the overlap between receivers that traditionally plague statistical assessments of movement. If we envision overlapping detection zones as a series of nested-Russian Dolls, we can develop a hierarchical data structure that describes these relationships. If a fish is present in a nested antenna while also present in the overlapping antenna, we can remove coincident detections in the overlapping antenna and reduce bias in our statistical models. This hierarchical data structure is known as a directed graph, where nodes are detection zones and the edges describe the hierarchical relationships among them. For this assessment, edges were directed from a larger detection zone towards a smaller. Edges identify the successive neighbors (smaller detection zones) of each parent node (larger detection zone) and are expressed as a tuple (‘parent’: ‘child’). 
+
+Each node on a telemetry network may consist of one or more receivers (Figure 2). We described the hierarchical relationships between nested receivers with a directed graph depicted in Figure 8. Here, the edges between nodes indicate successors, or nodes with successively smaller detection zones. On this figure, we can see what nodes overlap and what nodes are overlapped.  For example, node S01 overlaps S05, S06, S07, S08 and S09, while node S06 only overlaps node S08.  
+
+
+
+
+
 
 
 
