@@ -85,6 +85,41 @@ Like the tag and receiver tables, the node table will be saved as a comma delimi
 
 Note: There may be more than 1 receiver associated with a node.  For example, a fishway may have two differences, but for the purposes of the study you only have to know if a fish has entered the fishway.  It is logical to group them into a single network node.  Doing so will greatly simplify movement modeling.  The receiver to node relationship is developed in the master receiver table with the node column.  IDs must match between columns for relationships to work.
 
+Once the initial data files have been created and stored in the ‘Data’ folder, we will need to import them into the project database.  We will complete this task with the “project_db_ini.py” script (see below).  You will need to follow these steps:
+
+1.	Update line 4, identify the project directory (same directory you created prior)  
+2.	Update line 5, identify the project database name
+3.	Update line 8, set the number of detections we will look forward and backwards from the current while creating detection histories.  **The default is 5.**  
+4.	Update line 9, set the duration used when calculating the noise ratio.  **The default is 1 minute.**  
+5.	If you are not assessing movement, and do not have a node table, then comment out lines 13, 19 and 20 before running the script by adding a ‘#’ to the beginning of the line.  
+
+example project_db_ini.py:
+```
+import os
+import abtas
+import pandas as pd
+proj_dir = r'J:\1210\005\Calcs\Studies\3_3_19\2018\Test'                       # what is the project directory?
+dbName = 'ultrasound_2018_test.db'                                             # whad did you call the database?
+data_dir = os.path.join(proj_dir,'Data')                                       
+db_dir = os.path.join(proj_dir,'Data',dbName)                                  
+det = 5                                                                        # number of detections we will look forwards and backwards for in detection history
+duration = 1                                                                   # duration used in noise ratio calculation
+# import data to Python
+tblMasterTag = pd.read_csv(os.path.join(data_dir,'tblMasterTag.csv'))
+tblMasterReceiver = pd.read_csv(os.path.join(data_dir,'tblMasterReceiver.csv'))
+tblNodes = pd.read_csv(os.path.join(data_dir,'tblNodes.csv'))                  # no nodes?  then comment this line
+# write data to SQLite
+abtas.studyDataImport(tblMasterTag,db_dir,'tblMasterTag')
+print ('tblMasterTag imported')
+abtas.studyDataImport(tblMasterReceiver,db_dir,'tblMasterReceiver')
+print ('tblMasterReceiver imported')
+abtas.studyDataImport(tblNodes,db_dir,'tblNodes')                              # no nodes? then comment out this line
+print ('tblNodes imported')                                                    # no nodes? then comment this line
+abtas.setAlgorithmParameters(det,duration,db_dir)
+print ('tblAlgParams data entry complete, begin importing data and training')
+```
+
+
 
 
 
