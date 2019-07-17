@@ -107,18 +107,20 @@ duration = 1                                                                   #
 # import data to Python
 tblMasterTag = pd.read_csv(os.path.join(data_dir,'tblMasterTag.csv'))
 tblMasterReceiver = pd.read_csv(os.path.join(data_dir,'tblMasterReceiver.csv'))
-tblNodes = pd.read_csv(os.path.join(data_dir,'tblNodes.csv'))                  # no nodes?  then comment this line
+tblNodes = pd.read_csv(os.path.join(data_dir,'tblNodes.csv'))                  # no nodes?  then comment out this line
 # write data to SQLite
 abtas.studyDataImport(tblMasterTag,db_dir,'tblMasterTag')
 print ('tblMasterTag imported')
 abtas.studyDataImport(tblMasterReceiver,db_dir,'tblMasterReceiver')
 print ('tblMasterReceiver imported')
 abtas.studyDataImport(tblNodes,db_dir,'tblNodes')                              # no nodes? then comment out this line
-print ('tblNodes imported')                                                    # no nodes? then comment this line
+print ('tblNodes imported')                                                    # no nodes? then comment out this line
 abtas.setAlgorithmParameters(det,duration,db_dir)
 print ('tblAlgParams data entry complete, begin importing data and training')
 ```
 
+# False Positive Removal
+Radio telemetry receivers record four types of detections based upon their binary nature; true positives, true negatives, false positives and false negatives (Beeman and Perry, 2012). True positives and true negatives are valid data points that indicate the presence or absence of a tagged fish. A false positive is a detection of a fish’s presence when it is not there, while a false negative is a non-detection of a fish that is there. False negatives arise from a variety of causes including insufficient detection areas, collisions between transmitters, interference from ambient noise, or weak signals (Beeman & Perry, 2012). Inclusion of false negatives may negatively bias statistics as there is no way to know if a fish’s absence from a receiver was because it truly wasn’t there or if it was not recaptured by the receiver. While the probability of false negatives can be quantified from sample data as the probability of detection, quantifying the rate of false positives (type I error) is more problematic (Beeman & Perry, 2012). Inclusion of false positives in a dataset can bias study results in two ways: they can favor survivability through a project by including fish that weren’t there or increase measures of delay when a fish has already passed. There are no statistical approaches that can reduce bias associated with false positives, therefore they must be identified and removed *a priori*. ABTAS identifies and removes false positive detections with a Naïve Bayes classifier and removes recaptures resulting from overlapping detections zones with an algorithm inspired by nested Russian dolls. 
 
 
 
