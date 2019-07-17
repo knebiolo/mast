@@ -76,6 +76,16 @@ If one of your objectives is to analyze how fish move through a study area, you 
 
 Like the tag and receiver tables, the node table will be saved as a comma delimited text file in the ‘Data’ folder.  The XY coordinate data is meant to produce a schematic of the telemetry study (Figure 1).  **We do not recommend the use of actual XY coordinate data (latitude, longitude) because relationships between near-adjacent nodes may be hard to view and aquatic networks are often sinuous.**  The node table has the following schema below: 
 
+| Field      | Data Type |                                      Comment                             |
+|------------|-----------|--------------------------------------------------------------------------|
+|Node        |String     |(required) - alphanumeric ID for network node **must be unique**          |
+|Reach       |String     |(not required) - common name of reach monitored by node, e.g. 'Cabot Tailrace'|
+|X           |Integer    |(required) - arbitrary X coordinate point                                 |
+|Y           |Integer    |(required) - arbitrary Y coordinate point                                 |
+
+Note: There may be more than 1 receiver associated with a node.  For example, a fishway may have two differences, but for the purposes of the study you only have to know if a fish has entered the fishway.  It is logical to group them into a single network node.  Doing so will greatly simplify movement modeling.  The receiver to node relationship is developed in the master receiver table with the node column.  IDs must match between columns for relationships to work.
+
+
 
 
 
