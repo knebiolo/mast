@@ -3,7 +3,7 @@
 Aquatic Bio-Telemetry Analysis Software (ABTAS) for use in removing false positive and overlap detections from aquatic radio telemetry projects.
 
 # Introduction
-ABTAS, Kleinschmidtís radio telemetry analysis software is comprised a suite of Python scripts and an importable python module (abtas.py).  Each of the scripts carries out a task one may have when analyzing radio telemetry data, including: creating a standardized project database, importing raw data directly from receiver downloads, identifying and removing false positive detections, cross validating and assessing the quality of training data, producing an array of standard project statistics (no. recaptured at receiver, etc.), removing overlap between neighboring receivers with larger detection zones, and producing data appropriate for analysis with Competing Risks and Mark Recapture (Cormack Jolly Seber and Live Recapture Dead Recover) methods.  In future iterations of the software, we will replace the functional sample scripts with a Jupyter Notebook to guide users through training, classification, and data preparation.
+ABTAS, Kleinschmidt‚Äôs radio telemetry analysis software is comprised a suite of Python scripts and an importable python module (abtas.py).  Each of the scripts carries out a task one may have when analyzing radio telemetry data, including: creating a standardized project database, importing raw data directly from receiver downloads, identifying and removing false positive detections, cross validating and assessing the quality of training data, producing an array of standard project statistics (no. recaptured at receiver, etc.), removing overlap between neighboring receivers with larger detection zones, and producing data appropriate for analysis with Competing Risks and Mark Recapture (Cormack Jolly Seber and Live Recapture Dead Recover) methods.  In future iterations of the software, we will replace the functional sample scripts with a Jupyter Notebook to guide users through training, classification, and data preparation.
 
 The scripts in their current form take advantage of the multiprocessing module when necessary to make the data filtering process more efficient.  When activated, all system resources will be utilized unless otherwise directed by the end user.  **It is not recommended to create more processes than CPUs in your computer, please understand the limitations of your machine before proceeding.**
 
@@ -16,7 +16,7 @@ The software is written in Python 3.7.x and uses dependencies outside of the sta
 This repository includes sample scripts that guide a user through a telemetry project.  However, you could import abtas into your own proprietary scripts and data management routines.  These scripts are examples only, if you push changes to the script, the owner may not commit them.
 
 # Project Set Up
-The simple 4-line script ìproject_setup.pyî will create a standard file structure and project database in a directory of your choosing.  **It is recommended that the directory does not contain any spaces or special characters.**  For example, if our study was of fish migration in the Connecticut River our initial directory could appear as (if saved to your desktop):
+The simple 4-line script ‚Äúproject_setup.py‚Äù will create a standard file structure and project database in a directory of your choosing.  **It is recommended that the directory does not contain any spaces or special characters.**  For example, if our study was of fish migration in the Connecticut River our initial directory could appear as (if saved to your desktop):
 > C:\Users\UserName\Desktop\Connecticut_River_Study
 
 When a directory has been created, insert it into the script in line 2 (highlighted below).  Then, edit line 3 to name the database.  **It is recommended to avoid using spaces in the name of the database.**  Once lines 2 and 4 have been edited, run the script.  
@@ -41,10 +41,10 @@ Before proceeding to the next step, investigate the folder structure that was cr
 **Do not alter the structure of the directory.** Both the sample scripts provided and ABTAS expect that the directory is structured exactly as created.
 
 # Initializing the Project Database
-Once the project directory has been created, we will initialize the project database by declaring parameters and importing formatted data files that describe the tags and receivers used in the study.  If one of the objectives of your study is to analyze movement or you have close-spaced receivers and overlap is an issue, then we will also need to create a Node table.  This table describes the telemetry network and helps us visualize the relationships between receivers.  Please save initial database files to the ëDataí folder (see directory structure above if you forgot where it was) as comma delimited text files (.csv).  
+Once the project directory has been created, we will initialize the project database by declaring parameters and importing formatted data files that describe the tags and receivers used in the study.  If one of the objectives of your study is to analyze movement or you have close-spaced receivers and overlap is an issue, then we will also need to create a Node table.  This table describes the telemetry network and helps us visualize the relationships between receivers.  Please save initial database files to the ‚ÄòData‚Äô folder (see directory structure above if you forgot where it was) as comma delimited text files (.csv).  
 
 ## Master Tag Table
-The tag table must match the following schema and be saved as a comma delimited text file.  Field names must appear exactly as in the first column and data types must match.  Please save the file to the ëDataí folder and call it ëtblMasterTag.csví.  
+The tag table must match the following schema and be saved as a comma delimited text file.  Field names must appear exactly as in the first column and data types must match.  Please save the file to the ‚ÄòData‚Äô folder and call it ‚ÄòtblMasterTag.csv‚Äô.  
 
 | Field      | Data Type |                                      Comment                             |
 |------------|-----------|--------------------------------------------------------------------------|
@@ -60,7 +60,7 @@ The tag table must match the following schema and be saved as a comma delimited 
 |RelDate     |DateTime   |(required) - Date and time of release                                     |
 
 ## Master Receiver Table
-The receiver file must contain the following fields and should be saved as a comma delimited text file.  Please see the schema below.  As with the master tag file, please save the master receiver file to the ëDataí folder.    A good name for this file is ìtblMasterReceiver.csvî.  
+The receiver file must contain the following fields and should be saved as a comma delimited text file.  Please see the schema below.  As with the master tag file, please save the master receiver file to the ‚ÄòData‚Äô folder.    A good name for this file is ‚ÄútblMasterReceiver.csv‚Äù.  
 
 | Field      | Data Type |                                      Comment                             |
 |------------|-----------|--------------------------------------------------------------------------|
@@ -70,11 +70,11 @@ The receiver file must contain the following fields and should be saved as a com
 |Node        |String     |(required) - alphanumeric ID for network node, e.g. 'S01'.                |
 
 ## Telemetry network
-If one of your objectives is to analyze how fish move through a study area, you will need to create a table that describes relationships between receivers (single receivers or groupings) by identifying the logical pathways that exist between them.  Figure 1 depicts a telemetry network of a recent project completed by Kleinschmidt Associates.  Each point on the picture is either a single telemetry receiver or group of receivers.  These points are known as nodes and represent telemetered river reaches.  The receiver-to-node relationship is mapped in the master receiver table with the ëNodeí column.  The lines, or edges in Figure 1 depict the relationships between nodes.  Some are double headed while others are one way.  Some edges are one way because it is impossible for a fish to swim up through a hydroelectric turbine.  This type of graph is known as a directed acyclic graph.  For now, we only need to identify the nodes and give them arbitrary XY coordinates.  
+If one of your objectives is to analyze how fish move through a study area, you will need to create a table that describes relationships between receivers (single receivers or groupings) by identifying the logical pathways that exist between them.  Figure 1 depicts a telemetry network of a recent project completed by Kleinschmidt Associates.  Each point on the picture is either a single telemetry receiver or group of receivers.  These points are known as nodes and represent telemetered river reaches.  The receiver-to-node relationship is mapped in the master receiver table with the ‚ÄòNode‚Äô column.  The lines, or edges in Figure 1 depict the relationships between nodes.  Some are double headed while others are one way.  Some edges are one way because it is impossible for a fish to swim up through a hydroelectric turbine.  This type of graph is known as a directed acyclic graph.  For now, we only need to identify the nodes and give them arbitrary XY coordinates.  
 
 ![Example Telemetry Network](https://i.ibb.co/zNtHCwS/telem-network-sm.png)
 
-Like the tag and receiver tables, the node table will be saved as a comma delimited text file in the ëDataí folder.  The XY coordinate data is meant to produce a schematic of the telemetry study (Figure 1).  **We do not recommend the use of actual XY coordinate data (latitude, longitude) because relationships between near-adjacent nodes may be hard to view and aquatic networks are often sinuous.**  The node table has the following schema below: 
+Like the tag and receiver tables, the node table will be saved as a comma delimited text file in the ‚ÄòData‚Äô folder.  The XY coordinate data is meant to produce a schematic of the telemetry study (Figure 1).  **We do not recommend the use of actual XY coordinate data (latitude, longitude) because relationships between near-adjacent nodes may be hard to view and aquatic networks are often sinuous.**  The node table has the following schema below: 
 
 | Field      | Data Type |                                      Comment                             |
 |------------|-----------|--------------------------------------------------------------------------|
@@ -85,13 +85,13 @@ Like the tag and receiver tables, the node table will be saved as a comma delimi
 
 Note: There may be more than 1 receiver associated with a node.  For example, a fishway may have two differences, but for the purposes of the study you only have to know if a fish has entered the fishway.  It is logical to group them into a single network node.  Doing so will greatly simplify movement modeling.  The receiver to node relationship is developed in the master receiver table with the node column.  IDs must match between columns for relationships to work.
 
-Once the initial data files have been created and stored in the ëDataí folder, we will need to import them into the project database.  We will complete this task with the ìproject_db_ini.pyî script (see below).  You will need to follow these steps:
+Once the initial data files have been created and stored in the ‚ÄòData‚Äô folder, we will need to import them into the project database.  We will complete this task with the ‚Äúproject_db_ini.py‚Äù script (see below).  You will need to follow these steps:
 
 1.	Update line 4, identify the project directory (same directory you created prior)  
 2.	Update line 5, identify the project database name
 3.	Update line 8, set the number of detections we will look forward and backwards from the current while creating detection histories.  **The default is 5.**  
 4.	Update line 9, set the duration used when calculating the noise ratio.  **The default is 1 minute.**  
-5.	If you are not assessing movement, and do not have a node table, then comment out lines 13, 19 and 20 before running the script by adding a ë#í to the beginning of the line.  
+5.	If you are not assessing movement, and do not have a node table, then comment out lines 13, 19 and 20 before running the script by adding a ‚Äò#‚Äô to the beginning of the line.  
 
 example project_db_ini.py:
 ```
@@ -120,9 +120,9 @@ print ('tblAlgParams data entry complete, begin importing data and training')
 ```
 
 # False Positive Removal
-Radio telemetry receivers record four types of detections based upon their binary nature; true positives, true negatives, false positives and false negatives (Beeman and Perry, 2012). True positives and true negatives are valid data points that indicate the presence or absence of a tagged fish. A false positive is a detection of a fishís presence when it is not there, while a false negative is a non-detection of a fish that is there. False negatives arise from a variety of causes including insufficient detection areas, collisions between transmitters, interference from ambient noise, or weak signals (Beeman & Perry, 2012). Inclusion of false negatives may negatively bias statistics as there is no way to know if a fishís absence from a receiver was because it truly wasnít there or if it was not recaptured by the receiver. While the probability of false negatives can be quantified from sample data as the probability of detection, quantifying the rate of false positives (type I error) is more problematic (Beeman & Perry, 2012). Inclusion of false positives in a dataset can bias study results in two ways: they can favor survivability through a project by including fish that werenít there or increase measures of delay when a fish has already passed. There are no statistical approaches that can reduce bias associated with false positives, therefore they must be identified and removed *a priori*. ABTAS identifies and removes false positive detections with a NaÔve Bayes classifier and removes recaptures resulting from overlapping detections zones with an algorithm inspired by nested Russian dolls. 
+Radio telemetry receivers record four types of detections based upon their binary nature; true positives, true negatives, false positives and false negatives (Beeman and Perry, 2012). True positives and true negatives are valid data points that indicate the presence or absence of a tagged fish. A false positive is a detection of a fish‚Äôs presence when it is not there, while a false negative is a non-detection of a fish that is there. False negatives arise from a variety of causes including insufficient detection areas, collisions between transmitters, interference from ambient noise, or weak signals (Beeman & Perry, 2012). Inclusion of false negatives may negatively bias statistics as there is no way to know if a fish‚Äôs absence from a receiver was because it truly wasn‚Äôt there or if it was not recaptured by the receiver. While the probability of false negatives can be quantified from sample data as the probability of detection, quantifying the rate of false positives (type I error) is more problematic (Beeman & Perry, 2012). Inclusion of false positives in a dataset can bias study results in two ways: they can favor survivability through a project by including fish that weren‚Äôt there or increase measures of delay when a fish has already passed. There are no statistical approaches that can reduce bias associated with false positives, therefore they must be identified and removed *a priori*. ABTAS identifies and removes false positive detections with a Na√Øve Bayes classifier and removes recaptures resulting from overlapping detections zones with an algorithm inspired by nested Russian dolls. 
 
-
+Specifically, Bayes Rule calculates the posterior probability, or the probability of a hypothesis occurring given some information about its present state, and is written with P(Œ∏_i |x_j); where Œ∏_i is the hypothesis (true or false positive) and x_j is observed data. Formally, Bayes Rule is expressed as:
 
 
 
