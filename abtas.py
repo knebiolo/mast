@@ -1186,6 +1186,9 @@ def calc_class_params_map(classify_object):
     classify_object.histDF['lagBdiffBin'] = (classify_object.histDF.lagBdiff//10)*.10
     
     #get training data
+    '''
+    Reclassification code contributed by T Castro-Santos
+    '''
     conn = sqlite3.connect(classify_object.trainingDB, timeout=30.0)
     c = conn.cursor()
     if classify_object.reclass_iter == None:
@@ -1196,14 +1199,16 @@ def calc_class_params_map(classify_object):
             trainDF = pd.read_sql("select * from tblTrain",con=conn)#This will read in tblTrain and create a pandas dataframe
             classDF = pd.read_sql("select test, FreqCode,Power,lagB,lagBdiff,fishCount,conRecLength,consDet,detHist,hitRatio,noiseRatio,seriesHit,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from tblClassify_%s"%(site),con=conn)
         else:
-            trainDF = pd.read_sql("select * from tblTrain",con=conn)#This will read in tblTrain and create a pandas dataframe        
+            trainDF = pd.read_sql("select * from tblTrain_%s"%(classify_object.reclass_iter - 1),con=conn)#This will read in tblTrain and create a pandas dataframe        
             classDF = pd.read_sql("select test, FreqCode,Power,lagB,lagBdiff,fishCount,conRecLength,consDet,detHist,hitRatio,noiseRatio,seriesHit,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from tblClassify_%s_%s"%(site,classify_object.reclass_iter-1),con=conn)
         trainDF = trainDF[trainDF.Detection==0]
         classDF = classDF[classDF.test==1]    
         classDF['Channels']=np.repeat(1,len(classDF))
         classDF.rename(columns={"test":"Detection","fishCount":"FishCount","RowSeconds":"Seconds","RecType":"recType"},inplace=True)#inplace tells it to replace the existing dataframe
         #Next we append the classdf to the traindf
-        trainDF=trainDF.append(classDF)   
+        trainDF = trainDF.append(classDF)  
+        trainDF.to_sql('tblTrain_%s'%(classify_object.reclass_iter),index=False,con=conn)#we might want to allow for further iterations
+
     c.close()
          
     # Update Data Types - they've got to match or the merge doesn't work!!!!
