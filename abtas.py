@@ -789,7 +789,7 @@ def lotek_import(fileName,dbName,recName):
         for row in rows:                                                               # for every row
             if 'Active scan_table:' in row[1][0]:                                   # if the first 18 characters say what that says
                 idx0 = counter + 2                                                      # channel dictionary data starts two rows from here
-                while rows.next()[1][0] != '\n':                                       # while the next row isn't empty
+                while next(rows)[1][0] != '\n':                                       # while the next row isn't empty
                     counter = counter + 1                                               # increase the counter, when the row is empty we have reached the end of channels, break loop
                 idx1 = counter + 1                                                      # get index of last data row 
                 break                                                                   # break that loop, we done
