@@ -703,6 +703,8 @@ def createTrainDB(project_dir, dbName):
     c.execute('''CREATE INDEX idx_RecID_Raw ON tblRaw (recID)''')
     c.execute('''CREATE INDEX idx_FreqCode On tblRaw (FreqCode)''')
     c.execute('''CREATE INDEX idx_fileNameTrain ON tblTrain (fileName)''')
+    c.execute('''CREATE INDEX idx_RecType ON tblTrain (recType)''')
+
     conn.commit()   
     c.close()
 
@@ -797,7 +799,7 @@ def lotek_import(fileName,dbName,recName):
     headerDat = {}                                                              # create empty dictionary to hold Lotek header data indexed by line number - to be imported to Pandas dataframe 
     lineCounter = []                                                            # create empty array to hold line indices
     lineList = []                                                               # generate a list of header lines - contains all data we need to write to project set up database
-    o_file =open(fileName)                                                      # open file we are currently iterating on
+    o_file =open(fileName, encoding='utf-8')
     counter = 0                                                                 # start line counter
     line = o_file.readline()[:-1]                                               # read first line in file
     lineCounter.append(counter)                                                 # append the current line counter to the counter array
@@ -880,6 +882,7 @@ def lotek_import(fileName,dbName,recName):
             telemDat['recID'] = np.repeat(recName,len(telemDat))
             telemDat.to_sql('tblRaw',con = conn,index = False, if_exists = 'append')
     else:
+        lotek400 = False
         # find where data begins and header data ends
         with o_file as f:
             for line in f:              
@@ -887,6 +890,11 @@ def lotek_import(fileName,dbName,recName):
                     counter = counter + 1
                     dataRow = counter + 5                                               # if this current line signifies the start of the data stream, the data starts three rows down from this 
                     break                                                               # break the loop, we have reached our stop point 
+                elif line[0:14] == "Code_log data:":
+                    counter = counter + 1
+                    dataRow = counter + 3
+                    lotek400 = True
+                    break
                 else:
                     counter = counter + 1                                               # if we are still reading header data increase the line counter by 1
                     lineCounter.append(counter)                                         # append the line counter to the count array 
@@ -899,11 +907,11 @@ def lotek_import(fileName,dbName,recName):
         
         # find scan time
         for row in headerDF.iterrows():                                                # for every header data row
-            if 'scan time' in row[1][0]:                                            # if the first 9 characters of the line say 'Scan Time' = we have found the scan time in the document 
+            if 'scan time' in row[1][0] or 'Scan time' in row[1][0]:                   # if the first 9 characters of the line say 'Scan Time' = we have found the scan time in the document 
                 scanTimeStr = row[1][0][-7:-1]                                          # get the number value from the row
                 scanTimeSplit = scanTimeStr.split(':')                                  # split the string
                 scanTime = float(scanTimeSplit[1])                                      # convert the scan time string to float
-                break                                                                   # stop that loop, we done
+                break                                                                   # stop that loop, we done                
         del row       
         
         # find number of channels and create channel dictionary
@@ -914,7 +922,7 @@ def lotek_import(fileName,dbName,recName):
         for row in rows:                                                               # for every row
             if 'Active scan_table:' in row[1][0]:                                   # if the first 18 characters say what that says
                 idx0 = counter + 2                                                      # channel dictionary data starts two rows from here
-                while rows.next()[1][0] != '\n':                                       # while the next row isn't empty
+                while next(rows)[1][0] != '\n':                                       # while the next row isn't empty
                     counter = counter + 1                                               # increase the counter, when the row is empty we have reached the end of channels, break loop
                 idx1 = counter + 1                                                      # get index of last data row 
                 break                                                                   # break that loop, we done
@@ -936,21 +944,33 @@ def lotek_import(fileName,dbName,recName):
         c = conn.cursor()   
         
         # with our data row, extract information using pandas fwf import procedure
-        telemDat = pd.read_fwf(os.path.join(fileName),colspecs = [(0,5),(5,14),(14,20),(20,26),(26,30),(30,36)],names = ['DayNumber','Time','ChannelID','Power','Antenna','TagID'],skiprows = dataRow)
-        telemDat = telemDat.iloc[:-2]                                                   # remove last two rows, Lotek adds garbage at the end
+        if lotek400 == False:
+            telemDat = pd.read_fwf(os.path.join(fileName),colspecs = [(0,5),(5,14),(14,20),(20,26),(26,30),(30,36)],names = ['DayNumber','Time','ChannelID','Power','Antenna','TagID'],skiprows = dataRow)
+            telemDat = telemDat.iloc[:-2]                                                   # remove last two rows, Lotek adds garbage at the end
+        else:
+            telemDat = pd.read_fwf(os.path.join(fileName),colspecs = [(0,5),(5,14),(14,22),(22,27),(27,35),(35,41),(41,48),(48,55),(55,85)],names = ['DayNumber','Time','ChannelID','TagID','Antenna','Power','Data','Events','DateTime'],skiprows = dataRow)
+            telemDat.drop(labels = ['Data','Events','DateTime'], axis = 1, inplace = True)
+            telemDat.dropna(inplace = True)
+            #telemDat.to_csv(r"C:\Users\Kevin Nebiolo\Desktop\Ultrasound_2019\2019\Output\Scratch\fuck.csv")
+
         telemDat['fileName'] = np.repeat(fileName,len(telemDat))
         def id_to_freq(row,channelDict):
-            if row[2] in channelDict:
-                return channelDict[row[2]]
+            channel = row['ChannelID']
+            if np.int(channel) in channelDict:
+                return channelDict[np.int(channel)]
             else:
                 return '888'
         if len(telemDat) > 0:
+            #print (channelDict)
             telemDat['Frequency'] = telemDat.apply(id_to_freq, axis = 1, args = (channelDict,))
+            #print (telemDat[['Frequency']].head())
+
             telemDat = telemDat[telemDat.Frequency != '888']
             telemDat = telemDat[telemDat.TagID != 999]
             telemDat['FreqCode'] = telemDat['Frequency'].astype(str) + ' ' + telemDat['TagID'].astype(int).astype(str)
             telemDat['day0'] = np.repeat(pd.to_datetime("1900-01-01"),len(telemDat))
             telemDat['Date'] = telemDat['day0'] + pd.to_timedelta(telemDat['DayNumber'].astype(int), unit='d')
+            
             telemDat['Date'] = telemDat.Date.astype('str')
             telemDat['timeStamp'] = pd.to_datetime(telemDat['Date'] + ' ' + telemDat['Time'])# create timestamp field from date and time and apply to index
             telemDat.drop(['day0','DayNumber'],axis = 1, inplace = True)       
@@ -1162,6 +1182,8 @@ class classify_data():
             self.trainingDB = training
         else:
             self.trainingDB = projectDB
+        self.alive_factors = np.arange(self.PulseRate,3600,self.PulseRate)
+
 
 def likelihood(assumption,classify_object):
     '''calculates likelihood based on true or false assumption and fields provided to classify object'''
@@ -1228,13 +1250,16 @@ def calc_class_params_map(classify_object):
     classify_object.histDF['lagB'] = classify_object.histDF.Epoch.diff(-1)
     classify_object.histDF['lagFdiff'] = classify_object.histDF.lagF.diff()
     classify_object.histDF['lagBdiff'] = classify_object.histDF.lagB.diff(-1)   
-    classify_object.histDF['seriesHit'] = classify_object.histDF.apply(seriesHit, axis = 1, args = ("A",classify_object,classify_object.histDF))             # determine whether or not a row record is in series 
-    classify_object.histDF['detHist'] = classify_object.histDF.apply(detHist_2, axis = 1, args = ("A",classify_object,classify_object.histDF))   # calculate detection history
-    classify_object.histDF['consDet'] = classify_object.histDF.apply(consDet, axis = 1, args = ("A",classify_object))                           # determine whether or not to previous record or next record is consecutive in series
-    classify_object.histDF['hitRatio'] = classify_object.histDF.apply(hitRatio,axis =1, args = 'A')                                            # calculate hit ratio from detection history
+    #classify_object.histDF['seriesHit'] = classify_object.histDF.apply(seriesHit, axis = 1, args = ("A",classify_object,classify_object.histDF))             # determine whether or not a row record is in series 
+    classify_object.histDF['seriesHit'] = classify_object.histDF['lagB'].apply(lambda x: 1 if x in classify_object.alive_factors else 0) 
+    classify_object.histDF = detHist_4(classify_object.histDF,classify_object.PulseRate,classify_object.det)             # calculate detection history
+
+    #classify_object.histDF['detHist'] = classify_object.histDF.apply(detHist_2, axis = 1, args = ("A",classify_object,classify_object.histDF))   # calculate detection history
+    #classify_object.histDF['consDet'] = classify_object.histDF.apply(consDet, axis = 1, args = ("A",classify_object))                           # determine whether or not to previous record or next record is consecutive in series
+    #classify_object.histDF['hitRatio'] = classify_object.histDF.apply(hitRatio,axis =1, args = 'A')                                            # calculate hit ratio from detection history
     classify_object.histDF['conRecLength'] = classify_object.histDF.apply(conRecLength, axis = 1, args = 'A')                                  # calculate the number of consecutive detections in series
     classify_object.histDF['noiseRatio'] = classify_object.histDF.apply(noiseRatio, axis = 1, args = (classify_object,allData))   # calculate the noise ratio    
-    classify_object.histDF['fishCount'] = classify_object.histDF.apply(fishCount, axis = 1, args = (classify_object,allData))
+    #classify_object.histDF['fishCount'] = classify_object.histDF.apply(fishCount, axis = 1, args = (classify_object,allData))
     classify_object.histDF['powerBin'] = (classify_object.histDF.Power//10)*10
     classify_object.histDF['noiseBin'] = (classify_object.histDF.noiseRatio//.1)*.1
     classify_object.histDF['lagBdiffBin'] = (classify_object.histDF.lagBdiff//10)*.10
@@ -1424,7 +1449,8 @@ def classDatAppend(site,inputWS,projectDB):
         #dat.drop(['recID1'],axis = 1,inplace = True)
         dat.to_sql('tblClassify_%s'%(site),con = conn,index = False, if_exists = 'append', chunksize = 1000)
         os.remove(os.path.join(inputWS,f))
-        del dat                
+        del dat    
+    c.execute('''CREATE INDEX idx_combined_%s ON tblClassify_%s (recID,FreqCode,Epoch)'''%(site,site))     
     c.close()        
                 
                                 
