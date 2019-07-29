@@ -418,7 +418,63 @@ def detHist_3 (status,det,data,masterTags,projectDB):
     
     data['detHist_%s'%(status)] = detHistCol
     #data.drop('rate',inplace = True)
-    return data                                                             # return the detection history string    
+    return data                                                             # return the detection history string  
+
+def detHist_4 (data,rate,det):
+    '''New iteration of the detection history function meant to be superfast.
+    We use pandas tricks to create the history by shifting epoch columns and 
+    perfoming boolean logic on the entire dataframe rather than row-by-row'''
+    
+    # first step, identify how many channels are in this dataset
+    channels = data.Channels.max()
+    
+    # build detection history ushing shifts
+    if channels > 1:
+        for i in np.arange(det * -1 , det + 1, 1):
+            data['epoch_shift_%s'%(np.int(i))] = data.Epoch.shift(-1 * np.int(i))
+            data['ll'] = data['Epoch'] + ((data['ScanTime'] * data['Channels'] * i) + (rate * -0.5))
+            data['ul'] = data['Epoch'] + ((data['ScanTime'] * data['Channels'] * i) + (rate * 0.5))
+            if det == 0:
+                data['det_0'] = '1'
+            else:
+                data.loc[(data['epoch_shift_%s'%(np.int(i))] >= data.ll) & (data['epoch_shift_%s'%(np.int(i))] <= data.ul),'det_%s'%(np.int(i))] = '1'
+                data.loc[(data['epoch_shift_%s'%(np.int(i))] < data.ll) | (data['epoch_shift_%s'%(np.int(i))] > data.ul),'det_%s'%(np.int(i))] = '0'
+                data['det_%s'%(np.int(i))].fillna(value = '0', inplace = True)
+            
+            #print (data[['Epoch','ll','epoch_shift_%s'%(np.int(i)),'ul','det_%s'%(np.int(i))]].head(20))
+    else:
+        for i in np.arange(det * -1 , det + 1, 1):
+            data['epoch_shift_%s'%(np.int(i))] = data.Epoch.shift(-1 * np.int(i))
+            data['ll'] = data['Epoch'] + (rate * i - 1)   # number of detection period time steps backward buffered by -1 pulse rate seconds that we will be checking for possible detections in series
+            data['ul'] = data['Epoch'] + (rate * i + 1)     # number of detection period time steps backward buffered by +1 pulse rate that we will be checking for possible detections in series                                                            
+            if det == 0:
+                data['det_0'] = '1'
+            else:
+                data.loc[(data['epoch_shift_%s'%(np.int(i))] >= data.ll) & (data['epoch_shift_%s'%(np.int(i))] <= data.ul),'det_%s'%(np.int(i))] = '1'
+                data.loc[(data['epoch_shift_%s'%(np.int(i))] < data.ll) | (data['epoch_shift_%s'%(np.int(i))] > data.ul),'det_%s'%(np.int(i))] = '0'
+                data['det_%s'%(np.int(i))].fillna(value = '0', inplace = True)
+            
+            #print (data[['Epoch','ll','epoch_shift_%s'%(np.int(i)),'ul','det_%s'%(np.int(i))]].head(20))
+    data.drop(labels = ['ll','ul'], axis = 1, inplace = True)       
+
+    # determine if consecutive detections consDet is true
+    data.loc[(data['det_-1'] == 1) | (data['det_1'] == 1), 'consDet'] = 1
+    data.loc[(data['det_-1'] != 1) & (data['det_1'] != 1), 'consDet'] = 0
+    
+    # calculate hit ratio 
+    data['hitRatio'] = np.zeros(len(data))
+    for i in np.arange(det * -1, det + 1, 1):
+        data['hitRatio'] = data['hitRatio'] + data['det_%s'%(np.int(i))].astype(np.int)
+    data['hitRatio'] = data['hitRatio'] / np.float(len(np.arange(det * -1, det + 1, 1)))
+        
+    # concatenate a detection history string
+    data['detHist'] = np.repeat('',len(data))
+    for i in np.arange(det * -1, det + 1, 1):
+        data['detHist'] = data['detHist'] + data['det_%s'%(np.int(i))].astype('str')
+        data.drop(labels = ['det_%s'%(np.int(i)),'epoch_shift_%s'%(np.int(i))], axis = 1, inplace = True) 
+    
+    return data
+          
 
 def consDet (row, status, datObject):
     '''consDet is a function for returning whether or not consecutive detections 
@@ -438,6 +494,7 @@ def consDet (row, status, datObject):
     else:
         consDet = 0
     return consDet
+       
  
 def hitRatio(row,status):
     '''The hit ratio function quantifies the hit ratio, or the number of positive 
@@ -547,13 +604,9 @@ def fishCount (row,datObject,data):
     ul = rowSeconds + (duration * 60.0) 
     # extract data
     trunc = data[(data.index >= ll) & (data.index <  ul)]                       # truncate the dataset, we only care about these records
-    
-    # get list of potential fish present 
-    fish = 0.0
-    for i in trunc.FreqCode.values:                                             # for every row in the truncated dataset                                                     # get the frequency/code
-        if i in tags:                                                           # if the code is not in the accepted code list, it's a miscode! egads!
-            fish = fish + 1.0
-    return fish                                                                # return length of that list 
+    fishies = trunc.FreqCode.unique()
+    return np.sum(np.isin(fishies,tags))
+
 
 def noiseRatio (row,datObject,data):
     
@@ -565,7 +618,7 @@ def noiseRatio (row,datObject,data):
     datObject = the current classify_data or training_data object
     data = current data file
     '''
- 
+    tags = datObject.studyTags
     rowSeconds = (row['RowSeconds'])
     ll = rowSeconds - (datObject.duration * 60.0)
     ul = rowSeconds + (datObject.duration * 60.0) 
@@ -573,12 +626,8 @@ def noiseRatio (row,datObject,data):
     trunc = data[(data.index >= ll) & (data.index <  ul)]               # truncate the dataset, we only care about these records
     # calculate noise ratio 
     total = float(len(trunc))                                                   # how many records are there in this dataset?
-    miscode = 0.0                                                               # start a miscode counter, 0.0 for float on return
-    for i in trunc.FreqCode.values:                                               # for every row in the truncated dataset                                                     # get the frequency/code
-        if i in datObject.studyTags:                                                           # if the code is not in the accepted code list, it's a miscode! egads!
-            miscode = miscode + 0.0
-        else:
-            miscode = miscode + 1.0
+    fishies = trunc.FreqCode.unique()
+    miscode = np.float(np.sum(np.isin(fishies,tags,invert = True)))
     return round((miscode/total),4)                                       # the noise ratio is the number of miscoded tags divided by the total number of records in the truncated dataset, which happens to be on a specified interval
     
 def MAP (row):
@@ -976,8 +1025,7 @@ class training_data():
         self.studyTags = allTags.FreqCode.values
         self.recType = recType.get_value(0,'RecType')
         self.histDF['recType'] = np.repeat(self.recType,len(self.histDF))
-
-
+        
         # for training data, we know the tag's detection class ahead of time,
         # if the tag is in the study tag list, it is a known detection class, if 
         # it is a beacon tag, it is definite, if it is a study tag, it's plausible 
@@ -990,9 +1038,12 @@ class training_data():
             self.PulseRate = rates.get_value(0,'PulseRate')
             self.MortRate = rates.get_value(0,'MortRate')
         else:
-            self.PulseRate = 2.0
+            self.PulseRate = 3.0
             self.MortRate = 11.0
-        # get 
+        
+        # create a list of factors to search for series hit
+        self.alive_factors = np.arange(self.PulseRate,3600,self.PulseRate)
+        #self.dead_factors = np.arange(self.MortRate,3600,self.MortRate)
         
 # we are going to map this function 
 def calc_train_params_map(trainee):                                                       # for every Freq/Code combination...    
@@ -1020,14 +1071,17 @@ def calc_train_params_map(trainee):                                             
     histDF['lagB'] = histDF.Epoch.diff()                                       # calculate the difference in seconds until the next detection   
     histDF['lagBdiff'] = histDF.lagB.diff()
     histDF.lagBdiff.fillna(999999999,inplace = True)
-    histDF['detHist'] = histDF.apply(detHist_2, axis = 1, args = ("T",trainee,histDF))   # calculate detection history
-    histDF['consDet'] = histDF.apply(consDet, axis = 1, args = ("T",trainee))  # determine whether or not to previous record or next record is consecutive in series
-    histDF['hitRatio'] = histDF.apply(hitRatio,axis =1, args = 'T')            # calculate hit ratio from detection history
+    histDF = detHist_4(histDF,trainee.PulseRate,trainee.det)             # calculate detection history
+    ''' we no longer require a function for consecutive detction or hit ratio, it is now an output of detHist_4'''
+    #histDF['consDet'] = histDF.apply(consDet, axis = 1, args = ("T",trainee))  # determine whether or not to previous record or next record is consecutive in series
+    #histDF['hitRatio'] = histDF.apply(hitRatio,axis =1, args = 'T')            # calculate hit ratio from detection history
     histDF['conRecLength'] = histDF.apply(conRecLength, axis = 1, args = 'T')  # calculate the number of consecutive detections in series
-    histDF['miss_to_hit'] = histDF.apply(miss_to_hit, axis = 1, args = 'T')    # calculate the hit to miss length ratio 
-    histDF['seriesHit'] = histDF.apply(seriesHit, axis = 1, args = ("T",trainee,histDF))   # determine whether or not a row record is in series 
+    #histDF['miss_to_hit'] = histDF.apply(miss_to_hit, axis = 1, args = 'T')    # calculate the hit to miss length ratio 
+    '''we are calculating series hit with a single lambda apply function using a list of known factors of the tag's pulse rate - hopefully this is faster'''
+    #histDF['seriesHit'] = histDF.apply(seriesHit, axis = 1, args = ("T",trainee,histDF))   # determine whether or not a row record is in series 
+    histDF['seriesHit'] = histDF['lagB'].apply(lambda x: 1 if x in trainee.alive_factors else 0) 
     histDF['noiseRatio'] = histDF.apply(noiseRatio, axis = 1, args = (trainee,allData))            
-    histDF['FishCount'] = histDF.apply(fishCount, axis = 1, args = (trainee,allData))
+    #histDF['FishCount'] = histDF.apply(fishCount, axis = 1, args = (trainee,allData))
     histDF.set_index('timeStamp',inplace = True, drop = True) 
     histDF.drop(['recID1','RowSeconds'],axis = 1, inplace = True)
     histDF['Seconds'] = histDF.index.hour * 3600 + histDF.index.minute * 60 + histDF.index.second
