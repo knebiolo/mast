@@ -707,7 +707,7 @@ def createTrainDB(project_dir, dbName):
     c.execute('''DROP TABLE IF EXISTS tblRaw''')
     c.execute('''DROP TABLE IF EXISTS tblTrain''')
 
-    c.execute('''CREATE TABLE tblTrain(Channels INTEGER, Detection INTEGER, FreqCode TEXT, Power REAL, lagB INTEGER, lagBdiff REAL, FishCount INTEGER, conRecLength INTEGER, miss_to_hit REAL, consDet INTEGER, detHist TEXT, hitRatio REAL, noiseRatio REAL, seriesHit INTEGER, timeStamp TIMESTAMP, Epoch INTEGER, Seconds INTEGER, fileName TEXT, recID TEXT, recType TEXT, ScanTime REAL)''') # create full radio table - table includes all records, final version will be designed for specific receiver types
+    c.execute('''CREATE TABLE tblTrain(Channels INTEGER, Detection INTEGER, FreqCode TEXT, Power REAL, lag INTEGER, lagDiff REAL, FishCount INTEGER, conRecLength INTEGER, miss_to_hit REAL, consDet INTEGER, detHist TEXT, hitRatio REAL, noiseRatio REAL, seriesHit INTEGER, timeStamp TIMESTAMP, Epoch INTEGER, Seconds INTEGER, fileName TEXT, recID TEXT, recType TEXT, ScanTime REAL)''') # create full radio table - table includes all records, final version will be designed for specific receiver types
     c.execute('''CREATE TABLE tblRaw(timeStamp TIMESTAMP, Epoch INTEGER, FreqCode TEXT, Power REAL, fileName TEXT, recID TEXT)''')
     c.execute('''CREATE INDEX idx_fileNameRaw ON tblRaw (fileName)''')
     c.execute('''CREATE INDEX idx_RecID_Raw ON tblRaw (recID)''')
@@ -1100,7 +1100,7 @@ def calc_train_params_map(trainee):                                             
     histDF['Detection'] = np.repeat(trainee.plausible,len(histDF))
     histDF['lag'] = histDF.Epoch.diff().abs()                                      # calculate the difference in seconds until the next detection   
     histDF['lagDiff'] = histDF.lag.diff()
-    histDF.lagBdiff.fillna(999999999,inplace = True)
+    histDF.lagDiff.fillna(999999999,inplace = True)
     histDF = detHist_4(histDF,trainee.PulseRate,trainee.det)             # calculate detection history
     ''' we no longer require a function for consecutive detction or hit ratio, it is now an output of detHist_4'''
     #histDF['consDet'] = histDF.apply(consDet, axis = 1, args = ("T",trainee))  # determine whether or not to previous record or next record is consecutive in series
@@ -1284,10 +1284,10 @@ def calc_class_params_map(classify_object):
     else:
         if classify_object.reclass_iter<=2:
             trainDF = pd.read_sql("select * from tblTrain",con=conn)#This will read in tblTrain and create a pandas dataframe
-            classDF = pd.read_sql("select test, FreqCode,Power,lagB,lagBdiff,fishCount,conRecLength,consDet,detHist,hitRatio,noiseRatio,seriesHit,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from tblClassify_%s"%(site),con=conn)
+            classDF = pd.read_sql("select test, FreqCode,Power,lag,lagDiff,fishCount,conRecLength,consDet,detHist,hitRatio,noiseRatio,seriesHit,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from tblClassify_%s"%(site),con=conn)
         else:
             trainDF = pd.read_sql("select * from tblTrain_%s"%(classify_object.reclass_iter - 1),con=conn)#This will read in tblTrain and create a pandas dataframe        
-            classDF = pd.read_sql("select test, FreqCode,Power,lagB,lagBdiff,fishCount,conRecLength,consDet,detHist,hitRatio,noiseRatio,seriesHit,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from tblClassify_%s_%s"%(site,classify_object.reclass_iter-1),con=conn)
+            classDF = pd.read_sql("select test, FreqCode,Power,lag,lagDiff,fishCount,conRecLength,consDet,detHist,hitRatio,noiseRatio,seriesHit,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from tblClassify_%s_%s"%(site,classify_object.reclass_iter-1),con=conn)
         trainDF = trainDF[trainDF.Detection==0]
         classDF = classDF[classDF.test==1]    
         classDF['Channels']=np.repeat(1,len(classDF))
@@ -1309,7 +1309,7 @@ def calc_class_params_map(classify_object):
     trainDF['hitRatio'] = trainDF.hitRatio.astype(float).round(4)
     trainDF['powerBin'] = (trainDF.Power//10)*10
     #trainDF['noiseBin'] = (trainDF.noiseRatio//.1)*.1
-    trainDF['lagBdiffBin'] = (trainDF.lagBdiff//10)*.10
+    trainDF['lagDiffBin'] = (trainDF.lagDiff//10)*.10
     
     # making sure our classify object data types match
     classify_object.histDF.seriesHit = classify_object.histDF.seriesHit.astype(np.int64)
@@ -1378,12 +1378,12 @@ def calc_class_params_map(classify_object):
 #    classify_object.histDF = pd.merge(left = classify_object.histDF, right = noiseCount, how = u'left', left_on = ['HF','noiseBin'], right_on = ['HF','noiseBin'])
 
     # Lag Bin
-    lagCount = trainDF.groupby(['Detection','lagBdiffBin'])['lagBdiffBin'].count()
+    lagCount = trainDF.groupby(['Detection','lagDiffBin'])['lagDiffBin'].count()
     lagCount = pd.Series(lagCount, name = 'lagDiffCount_T')
     lagCount = pd.DataFrame(lagCount).reset_index().rename(columns = {'Detection':'HT'})
-    classify_object.histDF = pd.merge(left = classify_object.histDF, right = lagCount, how = u'left', left_on = ['HT','lagBdiffBin'], right_on = ['HT','lagBdiffBin'])
+    classify_object.histDF = pd.merge(left = classify_object.histDF, right = lagCount, how = u'left', left_on = ['HT','lagDiffBin'], right_on = ['HT','lagDiffBin'])
     lagCount = lagCount.rename(columns = {'HT':'HF','lagDiffCount_T':'lagDiffCount_F'})
-    classify_object.histDF = pd.merge(left = classify_object.histDF, right = lagCount, how = u'left', left_on = ['HF','lagBdiffBin'], right_on = ['HF','lagBdiffBin'])
+    classify_object.histDF = pd.merge(left = classify_object.histDF, right = lagCount, how = u'left', left_on = ['HF','lagDiffBin'], right_on = ['HF','lagDiffBin'])
 
     
     classify_object.histDF.fillna(0.0000001,inplace = True)
@@ -1678,8 +1678,8 @@ class classification_results():
         conn = sqlite3.connect(projectDB)
         c = conn.cursor()
         conn = sqlite3.connect(self.projectDB)                                              # connect to the database
-        #self.class_stats_data = pd.DataFrame(columns = ['FreqCode','Epoch','recID','Power','hitRatio','postTrue','postFalse','test','lagBdiff','conRecLength','noiseRatio','fishCount', 'logLikelihoodRatio'])                # set up an empty data frame
-        self.class_stats_data = pd.DataFrame(columns = ['FreqCode','Epoch','recID','Power','hitRatio','postTrue','postFalse','test','lagBdiff','conRecLength', 'logLikelihoodRatio'])                # set up an empty data frame
+        #self.class_stats_data = pd.DataFrame(columns = ['FreqCode','Epoch','recID','Power','hitRatio','postTrue','postFalse','test','lagDiff','conRecLength','noiseRatio','fishCount', 'logLikelihoodRatio'])                # set up an empty data frame
+        self.class_stats_data = pd.DataFrame(columns = ['FreqCode','Epoch','recID','Power','hitRatio','postTrue','postFalse','test','lagDiff','conRecLength', 'logLikelihoodRatio'])                # set up an empty data frame
 
         self.site = site
         if site == None:
@@ -1688,15 +1688,15 @@ class classification_results():
             receivers = receivers.recID.unique()                               # get the unique receivers associated with this node    
             for i in receivers:                                                # for every receiver 
                 print ("Start selecting and merging data for receiver %s"%(i))
-                #sql = "SELECT FreqCode, Epoch, recID, Power, hitRatio, postTrue, postFalse, test, lagBdiff, conRecLength, noiseRatio, fishCount, logLikelihoodRatio FROM tblClassify_%s "%(i)
-                sql = "SELECT FreqCode, Epoch, recID, Power, hitRatio, postTrue, postFalse, test, lagBdiff, conRecLength, logLikelihoodRatio FROM tblClassify_%s "%(i)
+                #sql = "SELECT FreqCode, Epoch, recID, Power, hitRatio, postTrue, postFalse, test, lagDiff, conRecLength, noiseRatio, fishCount, logLikelihoodRatio FROM tblClassify_%s "%(i)
+                sql = "SELECT FreqCode, Epoch, recID, Power, hitRatio, postTrue, postFalse, test, lagDiff, conRecLength, logLikelihoodRatio FROM tblClassify_%s "%(i)
                 dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
                 self.class_stats_data = self.class_stats_data.append(dat)
                 del dat 
         else:
             print ("Start selecting and merging data for receiver %s"%(site))
-            #sql = "SELECT FreqCode, Epoch, recID, Power, hitRatio, postTrue, postFalse, test, lagBdiff, conRecLength, noiseRatio, fishCount, logLikelihoodRatio FROM tblClassify_%s "%(site)
-            sql = "SELECT FreqCode, Epoch, recID, Power, hitRatio, postTrue, postFalse, test, lagBdiff, conRecLength, logLikelihoodRatio FROM tblClassify_%s "%(site)
+            #sql = "SELECT FreqCode, Epoch, recID, Power, hitRatio, postTrue, postFalse, test, lagDiff, conRecLength, noiseRatio, fishCount, logLikelihoodRatio FROM tblClassify_%s "%(site)
+            sql = "SELECT FreqCode, Epoch, recID, Power, hitRatio, postTrue, postFalse, test, lagDiff, conRecLength, logLikelihoodRatio FROM tblClassify_%s "%(site)
             dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
             self.class_stats_data = self.class_stats_data.append(dat)
             del dat 
@@ -1735,7 +1735,7 @@ class classification_results():
         print ("Compiling Figures")
         # get data by detection class for side by side histograms
         self.class_stats_data['Power'] = self.class_stats_data.Power.astype(float)
-        self.class_stats_data['lagBDiff'] = self.class_stats_data.lagBdiff.astype(float)
+        self.class_stats_data['lagDiff'] = self.class_stats_data.lagDiff.astype(float)
         self.class_stats_data['conRecLength'] = self.class_stats_data.conRecLength.astype(float)
         self.class_stats_data['noiseRatio'] = self.class_stats_data.noiseRatio.astype(float)
         self.class_stats_data['fishCount'] = self.class_stats_data.fishCount.astype(float)
@@ -1782,8 +1782,8 @@ class classification_results():
 
         plt.figure(figsize = (6,3)) 
         fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-        axs[0].hist(trues.lagBdiff.values, lagBins)
-        axs[1].hist(falses.lagBdiff.values, lagBins)
+        axs[0].hist(trues.lagDiff.values, lagBins)
+        axs[1].hist(falses.lagDiff.values, lagBins)
         axs[0].set_xlabel('Lag Differences')  
         axs[0].set_title('True')
         axs[1].set_xlabel('Lag Differences')
@@ -1909,7 +1909,7 @@ class training_results():
         print ("Compiling Figures")
         # get data by detection class for side by side histograms
         self.train_stats_data['Power'] = self.train_stats_data.Power.astype(float)
-        self.train_stats_data['lagBDiff'] = self.train_stats_data.lagBdiff.astype(float)
+        self.train_stats_data['lagDiff'] = self.train_stats_data.lagDiff.astype(float)
         self.train_stats_data['conRecLength'] = self.train_stats_data.conRecLength.astype(float)
         self.train_stats_data['noiseRatio'] = self.train_stats_data.noiseRatio.astype(float)
         self.train_stats_data['FishCount'] = self.train_stats_data.FishCount.astype(float)
@@ -1954,8 +1954,8 @@ class training_results():
 
         plt.figure() 
         fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True,figsize = figSize)
-        axs[0].hist(trues.lagBdiff.values, lagBins, density = True)
-        axs[1].hist(falses.lagBdiff.values, lagBins, density = True)
+        axs[0].hist(trues.lagDiff.values, lagBins, density = True)
+        axs[1].hist(falses.lagDiff.values, lagBins, density = True)
         axs[0].set_xlabel('Lag Differences')  
         axs[0].set_title('True')
         axs[1].set_xlabel('Lag Differences')
@@ -2798,11 +2798,11 @@ def the_big_merge(outputWS,projectDB):
     recSQL = "SELECT * FROM tblMasterReceiver"                                 # SQL code to import data from this node
     receivers = pd.read_sql(recSQL,con = conn)                                 # import data
     receivers = receivers.recID.unique()                                       # get the unique receivers associated with this node    
-    recapdata = pd.DataFrame(columns = ['FreqCode','Epoch','recID','timeStamp','Power','lagF','lagB','hitRatio','postTrue','postFalse','test','presence_number','overlapping'])                # set up an empty data frame
+    recapdata = pd.DataFrame(columns = ['FreqCode','Epoch','recID','timeStamp','Power','lag','hitRatio','postTrue','postFalse','test','presence_number','overlapping'])                # set up an empty data frame
     for i in receivers:                                                            # for every receiver 
         print ("Start selecting and merging data for receiver %s"%(i))
-        #sql = "SELECT tblClassify_%s.FreqCode, tblClassify_%s.Epoch, tblClassify_%s.recID, timeStamp, Power, LagF, LagB, tblClassify_%s.hitRatio, postTrue, postFalse, presence_number, overlapping, test FROM tblClassify_%s LEFT JOIN tblOverlap ON tblClassify_%s.FreqCode = tblOverlap.FreqCode AND tblClassify_%s.Epoch = tblOverlap.Epoch AND tblClassify_%s.recID = tblOverlap.recID LEFT JOIN tblPresence ON tblClassify_%s.FreqCode = tblPresence.FreqCode AND tblClassify_%s.Epoch = tblPresence.Epoch AND tblClassify_%s.recID = tblPresence.recID WHERE test = 1 AND tblClassify_%s.hitRatio > 0.3"%(i,i,i,i,i,i,i,i,i,i,i,i)
-        sql = "SELECT tblClassify_%s.FreqCode, tblClassify_%s.Epoch, tblClassify_%s.recID, timeStamp, Power, LagF, LagB, tblClassify_%s.hitRatio, postTrue, postFalse, presence_number, overlapping, test FROM tblClassify_%s LEFT JOIN tblOverlap ON tblClassify_%s.FreqCode = tblOverlap.FreqCode AND tblClassify_%s.Epoch = tblOverlap.Epoch AND tblClassify_%s.recID = tblOverlap.recID LEFT JOIN tblPresence ON tblClassify_%s.FreqCode = tblPresence.FreqCode AND tblClassify_%s.Epoch = tblPresence.Epoch AND tblClassify_%s.recID = tblPresence.recID WHERE test = 1"%(i,i,i,i,i,i,i,i,i,i,i)
+        #sql = "SELECT tblClassify_%s.FreqCode, tblClassify_%s.Epoch, tblClassify_%s.recID, timeStamp, Power, Lag, tblClassify_%s.hitRatio, postTrue, postFalse, presence_number, overlapping, test FROM tblClassify_%s LEFT JOIN tblOverlap ON tblClassify_%s.FreqCode = tblOverlap.FreqCode AND tblClassify_%s.Epoch = tblOverlap.Epoch AND tblClassify_%s.recID = tblOverlap.recID LEFT JOIN tblPresence ON tblClassify_%s.FreqCode = tblPresence.FreqCode AND tblClassify_%s.Epoch = tblPresence.Epoch AND tblClassify_%s.recID = tblPresence.recID WHERE test = 1 AND tblClassify_%s.hitRatio > 0.3"%(i,i,i,i,i,i,i,i,i,i,i,i)
+        sql = "SELECT tblClassify_%s.FreqCode, tblClassify_%s.Epoch, tblClassify_%s.recID, timeStamp, Power, Lag, tblClassify_%s.hitRatio, postTrue, postFalse, presence_number, overlapping, test FROM tblClassify_%s LEFT JOIN tblOverlap ON tblClassify_%s.FreqCode = tblOverlap.FreqCode AND tblClassify_%s.Epoch = tblOverlap.Epoch AND tblClassify_%s.recID = tblOverlap.recID LEFT JOIN tblPresence ON tblClassify_%s.FreqCode = tblPresence.FreqCode AND tblClassify_%s.Epoch = tblPresence.Epoch AND tblClassify_%s.recID = tblPresence.recID WHERE test = 1"%(i,i,i,i,i,i,i,i,i,i,i)
 
         dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
         dat['overlapping'].fillna(0,inplace = True)
