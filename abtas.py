@@ -957,12 +957,13 @@ def lotek_import(fileName,dbName,recName):
         if lotek400 == False:
             telemDat = pd.read_fwf(os.path.join(fileName),colspecs = [(0,5),(5,14),(14,20),(20,26),(26,30),(30,36)],names = ['DayNumber','Time','ChannelID','Power','Antenna','TagID'],skiprows = dataRow)
             telemDat = telemDat.iloc[:-2]                                                   # remove last two rows, Lotek adds garbage at the end
+            telemDat.dropna(inplace = True)
         else:
             telemDat = pd.read_fwf(os.path.join(fileName),colspecs = [(0,5),(5,14),(14,22),(22,27),(27,35),(35,41),(41,48),(48,55),(55,85)],names = ['DayNumber','Time','ChannelID','TagID','Antenna','Power','Data','Events','DateTime'],skiprows = dataRow)
             telemDat.drop(labels = ['Data','Events','DateTime'], axis = 1, inplace = True)
             telemDat.dropna(inplace = True)
             #telemDat.to_csv(r"C:\Users\Kevin Nebiolo\Desktop\Ultrasound_2019\2019\Output\Scratch\fuck.csv")
-
+        print (telemDat.head())
         telemDat['fileName'] = np.repeat(fileName,len(telemDat))
         def id_to_freq(row,channelDict):
             channel = row['ChannelID']
@@ -1482,7 +1483,7 @@ class cross_validated():
         self.k = folds
         self.trainDF.Detection = self.trainDF.Detection.astype(int)
         self.trainDF.FreqCode = self.trainDF.FreqCode.astype(str)
-        self.trainDF.seriesHit = self.trainDF.seriesHit.astype(np.int64)
+        self.trainDF.seriesHit = self.trainDF.seriesHit.astype(int)
         self.trainDF.consDet = self.trainDF.consDet.astype(int)
         self.trainDF.detHist = self.trainDF.detHist.astype(str)
         self.trainDF.noiseRatio = self.trainDF.noiseRatio.astype(float)
@@ -1505,23 +1506,24 @@ class cross_validated():
     def fold(self,i):
         testDat = self.trainDF[self.trainDF.fold == i]
         trainDat = self.trainDF[self.trainDF.fold != i]                                      # create a test dataset that is the current fold
-        testDat['HT'] = np.repeat(1,len(testDat))
-        testDat['HF'] = np.repeat(0,len(testDat))    
+        testDat['HT'] = np.repeat('1',len(testDat))
+        testDat['HF'] = np.repeat('0',len(testDat))    
         
         # Make a Count of the predictor variables and join to training data frame - For ALIVE Strings
-        
+        testDat = testDat.reset_index()
+        print (trainDat.head())
         # Series Hit
-        seriesHitCount = trainDat.groupby(['Detection','seriesHit'])['seriesHit'].count()
+        seriesHitCount = trainDat.groupby(['Detection','seriesHit'])['seriesHit'].count().astype(int)
         seriesHitCount = pd.Series(seriesHitCount, name = 'seriesHitCountT')
         seriesHitCount = pd.DataFrame(seriesHitCount).reset_index().rename(columns = {'Detection':'HT'})
-        testDat = testDat.reset_index()
+        print (seriesHitCount)
         testDat = pd.merge(left = testDat, right = seriesHitCount, how = u'left',left_on = ['HT','seriesHit'], right_on = ['HT','seriesHit'])
         seriesHitCount = seriesHitCount.rename(columns = {'HT':'HF','seriesHitCountT':'seriesHitCountF'})
         testDat = pd.merge(left = testDat, right = seriesHitCount, how = u'left',left_on = ['HF','seriesHit'], right_on = ['HF','seriesHit'])
         #testDat.drop(['seriesHit_x','seriesHit_y'], axis = 1, inplace = True)
         
         # Consecutive Detections 
-        consDetCount = trainDat.groupby(['Detection','consDet'])['consDet'].count()
+        consDetCount = trainDat.groupby(['Detection','consDet'])['consDet'].count().astype(int)
         consDetCount = pd.Series(consDetCount, name = 'consDetCountT')
         consDetCount = pd.DataFrame(consDetCount).reset_index().rename(columns = {'Detection':'HT'})
         testDat = pd.merge(left = testDat, right = consDetCount, how = u'left', left_on = ['HT','consDet'], right_on = ['HT','consDet'])
@@ -1530,16 +1532,16 @@ class cross_validated():
         #testDat.drop(['consDet_x','consDet_y'], axis = 1, inplace = True)
         
         # Detection History  
-        detHistCount = trainDat.groupby(['Detection','detHist'])['detHist'].count()
+        detHistCount = trainDat.groupby(['Detection','detHist'])['detHist'].count().astype(int)
         detHistCount = pd.Series(detHistCount, name = 'detHistCountT')
         detHistCount = pd.DataFrame(detHistCount).reset_index().rename(columns = {'Detection':'HT'})
-        testDat = pd.merge(left = testDat, right = detHistCount, how = u'left', left_on = ['HT','detHist'],right_on =['HT','detHist'])
+        testDat = pd.merge(how = 'left', left = testDat, right = detHistCount, left_on = ['HT','detHist'],right_on =['HT','detHist'])
         detHistCount = detHistCount.rename(columns = {'HT':'HF','detHistCountT':'detHistCountF'})
-        testDat = pd.merge(left = testDat, right = detHistCount, how = u'left', left_on = ['HF','detHist'],right_on =['HF','detHist'])
+        testDat = pd.merge(how = 'left', left = testDat, right = detHistCount, left_on = ['HF','detHist'],right_on =['HF','detHist'])
         #testDat.drop(['detHist_x','detHist_y'], axis = 1, inplace = True)
         
         # Consecutive Record Length 
-        conRecLengthCount = trainDat.groupby(['Detection','conRecLength'])['conRecLength'].count()
+        conRecLengthCount = trainDat.groupby(['Detection','conRecLength'])['conRecLength'].count().astype(int)
         conRecLengthCount = pd.Series(conRecLengthCount, name = 'conRecLengthCountT')
         conRecLengthCount = pd.DataFrame(conRecLengthCount).reset_index().rename(columns = {'Detection':'HT'})
         testDat = pd.merge(left = testDat, right = conRecLengthCount, how = u'left', left_on = ['HT','conRecLength'], right_on = ['HT','conRecLength'])
@@ -1548,7 +1550,7 @@ class cross_validated():
         #testDat.drop(['conRecLength_x','conRecLength_y'], axis = 1, inplace = True)
         
         # Hit Ratio 
-        hitRatioCount = trainDat.groupby(['Detection','hitRatio'])['hitRatio'].count()
+        hitRatioCount = trainDat.groupby(['Detection','hitRatio'])['hitRatio'].count().astype(int)
         hitRatioCount = pd.Series(hitRatioCount, name = 'hitRatioCountT')
         hitRatioCount = pd.DataFrame(hitRatioCount).reset_index().rename(columns = {'Detection':'HT'})
         testDat = pd.merge(left = testDat, right = hitRatioCount, how = u'left', left_on = ['HT','hitRatio'], right_on = ['HT','hitRatio'])
@@ -1557,7 +1559,7 @@ class cross_validated():
         #testDat.drop(['hitRatio_x','hitRatio_y'], axis = 1, inplace = True)
         
         # Power
-        powerCount = trainDat.groupby(['Detection','powerBin'])['powerBin'].count()
+        powerCount = trainDat.groupby(['Detection','powerBin'])['powerBin'].count().astype(int)
         powerCount = pd.Series(powerCount, name = 'powerCount_T')
         powerCount = pd.DataFrame(powerCount).reset_index().rename(columns = {'Detection':'HT'})
         testDat = pd.merge(left = testDat, right = powerCount, how = u'left', left_on = ['HT','powerBin'], right_on = ['HT','powerBin'])
@@ -1612,8 +1614,8 @@ class cross_validated():
         # Calculate the likelihood of each hypothesis being true   
         #testDat['LikelihoodTrue'] = likelihood(True,self)
         #testDat['LikelihoodFalse'] = likelihood(False,self)
-        testDat['LikelihoodTrue'] = testDat['LPowerT'] * testDat['LHitRatioT'] * testDat['LnoiseT'] * testDat['LconRecT'] * testDat['LseriesHitT'] * testDat['LconsDetT']
-        testDat['LikelihoodFalse'] = testDat['LPowerF'] * testDat['LHitRatioF'] *  testDat['LnoiseF'] * testDat['LconRecF'] * testDat['LseriesHitF'] * testDat['LconsDetF']
+        testDat['LikelihoodTrue'] = testDat['LPowerT'] * testDat['LHitRatioT'] * testDat['LconRecT'] * testDat['LseriesHitT'] * testDat['LconsDetT']
+        testDat['LikelihoodFalse'] = testDat['LPowerF'] * testDat['LHitRatioF'] * testDat['LconRecF'] * testDat['LseriesHitF'] * testDat['LconsDetF']
         
         # Calculate the posterior probability of each Hypothesis occuring
         testDat['postTrue'] = testDat['priorT'] * testDat['LikelihoodTrue']
