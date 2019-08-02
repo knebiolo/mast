@@ -1461,7 +1461,7 @@ def classDatAppend(site,inputWS,projectDB):
         dat.to_sql('tblClassify_%s'%(site),con = conn,index = False, if_exists = 'append', chunksize = 1000)
         os.remove(os.path.join(inputWS,f))
         del dat    
-    c.execute('''CREATE INDEX idx_combined_%s ON tblClassify_%s (recID,FreqCode,Epoch)'''%(site,site))     
+    #c.execute('''CREATE INDEX idx_combined_%s ON tblClassify_%s (recID,FreqCode,Epoch)'''%(site,site))     
     c.close()        
                 
                                 
@@ -1739,8 +1739,8 @@ class classification_results():
         self.class_stats_data['Power'] = self.class_stats_data.Power.astype(float)
         self.class_stats_data['lagDiff'] = self.class_stats_data.lagDiff.astype(float)
         self.class_stats_data['conRecLength'] = self.class_stats_data.conRecLength.astype(float)
-        self.class_stats_data['noiseRatio'] = self.class_stats_data.noiseRatio.astype(float)
-        self.class_stats_data['fishCount'] = self.class_stats_data.fishCount.astype(float)
+        #self.class_stats_data['noiseRatio'] = self.class_stats_data.noiseRatio.astype(float)
+        #self.class_stats_data['fishCount'] = self.class_stats_data.fishCount.astype(float)
         self.class_stats_data['logPostRatio'] =np.log10(self.class_stats_data.postTrue.values/self.class_stats_data.postFalse.values)
 
 
