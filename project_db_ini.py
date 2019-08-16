@@ -1,8 +1,8 @@
 import os
 import abtas
 import pandas as pd
-proj_dir = r'J:\1210\005\Calcs\Studies\3_3_19\2018\Test'                       # what is the project directory?
-dbName = 'ultrasound_2018_test.db'                                             # whad did you call the database?
+proj_dir = r'C:\Users\Kevin Nebiolo\Desktop\Telemetry_Test'                      # what is the project directory?
+dbName = 'telemetry_test.db'                                            # whad did you call the database?
 data_dir = os.path.join(proj_dir,'Data')                                       
 db_dir = os.path.join(proj_dir,'Data',dbName)                                  
 det = 5                                                                        # number of detections we will look forwards and backwards for in detection history
