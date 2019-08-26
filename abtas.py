@@ -817,10 +817,10 @@ class training_data():
             self.PulseRate = rates.get_value(0,'PulseRate')
         else:
             self.PulseRate = 3.0
-        if len(rates.MortRate.values) > 0:
-            self.MortRate = rates.get_value(0,'MortRate')
-        else:
+        if np.any(rates.MortRate.values == None):
             self.MortRate = 11.0
+        else:
+            self.MortRate = rates.get_value(0,'MortRate')
         
         # create a list of factors to search for series hit
         self.alive_factors = np.arange(self.PulseRate,3600,self.PulseRate)
@@ -929,10 +929,10 @@ class classify_data():
         self.studyTags = allTags.FreqCode.values
         self.recType = recType.get_value(0,'RecType')
         self.PulseRate = rates.get_value(0,'PulseRate')
-        if len(rates.MortRate.values) > 0:
-            self.MortRate = rates.get_value(0,'MortRate')
-        else:
+        if rates.MortRate.values[0] == None:
             self.MortRate = 11.0
+        else:
+            self.MortRate = rates.get_value(0,'MortRate')
         # create a list of factors to search for series hit
         self.alive_factors = np.arange(self.PulseRate,3600,self.PulseRate)
         self.dead_factors = np.arange(self.MortRate,3600,self.MortRate)
