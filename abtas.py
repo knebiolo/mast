@@ -116,7 +116,7 @@ def status (row,datObject):
         status = "U"
     return status
 
-def detHist (data,rate,det, status = 'A'):
+def detHist (data,rate,det, status = 'A', training = False):
     '''New iteration of the detection history function meant to be superfast.
     We use pandas tricks to create the history by shifting epoch columns and 
     perfoming boolean logic on the entire dataframe rather than row-by-row'''
@@ -179,6 +179,8 @@ def detHist (data,rate,det, status = 'A'):
             data['score'] = data.score + data.points
         data.drop(labels = ['det_%s'%(np.int(i)),'epoch_shift_%s'%(np.int(i))], axis = 1, inplace = True) 
     data.drop(labels = ['score','points'], axis = 1, inplace = True)
+    if training == True:
+        data.rename(columns = {'detHist_A':'detHist','consDet_A':'consDet','hitRatio_A':'hitRatio','conRecLength_A':'conRecLength'},inplace = True)
     return data
           
 
@@ -779,6 +781,7 @@ class training_data():
         self.histDF = pd.read_sql(sql,con = conn, parse_dates  = 'timeStamp',coerce_float  = True)
         sql = 'SELECT PulseRate,MortRate FROM tblMasterTag WHERE FreqCode == "%s"'%(i)
         rates = pd.read_sql(sql,con = conn)
+        self.rates = rates
         sql = 'SELECT FreqCode FROM tblMasterTag' 
         allTags = pd.read_sql(sql,con = conn)
         sql = 'SELECT * FROM tblAlgParams'
@@ -817,7 +820,7 @@ class training_data():
             self.PulseRate = rates.get_value(0,'PulseRate')
         else:
             self.PulseRate = 3.0
-        if np.any(rates.MortRate.values == None):
+        if np.any(rates.MortRate.values == None) or len(rates.MortRate.values) == 0:
             self.MortRate = 11.0
         else:
             self.MortRate = rates.get_value(0,'MortRate')
@@ -852,7 +855,7 @@ def calc_train_params_map(trainee):                                             
     histDF['lag'] = histDF.Epoch.diff().abs()                                      # calculate the difference in seconds until the next detection   
     histDF['lagDiff'] = histDF.lag.diff()
     histDF.lagDiff.fillna(999999999,inplace = True)
-    histDF = detHist(histDF,trainee.PulseRate,trainee.det)             # calculate detection history
+    histDF = detHist(histDF,trainee.PulseRate,trainee.det,training = True)             # calculate detection history
     histDF['seriesHit'] = histDF['lag'].apply(lambda x: 1 if x in trainee.alive_factors else 0) 
     #histDF['noiseRatio'] = histDF.apply(noiseRatio, axis = 1, args = (trainee,allData))            
     #histDF['FishCount'] = histDF.apply(fishCount, axis = 1, args = (trainee,allData))
