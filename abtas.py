@@ -115,312 +115,8 @@ def status (row,datObject):
     else:
         status = "U"
     return status
-                           
-def detHist (row,masterTags,det,status,data,projectDB):
-    '''detHist is a function for returning a detection history string at a time index.
-    The function looks into the future and past to see if the receiver recorded a 
-    detection in series.  
-    If there is a record in series then the resultant detection is 1, 0 otherwise. 
-    
-    The function requires:
-    A pandas dataframe with the following columns:
-    (det): a number of detections to search, passed as an integer;
-    (pulseRate): A double indicating the pulse rate of the tag in question;
-    (data): A pandas dataframe containing the data in question, assumes a time stamp index; 
-    (t): the current time stamp.
-    
-    The Input dataframe will be in a common data frame format'''
 
-    # do some data management, declare some local variables
-    site = row['recID1']                                                    # get the current site
-    freqCode = row['FreqCode']                                                 # get the current frequency - code
-    status = status
-    rowSeconds = (row['Epoch'])
-    scanTime = row['ScanTime']                                             # get the scan time, and number of channels scanned from the current row
-    channels = row['Channels']
-    if freqCode in masterTags.FreqCode.values:                    # if the frequency code exists in the master code list, get the pulse rate 
-        pulses = masterTags[(masterTags.FreqCode == freqCode)]
-        pulseRate = float(pulses.PulseRate.values[0])
-        mortRate = float(pulses.MortRate.values[0])
-    else:
-        pulseRate = 2.0                                                    # if it is not in the master code list, give it a default pulse rate of 2.0 seconds
-        mortRate = 9.0
-    if status == "A" or status == "U" or status == "T":
-        rate = pulseRate
-    else:
-        rate = mortRate
-    detHist = str("1")                                                         # start the detection history string by placing 1 to indicate a positive detection at time step i
-    
-    '''To Do:
-    Detection history can benefit from multiprocessing.  Use Python Decorated
-    Concurrency, pass dictionary of indexed detection history, return detection 
-    history dictionary
-    '''
-    # start creating the detection history for this row of data
-    for i in np.arange(1,det+1):                                                   # for every detection period
-        # create window 
-        tBackMinus1 = rowSeconds - ((scanTime * channels * i,0) + 0.5)   # number of detection period time steps backward buffered by -1 pulse rate seconds that we will be checking for possible detections in series
-        tBackPlus1 = rowSeconds - ((scanTime * channels * i,0) - 0.5 )     # number of detection period time steps backward buffered by +1 pulse rate that we will be checking for possible detections in series                        
-        
-        dataBack = data[(data.index > tBackMinus1) & (data.index < tBackPlus1)]  # truncate fish data frame records to select detection period recordset
-        if len(dataBack) > 0:
-            detHist = "1" + detHist            
-
-        else:
-            detHist = "0" + detHist
-        del dataBack                                                           # delete errrithing
-        tForwardMinus1 = rowSeconds + ((scanTime * channels * i,0) - 0.5)    # number of detection period time steps backward buffered by -1 seconds that we will be checking for possible detections in series
-        tForwardPlus1 = rowSeconds + ((scanTime * channels * i,0) + 0.5)    # number of detection period time steps backward buffered by +1 seconds that we will be checking for possible detections in series            
-        
-        dataForward = data[(data.index > tForwardMinus1) & (data.index <  tForwardPlus1)]
-        if len(dataForward) > 0:
-            detHist = detHist + "1"
-        else:
-            detHist = detHist + "0"
-        del dataForward
-    del site                                                                   # clean up, delete errrything
-    return detHist
-
-class detection_history():
-    '''Python class (detection history object) which is nothing more than a dictionary
-    making up the detection history indexed by set detections from the original detection.
-    
-    Class also contains a method for the creation of a detection history using multithreading.'''
-    def __init__(self,data,det,FreqCode,recType,channels,scanTime,rate,Epoch,projectDB):
-        self.det = det
-        self.FreqCode = FreqCode
-        self.recType = recType
-        self.channels = float(channels)
-        self.scanTime = float(scanTime)
-        self.rate = float(rate)
-        self.Epoch = float(Epoch)
-        self.projectDB = projectDB
-        self.data = data
-        self.det_hist_dict = {}
-        for i in np.arange(self.det * -1, self.det + 1,1): # use this statement if we want to look both forward or backward in time
-            self.det_hist_dict[i] = ''
-
-    def histBuilder(self,i):
-        if i < 0: # if i is negative, we are looking back in time
-            # create window
-            if self.channels > 1:
-                ll = self.Epoch - ((self.scanTime * self.channels * np.abs(i)) + (self.scanTime))   # number of detection period time steps backward buffered by -1 pulse rate seconds that we will be checking for possible detections in series
-                ul = self.Epoch - ((self.scanTime * self.channels * np.abs(i)) - (self.scanTime))     # number of detection period time steps backward buffered by +1 pulse rate that we will be checking for possible detections in series                        
-            else: # if there is only 1 channel, the lotek behaves like an Orion
-                ll = self.Epoch - ((self.rate * np.abs(i)) + (0.25 * self.rate))   # number of detection period time steps backward buffered by -1 pulse rate seconds that we will be checking for possible detections in series
-                ul = self.Epoch - ((self.rate * np.abs(i)) - (0.25 * self.rate))     # number of detection period time steps backward buffered by +1 pulse rate that we will be checking for possible detections in series                                                            
-            back = self.data[(self.data.index >= ll) & (self.data.index <= ul)]   
-            if len(back) > 0: # if data is not empty
-                self.det_hist_dict[i] = "1" 
-            else:
-                self.det_hist_dict[i] = "0"
-            del back, ll, ul
-        elif i > 0: # if i is positive, we are looking into the future
-            # create window
-            if self.channels >1:
-                ll = self.Epoch + ((self.scanTime * self.channels * i) - (self.scanTime))    # number of detection period time steps backward buffered by -1 seconds that we will be checking for possible detections in series
-                ul = self.Epoch + ((self.scanTime * self.channels * i) + (self.scanTime))    # number of detection period time steps backward buffered by +1 seconds that we will be checking for possible detections in series             
-            else: # if there is only 1 chanenl, the lotek behaves like an orion
-                ll = self.Epoch + ((self.rate * i) - (0.25 * self.rate))   # number of detection period time steps backward buffered by -1 pulse rate seconds that we will be checking for possible detections in series
-                ul = self.Epoch + ((self.rate * i) + (0.25 * self.rate))     # number of detection period time steps backward buffered by +1 pulse rate that we will be checking for possible detections in series                                                                       
-            forward = self.data[(self.data.index >= ll) & (self.data.index <= ul)] 
-            if len(forward) > 0: # if data is not empty
-                self.det_hist_dict[i] = "1" 
-            else:
-                self.det_hist_dict[i] = "0"
-            del forward, ll, ul
-        else:
-            self.det_hist_dict[i] = "1"        
-    
-    def build(self):
-        threads = []
-        for i in np.arange(self.det * -1,self.det + 1,1):
-            t = td.Thread(target = self.histBuilder, args = (i,))
-            t.start()
-            threads.append(t)
-        for t in threads:
-            t.join()
-
-def detHist_2(row,status,datObject,data):
-    '''Function creates a detection history object and returns a detection history string.  
-    
-    '''    
-    # do some data management, declare some local variables                                                    # get the current site
-    freqCode = row['FreqCode']                                                 # get the current frequency - code
-    status = status
-    Epoch = row['Epoch']
-    scanTime = row['ScanTime']                                             # get the scan time, and number of channels scanned from the current row
-    channels = row['Channels']
-    if status == "A" or status == "U" or status == "T":
-        rate = datObject.PulseRate
-    else:
-        rate = datObject.MortRate
-        
-    # create a detection history instance 
-    detHist = detection_history(data,datObject.det,freqCode,datObject.recType,channels,scanTime,rate,Epoch,datObject.projectDB)
-    # build a history
-    detHist.build() # function uses multithreading, indexes can be out of order, iterate over sorted keys to build a detection history string
-    # return a history
-    det_hist_str = ''
-    for key in sorted(detHist.det_hist_dict.keys()):
-        det_hist_str = det_hist_str + detHist.det_hist_dict[key]
-               
-    return det_hist_str
-    
-def detHist_3 (status,det,data,masterTags,projectDB):
-    '''Detection history 3 is yet another iteration of the detection history function.
-    What it lacks in programming elegance, it makes up for speed.  Hopefully.
-    
-    What if we just shift the epoch column for the set number of detections 
-    forward and backward, then perform logic on each column.  Is this shifted epoch
-    within an acceptable window of time?      
-    '''
-            
-    det_hist_window_dict = {}                                                   # dictionary key = detection history, value = window tuple (ll,ul)
-    for i in np.arange(1,det + 1,1):
-        # create forwards and backwards window boundaries
-        b_ll = data['Epoch'].astype(float) - ((data['ScanTime'].astype(float) * data['Channels'].astype(float) * i) - 0.5)
-        b_ul = data['Epoch'].astype(float) - ((data['ScanTime'].astype(float) * data['Channels'].astype(float) * i) + 0.5)
-        f_ll = data['Epoch'].astype(float) + ((data['ScanTime'].astype(float) * data['Channels'].astype(float) * i) - 0.5)
-        f_ul = data['Epoch'].astype(float) + ((data['ScanTime'].astype(float) * data['Channels'].astype(float) * i) + 0.5)           
-        det_hist_window_dict[i] = (b_ll.values,b_ul.values,f_ll.values,f_ul.values)                                                        # start the detection history string by placing 1 to indicate a positive detection at time step i
-    
-    shift_dict = {}
-    # let's get shifty
-    shift_dict[0] = data['Epoch'].values.astype(float) 
-    for i in np.arange(1,det + 1,1):
-        b_shift = data['Epoch'].shift(i)
-        f_shift = data['Epoch'].shift(-1 * i)
-        shift_dict[i] = (b_shift.values.astype(float),f_shift.values.astype(float))
-    
-    # create a base detection history, repeat 1 for number of rows in dataframe - our 0 detection 
-    det_hist_dict = dict(zip(np.arange(0,len(data)),np.repeat('1',len(data))))    
-        
-    # this is the function we are mapping, we feed it an iterator - tuple of input dictionaries - 
-    def histBuilder(iters):           
-        shift_dict = iters[0]
-        det_hist_window_dict = iters[1]
-        det_hist_dict = iters[2]
-        for i in np.arange(0,len(det_hist_dict)):
-            # forward shift 
-            # get forward shifts
-            f_shift1 = shift_dict[1][1][i]               #(b_shift,f_shift)
-            f_shift2 = shift_dict[2][1][i]               #(b_shift,f_shift)
-            f_shift3 = shift_dict[3][1][i]               #(b_shift,f_shift)
-            f_shift4 = shift_dict[4][1][i]               #(b_shift,f_shift)
-            f_shift5 = shift_dict[5][1][i]               #(b_shift,f_shift)    
-            # get forward windows
-            f_ll1 = det_hist_window_dict[1][2][i]     #(b_ll,b_ul,f_ll,f_ul)
-            f_ul1 = det_hist_window_dict[1][3][i]
-            f_ll2 = det_hist_window_dict[2][2][i]     #(b_ll,b_ul,f_ll,f_ul)
-            f_ul2 = det_hist_window_dict[2][3][i]
-            f_ll3 = det_hist_window_dict[3][2][i]     #(b_ll,b_ul,f_ll,f_ul)
-            f_ul3 = det_hist_window_dict[3][3][i]
-            f_ll4 = det_hist_window_dict[4][2][i]     #(b_ll,b_ul,f_ll,f_ul)
-            f_ul4 = det_hist_window_dict[4][3][i]
-            f_ll5 = det_hist_window_dict[5][2][i]     #(b_ll,b_ul,f_ll,f_ul)
-            f_ul5 = det_hist_window_dict[5][3][i]
-        
-            # first shift logic
-            if f_ll1 <= f_shift1 <= f_ul1:
-                det_hist_dict[i] = det_hist_dict[i] + '1'
-            else:
-                det_hist_dict[i] = det_hist_dict[i] + '0'
-                
-            # second shift logic
-            if f_ll2 <= f_shift1 <= f_ul2 or f_ll2 <= f_shift2 <= f_ul2:
-                det_hist_dict[i] = det_hist_dict[i] + '1'
-            else:
-                det_hist_dict[i] = det_hist_dict[i] + '0'
-        
-            # third shift logic
-            if f_ll3 <= f_shift1 <= f_ul3 or f_ll3 <= f_shift2 <= f_ul3 or f_ll3 <= f_shift3 <= f_ul3:
-                det_hist_dict[i] = det_hist_dict[i] + '1'
-            else:
-                det_hist_dict[i] = det_hist_dict[i] + '0'    
-        
-            # fourth shift logic
-            if f_ll4 <= f_shift1 <= f_ul4 or f_ll4 <= f_shift2 <= f_ul4 or f_ll4 <= f_shift3 <= f_ul4  or f_ll4 <= f_shift4 <= f_ul4:
-                det_hist_dict[i] = det_hist_dict[i] + '1'
-            else:
-                det_hist_dict[i] = det_hist_dict[i] + '0'  
-        
-            # fourth shift logic
-            if f_ll5 <= f_shift1 <= f_ul5 or f_ll5 <= f_shift2 <= f_ul5 or f_ll5 <= f_shift3 <= f_ul5  or f_ll5 <= f_shift4 <= f_ul5   or f_ll5 <= f_shift5 <= f_ul5:
-                det_hist_dict[i] = det_hist_dict[i] + '1'
-            else:
-                det_hist_dict[i] = det_hist_dict[i] + '0'        
-            # backward shift
-            
-            b_shift1 = shift_dict[1][0][i]
-            b_shift2 = shift_dict[2][0][i]
-            b_shift3 = shift_dict[3][0][i]
-            b_shift4 = shift_dict[4][0][i]
-            b_shift5 = shift_dict[5][0][i]
-        
-            b_ll1 = det_hist_window_dict[1][0][i]
-            b_ul1 = det_hist_window_dict[1][1][i]
-            b_ll2 = det_hist_window_dict[2][0][i]
-            b_ul2 = det_hist_window_dict[2][1][i]
-            b_ll3 = det_hist_window_dict[3][0][i]
-            b_ul3 = det_hist_window_dict[3][1][i]
-            b_ll4 = det_hist_window_dict[4][0][i]
-            b_ul4 = det_hist_window_dict[4][1][i]
-            b_ll5 = det_hist_window_dict[5][0][i]
-            b_ul5 = det_hist_window_dict[5][1][i]
-                
-            # back shift 1 logic
-            if b_ll1 <= b_shift1 <= b_ul1:
-                det_hist_dict[i] = '1' + det_hist_dict[i]
-            else:
-                det_hist_dict[i] = '0' + det_hist_dict[i]
-                
-            # back shift 2 logic
-            if b_ll2 <= b_shift1 <= b_ul2 or b_ll2 <= b_shift2 <= b_ul2:
-                det_hist_dict[i] = '1' + det_hist_dict[i]
-            else:
-                det_hist_dict[i] = '0' + det_hist_dict[i]
-                
-            # back shift 3 logic
-            if b_ll3 <= b_shift1 <= b_ul3 or b_ll3 <= b_shift2 <= b_ul3 or b_ll3 <= b_shift3 <= b_ul3:
-                det_hist_dict[i] = '1' + det_hist_dict[i]
-            else:
-                det_hist_dict[i] = '0' + det_hist_dict[i]
-        
-            # back shift 4 logic
-            if b_ll4 <= b_shift1 <= b_ul4 or b_ll4 <= b_shift2 <= b_ul4 or b_ll4 <= b_shift3 <= b_ul4 or b_ll4 <= b_shift4 <= b_ul4:
-                det_hist_dict[i] = '1' + det_hist_dict[i]
-            else:
-                det_hist_dict[i] = '0' + det_hist_dict[i]
-        
-            # back shift 5 logic
-            if b_ll5 <= b_shift1 <= b_ul5 or b_ll5 <= b_shift2 <= b_ul5 or b_ll5 <= b_shift3 <= b_ul5 or b_ll5 <= b_shift4 <= b_ul5 or b_ll5 <= b_shift5 <= b_ul5:
-                det_hist_dict[i] = '1' + det_hist_dict[i]
-            else:
-                det_hist_dict[i] = '0' + det_hist_dict[i]
-    
-    iters = [[shift_dict,det_hist_window_dict,det_hist_dict]]
-    
-    def build(iters):
-        threads = []
-        for i in iters:
-            t = td.Thread(target = histBuilder, args = iters)
-            t.start()
-            threads.append(t)
-        for t in threads:
-            t.join()
-            
-    build(iters)
-    
-    detHistCol = []
-    for key in sorted(det_hist_dict.keys()):
-        detHistCol.append(det_hist_dict[key])       
-    
-    data['detHist_%s'%(status)] = detHistCol
-    #data.drop('rate',inplace = True)
-    return data                                                             # return the detection history string  
-
-def detHist_4 (data,rate,det, status = 'A'):
+def detHist (data,rate,det, status = 'A'):
     '''New iteration of the detection history function meant to be superfast.
     We use pandas tricks to create the history by shifting epoch columns and 
     perfoming boolean logic on the entire dataframe rather than row-by-row'''
@@ -432,8 +128,8 @@ def detHist_4 (data,rate,det, status = 'A'):
     if channels > 1:
         for i in np.arange(det * -1 , det + 1, 1):
             data['epoch_shift_%s'%(np.int(i))] = data.Epoch.shift(-1 * np.int(i))
-            data['ll'] = data['Epoch'] + ((data['ScanTime'] * data['Channels'] * i) + (rate * -0.5))
-            data['ul'] = data['Epoch'] + ((data['ScanTime'] * data['Channels'] * i) + (rate * 0.5))
+            data['ll'] = data['Epoch'] + ((data['ScanTime'] * data['Channels'] * i) - 1)
+            data['ul'] = data['Epoch'] + ((data['ScanTime'] * data['Channels'] * i) + 1)
             if det == 0:
                 data['det_0'] = '1'
             else:
@@ -988,49 +684,65 @@ def lotek_import(fileName,dbName,recName):
     
         conn = sqlite3.connect(dbName, timeout=30.0)
         c = conn.cursor()   
-        
-        # with our data row, extract information using pandas fwf import procedure
-        if lotek400 == False:
-            telemDat = pd.read_fwf(os.path.join(fileName),colspecs = [(0,5),(5,14),(14,20),(20,26),(26,30),(30,36)],names = ['DayNumber','Time','ChannelID','Power','Antenna','TagID'],skiprows = dataRow)
-            telemDat = telemDat.iloc[:-2]                                                   # remove last two rows, Lotek adds garbage at the end
-            telemDat.dropna(inplace = True)
-        else:
-            telemDat = pd.read_fwf(os.path.join(fileName),colspecs = [(0,5),(5,14),(14,22),(22,27),(27,35),(35,41),(41,48),(48,55),(55,85)],names = ['DayNumber','Time','ChannelID','TagID','Antenna','Power','Data','Events','DateTime'],skiprows = dataRow)
-            telemDat.drop(labels = ['Data','Events','DateTime'], axis = 1, inplace = True)
-            telemDat.dropna(inplace = True)
-            #telemDat.to_csv(r"C:\Users\Kevin Nebiolo\Desktop\Ultrasound_2019\2019\Output\Scratch\fuck.csv")
-        print (telemDat.head())
-        telemDat['fileName'] = np.repeat(fileName,len(telemDat))
+
         def id_to_freq(row,channelDict):
             channel = row['ChannelID']
             if np.int(channel) in channelDict:
                 return channelDict[np.int(channel)]
             else:
                 return '888'
-        if len(telemDat) > 0:
-            #print (channelDict)
-            telemDat['Frequency'] = telemDat.apply(id_to_freq, axis = 1, args = (channelDict,))
-            #print (telemDat[['Frequency']].head())
-
-            telemDat = telemDat[telemDat.Frequency != '888']
-            telemDat = telemDat[telemDat.TagID != 999]
-            telemDat['FreqCode'] = telemDat['Frequency'].astype(str) + ' ' + telemDat['TagID'].astype(int).astype(str)
-            telemDat['day0'] = np.repeat(pd.to_datetime("1900-01-01"),len(telemDat))
-            telemDat['Date'] = telemDat['day0'] + pd.to_timedelta(telemDat['DayNumber'].astype(int), unit='d')
-            
-            telemDat['Date'] = telemDat.Date.astype('str')
-            telemDat['timeStamp'] = pd.to_datetime(telemDat['Date'] + ' ' + telemDat['Time'])# create timestamp field from date and time and apply to index
-            telemDat.drop(['day0','DayNumber'],axis = 1, inplace = True)       
-            telemDat['Epoch'] = (telemDat['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()    
-            telemDat.drop (['Date','Time','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
-            telemDat['fileName'] = np.repeat(fileName,len(telemDat))
-            telemDat['recID'] = np.repeat(recName,len(telemDat))
-            tuples = zip(telemDat.FreqCode.values,telemDat.recID.values,telemDat.Epoch.values)
-            index = pd.MultiIndex.from_tuples(tuples, names=['FreqCode', 'recID','Epoch'])
-            telemDat.set_index(index,inplace = True,drop = False)
-
-        telemDat.to_sql('tblRaw',con = conn,index = False, if_exists = 'append')
         
+        # with our data row, extract information using pandas fwf import procedure
+        if lotek400 == False:
+            telemDat = pd.read_fwf(os.path.join(fileName),colspecs = [(0,5),(5,14),(14,20),(20,26),(26,30),(30,36)],names = ['DayNumber','Time','ChannelID','Power','Antenna','TagID'],skiprows = dataRow)
+            telemDat = telemDat.iloc[:-2]                                                   # remove last two rows, Lotek adds garbage at the end
+            telemDat.dropna(inplace = True)
+            if len(telemDat) > 0:
+                telemDat['Frequency'] = telemDat.apply(id_to_freq, axis = 1, args = (channelDict,)) 
+                telemDat = telemDat[telemDat.Frequency != '888']
+                telemDat = telemDat[telemDat.TagID != 999]
+                telemDat['FreqCode'] = telemDat['Frequency'].astype(str) + ' ' + telemDat['TagID'].astype(int).astype(str)
+                telemDat['day0'] = np.repeat(pd.to_datetime("1900-01-01"),len(telemDat))
+                telemDat['Date'] = telemDat['day0'] + pd.to_timedelta(telemDat['DayNumber'].astype(int), unit='d')
+                telemDat['Date'] = telemDat.Date.astype('str')
+                telemDat['timeStamp'] = pd.to_datetime(telemDat['Date'] + ' ' + telemDat['Time'])# create timestamp field from date and time and apply to index
+                telemDat.drop(['day0','DayNumber'],axis = 1, inplace = True)       
+                telemDat['Epoch'] = (telemDat['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()    
+                telemDat.drop (['Date','Time','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
+                telemDat['fileName'] = np.repeat(fileName,len(telemDat))
+                telemDat['recID'] = np.repeat(recName,len(telemDat))
+                tuples = zip(telemDat.FreqCode.values,telemDat.recID.values,telemDat.Epoch.values)
+                index = pd.MultiIndex.from_tuples(tuples, names=['FreqCode', 'recID','Epoch'])
+                telemDat.set_index(index,inplace = True,drop = False)
+                telemDat.to_sql('tblRaw',con = conn,index = False, if_exists = 'append')
+
+        else:
+            telemDat = pd.read_fwf(os.path.join(fileName),colspecs = [(0,6),(6,14),(14,22),(22,27),(27,35),(35,41),(41,48),(48,56),(56,67),(67,80)],names = ['DayNumber_Start','StartTime','ChannelID','TagID','Antenna','Power','Data','Events','DayNumber_End','EndTime'],skiprows = dataRow)
+            telemDat.dropna(inplace = True)
+            if len(telemDat) > 0:
+                telemDat['Frequency'] = telemDat.apply(id_to_freq, axis = 1, args = (channelDict,)) 
+                telemDat = telemDat[telemDat.Frequency != '888']
+                telemDat = telemDat[telemDat.TagID != 999]
+                telemDat['FreqCode'] = telemDat['Frequency'].astype(str) + ' ' + telemDat['TagID'].astype(int).astype(str)
+                telemDat['day0'] = np.repeat(pd.to_datetime("1900-01-01"),len(telemDat))
+                telemDat['Date_Start'] = telemDat['day0'] + pd.to_timedelta(telemDat['DayNumber_Start'].astype(int), unit='d')
+                telemDat['Date_Start'] = telemDat.Date_Start.astype('str')
+                telemDat['Date_End'] = telemDat['day0'] + pd.to_timedelta(telemDat['DayNumber_End'].astype(int), unit='d')
+                telemDat['Date_End'] = telemDat.Date_End.astype('str')
+                telemDat['timeStamp'] = pd.to_datetime(telemDat['Date_Start'] + ' ' + telemDat['StartTime'])# create timestamp field from date and time and apply to index
+                telemDat['time_end'] = pd.to_datetime(telemDat['Date_End'] + ' ' + telemDat['EndTime'])# create timestamp field from date and time and apply to index
+                telemDat.drop(['day0','DayNumber_Start','DayNumber_End'],axis = 1, inplace = True) 
+                telemDat['duration'] = (telemDat.time_end - telemDat.timeStamp).astype('timedelta64[s]')
+                telemDat['events_per_duration'] = telemDat.Events / telemDat.duration
+                telemDat['Epoch'] = (telemDat['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()  
+                telemDat.drop (['Date_Start','Date_End','time_end','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
+                telemDat['fileName'] = np.repeat(fileName,len(telemDat))
+                telemDat['recID'] = np.repeat(recName,len(telemDat))
+                tuples = zip(telemDat.FreqCode.values,telemDat.recID.values,telemDat.Epoch.values)
+                index = pd.MultiIndex.from_tuples(tuples, names=['FreqCode', 'recID','Epoch'])
+                telemDat.set_index(index,inplace = True,drop = False)
+                telemDat.to_sql('tblRaw_Lotek400',con = conn,index = False, if_exists = 'append')
+       
     # add receiver parameters to database    
     recParamLine = [(recName,recType,scanTime,channels,fileName)]
     conn.executemany('INSERT INTO tblReceiverParameters VALUES (?,?,?,?,?)',recParamLine)
@@ -1140,14 +852,7 @@ def calc_train_params_map(trainee):                                             
     histDF['lag'] = histDF.Epoch.diff().abs()                                      # calculate the difference in seconds until the next detection   
     histDF['lagDiff'] = histDF.lag.diff()
     histDF.lagDiff.fillna(999999999,inplace = True)
-    histDF = detHist_4(histDF,trainee.PulseRate,trainee.det)             # calculate detection history
-    ''' we no longer require a function for consecutive detction or hit ratio, it is now an output of detHist_4'''
-    #histDF['consDet'] = histDF.apply(consDet, axis = 1, args = ("T",trainee))  # determine whether or not to previous record or next record is consecutive in series
-    #histDF['hitRatio'] = histDF.apply(hitRatio,axis =1, args = 'T')            # calculate hit ratio from detection history
-    #histDF['conRecLength'] = histDF.apply(conRecLength, axis = 1, args = 'T')  # calculate the number of consecutive detections in series
-    #histDF['miss_to_hit'] = histDF.apply(miss_to_hit, axis = 1, args = 'T')    # calculate the hit to miss length ratio 
-    '''we are calculating series hit with a single lambda apply function using a list of known factors of the tag's pulse rate - hopefully this is faster'''
-    #histDF['seriesHit'] = histDF.apply(seriesHit, axis = 1, args = ("T",trainee,histDF))   # determine whether or not a row record is in series 
+    histDF = detHist(histDF,trainee.PulseRate,trainee.det)             # calculate detection history
     histDF['seriesHit'] = histDF['lag'].apply(lambda x: 1 if x in trainee.alive_factors else 0) 
     #histDF['noiseRatio'] = histDF.apply(noiseRatio, axis = 1, args = (trainee,allData))            
     #histDF['FishCount'] = histDF.apply(fishCount, axis = 1, args = (trainee,allData))
@@ -1308,19 +1013,10 @@ def calc_class_params_map(classify_object):
     # calculate parameters
     classify_object.histDF['lag'] = classify_object.histDF.Epoch.diff().abs()
     classify_object.histDF['lagDiff'] = classify_object.histDF.lag.diff()
-    #classify_object.histDF['seriesHit'] = classify_object.histDF.apply(seriesHit, axis = 1, args = ("A",classify_object,classify_object.histDF))             # determine whether or not a row record is in series 
     classify_object.histDF['seriesHit_A'] = classify_object.histDF['lag'].apply(lambda x: 1 if x in classify_object.alive_factors else 0) 
-    classify_object.histDF['seriesHit_M'] = classify_object.histDF['lag'].apply(lambda x: 1 if x in classify_object.dead_factors else 0) 
-
-    classify_object.histDF = detHist_4(classify_object.histDF,classify_object.PulseRate,classify_object.det)             # calculate detection history
-    classify_object.histDF = detHist_4(classify_object.histDF,classify_object.MortRate,classify_object.det,'M')             # calculate detection history
-
-    #classify_object.histDF['detHist'] = classify_object.histDF.apply(detHist_2, axis = 1, args = ("A",classify_object,classify_object.histDF))   # calculate detection history
-    #classify_object.histDF['consDet'] = classify_object.histDF.apply(consDet, axis = 1, args = ("A",classify_object))                           # determine whether or not to previous record or next record is consecutive in series
-    #classify_object.histDF['hitRatio'] = classify_object.histDF.apply(hitRatio,axis =1, args = 'A')                                            # calculate hit ratio from detection history
-    #classify_object.histDF['conRecLength'] = classify_object.histDF.apply(conRecLength, axis = 1, args = 'A')                                  # calculate the number of consecutive detections in series
-    #classify_object.histDF['noiseRatio'] = classify_object.histDF.apply(noiseRatio, axis = 1, args = (classify_object,allData))   # calculate the noise ratio    
-    #classify_object.histDF['fishCount'] = classify_object.histDF.apply(fishCount, axis = 1, args = (classify_object,allData))
+    classify_object.histDF['seriesHit_M'] = classify_object.histDF['lag'].apply(lambda x: 1 if x in classify_object.dead_factors else 0)
+    classify_object.histDF = detHist(classify_object.histDF,classify_object.PulseRate,classify_object.det)             # calculate detection history
+    classify_object.histDF = detHist(classify_object.histDF,classify_object.MortRate,classify_object.det,'M')             # calculate detection history
     classify_object.histDF['powerBin'] = (classify_object.histDF.Power//10)*10
     #classify_object.histDF['noiseBin'] = (classify_object.histDF.noiseRatio//.1)*.1
     classify_object.histDF['lagDiffBin'] = (classify_object.histDF.lagDiff//10)*.10
@@ -1678,24 +1374,22 @@ class cross_validated():
     def fold(self,i):
         testDat = self.trainDF[self.trainDF.fold == i]
         trainDat = self.trainDF[self.trainDF.fold != i]                                      # create a test dataset that is the current fold
-        testDat['HT'] = np.repeat('1',len(testDat))
-        testDat['HF'] = np.repeat('0',len(testDat))    
+        testDat['HT'] = np.repeat(1,len(testDat))
+        testDat['HF'] = np.repeat(0,len(testDat))    
         
         # Make a Count of the predictor variables and join to training data frame - For ALIVE Strings
         testDat = testDat.reset_index()
-        print (trainDat.head())
         # Series Hit
-        seriesHitCount = trainDat.groupby(['Detection','seriesHit'])['seriesHit'].count().astype(int)
+        seriesHitCount = trainDat.groupby(['Detection','seriesHit'])['seriesHit'].count()
         seriesHitCount = pd.Series(seriesHitCount, name = 'seriesHitCountT')
         seriesHitCount = pd.DataFrame(seriesHitCount).reset_index().rename(columns = {'Detection':'HT'})
-        print (seriesHitCount)
         testDat = pd.merge(left = testDat, right = seriesHitCount, how = u'left',left_on = ['HT','seriesHit'], right_on = ['HT','seriesHit'])
         seriesHitCount = seriesHitCount.rename(columns = {'HT':'HF','seriesHitCountT':'seriesHitCountF'})
         testDat = pd.merge(left = testDat, right = seriesHitCount, how = u'left',left_on = ['HF','seriesHit'], right_on = ['HF','seriesHit'])
         #testDat.drop(['seriesHit_x','seriesHit_y'], axis = 1, inplace = True)
-        
+  
         # Consecutive Detections 
-        consDetCount = trainDat.groupby(['Detection','consDet'])['consDet'].count().astype(int)
+        consDetCount = trainDat.groupby(['Detection','consDet'])['consDet'].count()
         consDetCount = pd.Series(consDetCount, name = 'consDetCountT')
         consDetCount = pd.DataFrame(consDetCount).reset_index().rename(columns = {'Detection':'HT'})
         testDat = pd.merge(left = testDat, right = consDetCount, how = u'left', left_on = ['HT','consDet'], right_on = ['HT','consDet'])
@@ -1704,7 +1398,7 @@ class cross_validated():
         #testDat.drop(['consDet_x','consDet_y'], axis = 1, inplace = True)
         
         # Detection History  
-        detHistCount = trainDat.groupby(['Detection','detHist'])['detHist'].count().astype(int)
+        detHistCount = trainDat.groupby(['Detection','detHist'])['detHist'].count()
         detHistCount = pd.Series(detHistCount, name = 'detHistCountT')
         detHistCount = pd.DataFrame(detHistCount).reset_index().rename(columns = {'Detection':'HT'})
         testDat = pd.merge(how = 'left', left = testDat, right = detHistCount, left_on = ['HT','detHist'],right_on =['HT','detHist'])
@@ -1713,7 +1407,7 @@ class cross_validated():
         #testDat.drop(['detHist_x','detHist_y'], axis = 1, inplace = True)
         
         # Consecutive Record Length 
-        conRecLengthCount = trainDat.groupby(['Detection','conRecLength'])['conRecLength'].count().astype(int)
+        conRecLengthCount = trainDat.groupby(['Detection','conRecLength'])['conRecLength'].count()
         conRecLengthCount = pd.Series(conRecLengthCount, name = 'conRecLengthCountT')
         conRecLengthCount = pd.DataFrame(conRecLengthCount).reset_index().rename(columns = {'Detection':'HT'})
         testDat = pd.merge(left = testDat, right = conRecLengthCount, how = u'left', left_on = ['HT','conRecLength'], right_on = ['HT','conRecLength'])
@@ -1722,7 +1416,7 @@ class cross_validated():
         #testDat.drop(['conRecLength_x','conRecLength_y'], axis = 1, inplace = True)
         
         # Hit Ratio 
-        hitRatioCount = trainDat.groupby(['Detection','hitRatio'])['hitRatio'].count().astype(int)
+        hitRatioCount = trainDat.groupby(['Detection','hitRatio'])['hitRatio'].count()
         hitRatioCount = pd.Series(hitRatioCount, name = 'hitRatioCountT')
         hitRatioCount = pd.DataFrame(hitRatioCount).reset_index().rename(columns = {'Detection':'HT'})
         testDat = pd.merge(left = testDat, right = hitRatioCount, how = u'left', left_on = ['HT','hitRatio'], right_on = ['HT','hitRatio'])
@@ -1731,7 +1425,7 @@ class cross_validated():
         #testDat.drop(['hitRatio_x','hitRatio_y'], axis = 1, inplace = True)
         
         # Power
-        powerCount = trainDat.groupby(['Detection','powerBin'])['powerBin'].count().astype(int)
+        powerCount = trainDat.groupby(['Detection','powerBin'])['powerBin'].count()
         powerCount = pd.Series(powerCount, name = 'powerCount_T')
         powerCount = pd.DataFrame(powerCount).reset_index().rename(columns = {'Detection':'HT'})
         testDat = pd.merge(left = testDat, right = powerCount, how = u'left', left_on = ['HT','powerBin'], right_on = ['HT','powerBin'])
@@ -2936,33 +2630,32 @@ def russian_doll(overlap):
     '''Function iterates through matching recap data from successors to see if
     current recapture row at predeccesor overlaps with successor presence.'''
     #print "Starting Russing Doll algorithm for node %s, hope you aren't busy, you will be watching this process for hours"%(overlap.curr_node)
+    # create function that we can vectorize over list of epochs (i)
+    def overlap_check(i, min_epoch, max_epoch):
+        return np.logical_and(min_epoch >= i, max_epoch < i).any()
     nodeDat = overlap.node_recap_dict[overlap.curr_node]
     fishes = nodeDat.FreqCode.unique()
     for i in fishes:
         overlap.fish = i
         #print "Let's start sifting through fish %s at node %s"%(i, overlap.curr_node)
-        successors = overlap.G.succ[overlap.curr_node]
+        children = overlap.G.succ[overlap.curr_node]
         fishDat = nodeDat[nodeDat.FreqCode == i]
         fishDat['overlapping'] = np.zeros(len(fishDat))
         fishDat['successor'] = np.repeat('',len(fishDat))
-        fishDat.set_index('Epoch', inplace = True)
-        if len(successors) > 0:                                            # if there is no child node, who cares? there is no overlapping detections, we are at the middle doll
-            for index, row in fishDat.iterrows():                          # for every row in the fish data
-                epoch = index                                              # get the current time
-                #print "Fish %s epoch %s overlap check"%(i,epoch)
-                for j in successors:                                       # for each successor of the current node
-                    #print "current successor is receiver %s" %(j)
-                    #print "Sifting through node %s for overlaps"%(j)
-                    succDat = overlap.node_pres_dict[j]                       # get the current successor data 
-                    if len(succDat) > 0:
-                        succDat = succDat[succDat.FreqCode == i]               # extract this fish's data
-                        succDat = succDat[(succDat.min_Epoch <= epoch) & (succDat.max_Epoch >= epoch)]
-                        #print "Overlap Found, at %s fish %s was recaptured at both %s and %s"%(epoch,i,overlap.curr_node,j)
-                        #print succDat
-                        fishDat.set_value(epoch,'overlapping',1)
-                        fishDat.set_value(epoch,'successor',j)
-                        break
-        fishDat.reset_index(inplace = True, drop = False)
+        fishDat.set_index('Epoch', inplace = True, drop = False)
+        if len(children) > 0:                                            # if there is no child node, who cares? there is no overlapping detections, we are at the middle doll
+            for j in children:
+                child_dat = overlap.node_pres_dict[j]
+                if len(child_dat) > 0:
+                    min_epochs = child_dat.min_Epoch.values
+                    max_epochs = child_dat.max_Epoch.values
+                    for k in fishDat.Epoch.values:                          # for every row in the fish data                                            
+                        print ("Fish %s epoch %s overlap check at child %s"%(i,k,j))
+                        if np.logical_and(min_epochs <= k, max_epochs >k).any(): # if the current epoch is within a presence at a child receiver
+                            print ("Overlap Found, at %s fish %s was recaptured at both %s and %s"%(k,i,overlap.curr_node,j))
+                            fishDat.set_value(k,'overlapping',1)
+                            fishDat.set_value(k,'successor',j)
+        fishDat.reset_index(inplace = True, drop = True)
         fishDat.to_csv(os.path.join(overlap.outputWS,'%s_at_%s_soverlap.csv'%(i,overlap.curr_node)), index = False)
                 
 def manage_node_overlap_data(inputWS, projectDB):
@@ -2975,7 +2668,7 @@ def manage_node_overlap_data(inputWS, projectDB):
         os.remove(os.path.join(inputWS,f))
     c.close()
     
-def the_big_merge(outputWS,projectDB):
+def the_big_merge(outputWS,projectDB, hitRatio_Filter = False):
     '''function takes classified data, merges across sites and then joins presence 
     and overlapping data into one big file for import into Access for model building.'''
     conn = sqlite3.connect(projectDB)                                              # connect to the database
@@ -2990,6 +2683,8 @@ def the_big_merge(outputWS,projectDB):
 
         dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
         dat['overlapping'].fillna(0,inplace = True)
+        if hitRatio_Filter == True:
+            dat = dat[dat.hitRatio > 0.10]
         recapdata = recapdata.append(dat)
         del dat
     c = conn.cursor()
