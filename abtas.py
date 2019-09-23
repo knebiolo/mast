@@ -16,8 +16,8 @@ import matplotlib.pyplot as plt
 import matplotlib
 import matplotlib.dates as mdates
 from mpl_toolkits.mplot3d import Axes3D
-import statsmodels.api as sm
-import statsmodels.formula.api as smf
+#import statsmodels.api as sm
+#import statsmodels.formula.api as smf
 import operator
 #from datetime import datetime
 import networkx as nx
@@ -543,7 +543,7 @@ def lotek_import(fileName,dbName,recName):
     headerDat = {}                                                              # create empty dictionary to hold Lotek header data indexed by line number - to be imported to Pandas dataframe 
     lineCounter = []                                                            # create empty array to hold line indices
     lineList = []                                                               # generate a list of header lines - contains all data we need to write to project set up database
-    o_file =open(fileName, encoding='utf-8')
+    o_file = open(fileName, encoding='utf-8')
     counter = 0                                                                 # start line counter
     line = o_file.readline()[:-1]                                               # read first line in file
     lineCounter.append(counter)                                                 # append the current line counter to the counter array
@@ -721,6 +721,29 @@ def lotek_import(fileName,dbName,recName):
         else:
             telemDat = pd.read_fwf(os.path.join(fileName),colspecs = [(0,6),(6,14),(14,22),(22,27),(27,35),(35,41),(41,48),(48,56),(56,67),(67,80)],names = ['DayNumber_Start','StartTime','ChannelID','TagID','Antenna','Power','Data','Events','DayNumber_End','EndTime'],skiprows = dataRow)
             telemDat.dropna(inplace = True)
+#            if len(telemDat) > 0:
+#                telemDat['Frequency'] = telemDat.apply(id_to_freq, axis = 1, args = (channelDict,)) 
+#                telemDat = telemDat[telemDat.Frequency != '888']
+#                telemDat = telemDat[telemDat.TagID != 999]
+#                telemDat['FreqCode'] = telemDat['Frequency'].astype(str) + ' ' + telemDat['TagID'].astype(int).astype(str)
+#                telemDat['day0'] = np.repeat(pd.to_datetime("1900-01-01"),len(telemDat))
+#                telemDat['Date_Start'] = telemDat['day0'] + pd.to_timedelta(telemDat['DayNumber_Start'].astype(int), unit='d')
+#                telemDat['Date_Start'] = telemDat.Date_Start.astype('str')
+#                telemDat['Date_End'] = telemDat['day0'] + pd.to_timedelta(telemDat['DayNumber_End'].astype(int), unit='d')
+#                telemDat['Date_End'] = telemDat.Date_End.astype('str')
+#                telemDat['timeStamp'] = pd.to_datetime(telemDat['Date_Start'] + ' ' + telemDat['StartTime'])# create timestamp field from date and time and apply to index
+#                telemDat['time_end'] = pd.to_datetime(telemDat['Date_End'] + ' ' + telemDat['EndTime'])# create timestamp field from date and time and apply to index
+#                telemDat.drop(['day0','DayNumber_Start','DayNumber_End'],axis = 1, inplace = True) 
+#                telemDat['duration'] = (telemDat.time_end - telemDat.timeStamp).astype('timedelta64[s]')
+#                telemDat['events_per_duration'] = telemDat.Events / telemDat.duration
+#                telemDat['Epoch'] = (telemDat['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()  
+#                telemDat.drop (['Date_Start','Date_End','time_end','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
+#                telemDat['fileName'] = np.repeat(fileName,len(telemDat))
+#                telemDat['recID'] = np.repeat(recName,len(telemDat))
+#                tuples = zip(telemDat.FreqCode.values,telemDat.recID.values,telemDat.Epoch.values)
+#                index = pd.MultiIndex.from_tuples(tuples, names=['FreqCode', 'recID','Epoch'])
+#                telemDat.set_index(index,inplace = True,drop = False)
+#                telemDat.to_sql('tblRaw_Lotek400',con = conn,index = False, if_exists = 'append')
             if len(telemDat) > 0:
                 telemDat['Frequency'] = telemDat.apply(id_to_freq, axis = 1, args = (channelDict,)) 
                 telemDat = telemDat[telemDat.Frequency != '888']
@@ -740,10 +763,12 @@ def lotek_import(fileName,dbName,recName):
                 telemDat.drop (['Date_Start','Date_End','time_end','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
                 telemDat['fileName'] = np.repeat(fileName,len(telemDat))
                 telemDat['recID'] = np.repeat(recName,len(telemDat))
+                telemDat.drop(['StartTime','Data','Events','EndTime','duration','events_per_duration'], axis = 1, inplace = True)
                 tuples = zip(telemDat.FreqCode.values,telemDat.recID.values,telemDat.Epoch.values)
                 index = pd.MultiIndex.from_tuples(tuples, names=['FreqCode', 'recID','Epoch'])
                 telemDat.set_index(index,inplace = True,drop = False)
-                telemDat.to_sql('tblRaw_Lotek400',con = conn,index = False, if_exists = 'append')
+                telemDat.to_sql('tblRaw',con = conn,index = False, if_exists = 'append')
+
        
     # add receiver parameters to database    
     recParamLine = [(recName,recType,scanTime,channels,fileName)]
@@ -903,7 +928,9 @@ class classify_data():
         conn = sqlite3.connect(projectDB, timeout=30.0)        
         c = conn.cursor()
         sql = "SELECT FreqCode, Epoch, tblRaw.recID, timeStamp, Power, ScanTime, Channels, recType FROM tblRaw LEFT JOIN tblReceiverParameters ON tblRaw.fileName = tblReceiverParameters.fileName WHERE FreqCode == '%s' AND tblRaw.recID == '%s';"%(i,site)
-        self.histDF = pd.read_sql(sql,con = conn, parse_dates  = 'timeStamp',coerce_float  = True)
+        #self.histDF = pd.read_sql(sql,con = conn, parse_dates  = 'timeStamp',coerce_float  = True)
+        self.histDF = pd.read_sql(sql,con = conn,coerce_float  = True)
+
         sql = 'SELECT PulseRate,MortRate FROM tblMasterTag WHERE FreqCode == "%s"'%(i)
         rates = pd.read_sql(sql,con = conn)
         sql = 'SELECT FreqCode FROM tblMasterTag' 
@@ -932,10 +959,11 @@ class classify_data():
         self.studyTags = allTags.FreqCode.values
         self.recType = recType.get_value(0,'RecType')
         self.PulseRate = rates.get_value(0,'PulseRate')
-        if rates.MortRate.values[0] == None:
+        if np.any(rates.MortRate.values == None) or len(rates.MortRate.values) == 0:
             self.MortRate = 11.0
         else:
             self.MortRate = rates.get_value(0,'MortRate')
+
         # create a list of factors to search for series hit
         self.alive_factors = np.arange(self.PulseRate,3600,self.PulseRate)
         self.dead_factors = np.arange(self.MortRate,3600,self.MortRate)
@@ -1048,8 +1076,8 @@ def calc_class_params_map(classify_object):
             classDF.drop(['conRecLength_M','consDet_M','detHist_M','hitRatio_M','seriesHit_M'], axis = 1, inplace = True)
             classDF.rename(columns = {'conRecLength_A':'conRecLength','consDet_A':'consDet','detHist_A':'detHist','hitRatio_A':'hitRatio','seriesHit_A':'seriesHit'}, inplace = True)
 
-#        trainDF = trainDF[trainDF.Detection==0]
-#        classDF = classDF[classDF.test==1]    
+        trainDF = trainDF[trainDF.Detection==0]
+        classDF = classDF[classDF.test==1]    
         classDF['Channels']=np.repeat(1,len(classDF))
 #        classDF.rename(columns={"test":"Detection","fishCount":"FishCount","RowSeconds":"Seconds","RecType":"recType"},inplace=True)#inplace tells it to replace the existing dataframe
         classDF.rename(columns={"test":"Detection","RowSeconds":"Seconds","RecType":"recType"},inplace=True)#inplace tells it to replace the existing dataframe
@@ -1905,7 +1933,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
         counting process style
         bucket_length = covariate time interval, default 15 minutes  
     '''
-    def __init__(self,receiver_list,node_to_state,dbDir, input_type = 'query', initial_state_release = False, last_presence_time0 = False):
+    def __init__(self,receiver_list,node_to_state,dbDir, input_type = 'query', initial_state_release = False, last_presence_time0 = False, cap_loc = None, rel_loc = None):
         # Import Data using sql
         '''the default input type for this function is query, however 
         
@@ -1914,13 +1942,21 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
         self.dbDir = dbDir
         conn = sqlite3.connect(dbDir)
         c = conn.cursor()
-        sql = 'SELECT tblRecaptures.FreqCode, Epoch, timeStamp, Node, TagType, presence_number, overlapping FROM tblRecaptures LEFT JOIN tblMasterReceiver ON tblRecaptures.recID = tblMasterReceiver.recID LEFT JOIN tblMasterTag ON tblRecaptures.FreqCode = tblMasterTag.FreqCode WHERE tblRecaptures.recID = "%s"'%(receiver_list[0])        
+        sql = 'SELECT tblRecaptures.FreqCode, Epoch, timeStamp, Node, TagType, presence_number, overlapping, CapLoc, RelLoc FROM tblRecaptures LEFT JOIN tblMasterReceiver ON tblRecaptures.recID = tblMasterReceiver.recID LEFT JOIN tblMasterTag ON tblRecaptures.FreqCode = tblMasterTag.FreqCode WHERE tblRecaptures.recID = "%s"'%(receiver_list[0])        
         for i in receiver_list[1:]:
             sql = sql + ' OR tblRecaptures.recID = "%s"'%(i)
         self.data = pd.read_sql_query(sql,con = conn)
         self.data['timeStamp'] = pd.to_datetime(self.data.timeStamp)
         self.data = self.data[self.data.TagType == 'Study']
         self.data = self.data[self.data.overlapping == 0]
+
+        if rel_loc is not None:
+            self.data = self.data[self.data.RelLoc == rel_loc]
+        if cap_loc is not None:
+            self.data = self.data[self.data.CapLoc == cap_loc]
+        self.cap_loc = cap_loc
+        self.rel_loc = rel_loc
+
         c.close()
         print ("Finished sql") 
         print ("Starting node to state classification, with %s records this takes time"%(len(self.data)))
@@ -1944,10 +1980,17 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
             release times of each fish, morph data into a recaptures file and 
             merge it to self.data'''
             
-            sql = "SELECT FreqCode, TagType, RelDate FROM tblMasterTag WHERE TagType = 'Study'"
+            sql = "SELECT FreqCode, TagType, RelDate, RelLoc, CapLoc FROM tblMasterTag WHERE TagType = 'Study'"
             conn = sqlite3.connect(self.dbDir)
             c = conn.cursor()
+
+
+
             relDat = pd.read_sql_query(sql,con = conn, parse_dates = 'RelDate')
+            if self.rel_loc is not None:
+                relDat = relDat[relDat.RelLoc == rel_loc]
+            if self.cap_loc is not None:
+                relDat = relDat[relDat.CapLoc == cap_loc]
             relDat['RelDate'] = pd.to_datetime(relDat.RelDate)
             relDat['Epoch'] = (relDat['RelDate'] - datetime.datetime(1970,1,1)).dt.total_seconds()
             
@@ -1960,6 +2003,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
             print (relDat.head())
             c.close()
             self.data = self.data.append(relDat)
+            
 
         self.data['State'] = pd.to_numeric(self.data['State'], errors='coerce')# make sure State is an integer
         self.data['State'] = self.data.State.astype(np.int32)
@@ -2072,7 +2116,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
                 stateTable['state'] = stateTable['state'].astype(np.int32)
                 from_rec = stateTable['state'].shift(1).fillna(stateTable.iloc[0]['state']).astype(np.int32)
                 to_rec = stateTable['state'].astype(np.int32)
-                trans = zip(from_rec,to_rec)
+                trans = tuple(zip(from_rec,to_rec))
                 stateTable['transition'] = trans
                 stateTable['startState'] = from_rec
                 stateTable['endState'] = to_rec    
@@ -2182,7 +2226,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
                 exp_stateTable['test'] = exp_stateTable.t1 - exp_stateTable.t0 # this is no longer needed, but if t1 is smaller than t0 things are screwed up
                 stateTable = exp_stateTable
                 del exp_stateTable
-                stateTable['transition'] = zip(stateTable.startState.values.astype(int),stateTable.endState.values.astype(int)) # create transition variable, this is helpful in R
+                stateTable['transition'] = tuple(zip(stateTable.startState.values.astype(int),stateTable.endState.values.astype(int))) # create transition variable, this is helpful in R
                 self.master_stateTable = self.master_stateTable.append(stateTable)
                 # export
             self.master_stateTable.drop(labels = ['nextFlowPeriod','timeStamp'],axis = 1, inplace = True)
@@ -2214,8 +2258,10 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
         print (countPerTrans)
         print ("")
         # Step 3: Describe the expected number of transitions per fish 
-        self.fishTransCount = self.master_stateTable.groupby(['FreqCode','transition'])['transition'].count().to_frame().rename(columns = {'transition':'transCount'})
-        self.fishTransCount.reset_index(inplace = True)
+        self.fishTransCount = self.master_stateTable.groupby(['FreqCode','transition'])['transition'].count()
+        self.fishTransCount = self.fishTransCount.to_frame(name = 'transCount')
+        #self.fishTransCount.rename(columns = {'':'transCount'}, inplace = True)
+        #self.fishTransCount.reset_index(inplace = True)
         
         print ("The number of movements a fish is expected to make is best described with min, median and maximum statistics")
         print ("The mininum number of times each transition was made:")
@@ -2291,7 +2337,7 @@ class fish_history():
                 #fuck
                 print ("Data from reciever %s imported"%(i))
                 del sql                
-
+        data.drop_duplicates(keep = 'first', inplace = True)
         self.recaptures = data
        
         del data
@@ -2406,12 +2452,12 @@ class bout():
         receivers = receivers[receivers.Node == node].recID.unique()           # get the unique receivers associated with this node    
         data = pd.DataFrame(columns = ['FreqCode','Epoch','recID'])            # set up an empty data frame
         for i in receivers:                                                    # for every receiver 
-            sql = "SELECT FreqCode, Epoch, recID, test, hitRatio FROM tblClassify_%s"%(i) 
+            sql = "SELECT FreqCode, Epoch, recID, test FROM tblClassify_%s"%(i) 
             dat = pd.read_sql(sql, con = conn)                                 # get data for this receiver 
             print ("Got data for receiver %s"%(i))
             #dat = dat[(dat.test == 1) & (dat.hitRatio > 0.3)] # query
             dat = dat[(dat.test == 1)] # query
-            dat.drop(['test','hitRatio'],axis = 1, inplace = True)
+            dat.drop(['test'],axis = 1, inplace = True)
             print ("Restricted data")
             data = data.append(dat)  
         c = conn.cursor()
@@ -2466,7 +2512,10 @@ class bout():
                     print ("With knots at %s and %s seconds, the SSR of each model was %s, %s and %s respectivley"%(det_lag_DF.det_lag.values[k1],det_lag_DF.det_lag.values[k2],round(mod1ssr,4),round(mod2ssr,4),round(mod3ssr,4)))
                     ssr_sum = np.sum([mod1ssr,mod2ssr,mod3ssr])                # simple sum is fine here
                     knot_ssr[(k1,k2)] = ssr_sum                                     # add that sum to the dictionary
-            minKnot = min(knot_ssr.iteritems(), key = operator.itemgetter(1))[0]   # find the knot locations that mimize squared error
+            knotDF = pd.DataFrame.from_dict(knot_ssr, orient = 'index').reset_index()
+            knotDF.rename(columns = {'index':'knots',0:'SSR'}, inplace = True)
+            min_knot_idx = knotDF['SSR'].idxmin()
+            minKnot = knotDF.iloc[min_knot_idx,0]
             # You Can Plot If You Want To
             if plotOutputWS != None:
                 k1 = minKnot[0]
@@ -2504,12 +2553,12 @@ class bout():
         receivers = receivers[receivers.Node == self.node].recID.unique()                    # get the unique receivers associated with this node    
         presence = pd.DataFrame(columns = ['FreqCode','Epoch','recID'])                             # set up an empty data frame
         for i in receivers:                                                            # for every receiver 
-            sql = "SELECT FreqCode, Epoch, recID, test, hitRatio, logLikelihoodRatio FROM tblClassify_%s WHERE FreqCode == '%s'"%(i,fish) 
+            sql = "SELECT FreqCode, Epoch, recID, test FROM tblClassify_%s WHERE FreqCode == '%s'"%(i,fish) 
             dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver
             #dat = dat[(dat.test == 1) & (dat.hitRatio > 0.3) & (dat.logLikelihoodRatio > 0.0)] # query
-            dat = dat[(dat.test == 1) & (dat.logLikelihoodRatio > 0.0)] # query
+            dat = dat[dat.test == 1]
 
-            dat.drop(['test','hitRatio','logLikelihoodRatio'],axis = 1, inplace = True)
+            dat.drop(['test'],axis = 1, inplace = True)
             presence = presence.append(dat)
         c = conn.cursor()
         c.close()
@@ -2597,12 +2646,12 @@ class overlap_reduction():
                 #print "Start selecting classified and presence data that matches the current receiver (%s)"%(j)  
                 presence_sql = "SELECT * FROM tblPresence WHERE recID = '%s'"%(j)
                 presenceDat = pd.read_sql(presence_sql, con = conn)
-                recap_sql = "SELECT FreqCode, Epoch, recID, test, hitRatio from tblClassify_%s"%(j)
+                recap_sql = "SELECT FreqCode, Epoch, recID, test from tblClassify_%s"%(j)
                 recapDat = pd.read_sql(recap_sql, con = conn)
                 #recapDat = recapDat[(recapDat.test == 1) & (recapDat.hitRatio > 0.3)]
                 recapDat = recapDat[(recapDat.test == 1)]
 
-                recapDat.drop(labels = ['test','hitRatio',], axis = 1, inplace = True)
+                recapDat.drop(labels = ['test'], axis = 1, inplace = True)
                 # now that we have data, we need to summarize it, use group by to get min ans max epoch by freq code, recID and presence_number
                 pres_data = pres_data.append(presenceDat)
                 recap_data = recap_data.append(recapDat)
@@ -2649,6 +2698,7 @@ def russian_doll(overlap):
         if len(children) > 0:                                            # if there is no child node, who cares? there is no overlapping detections, we are at the middle doll
             for j in children:
                 child_dat = overlap.node_pres_dict[j]
+                child_dat = child_dat[child_dat.FreqCode == i]
                 if len(child_dat) > 0:
                     min_epochs = child_dat.min_Epoch.values
                     max_epochs = child_dat.max_Epoch.values
@@ -2678,16 +2728,16 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False):
     recSQL = "SELECT * FROM tblMasterReceiver"                                 # SQL code to import data from this node
     receivers = pd.read_sql(recSQL,con = conn)                                 # import data
     receivers = receivers.recID.unique()                                       # get the unique receivers associated with this node    
-    recapdata = pd.DataFrame(columns = ['FreqCode','Epoch','recID','timeStamp','Power','lag','hitRatio','postTrue','postFalse','test','presence_number','overlapping'])                # set up an empty data frame
+    recapdata = pd.DataFrame(columns = ['FreqCode','Epoch','recID','timeStamp'])                # set up an empty data frame
+    
     for i in receivers:                                                            # for every receiver 
         print ("Start selecting and merging data for receiver %s"%(i))
-        #sql = "SELECT tblClassify_%s.FreqCode, tblClassify_%s.Epoch, tblClassify_%s.recID, timeStamp, Power, Lag, tblClassify_%s.hitRatio, postTrue, postFalse, presence_number, overlapping, test FROM tblClassify_%s LEFT JOIN tblOverlap ON tblClassify_%s.FreqCode = tblOverlap.FreqCode AND tblClassify_%s.Epoch = tblOverlap.Epoch AND tblClassify_%s.recID = tblOverlap.recID LEFT JOIN tblPresence ON tblClassify_%s.FreqCode = tblPresence.FreqCode AND tblClassify_%s.Epoch = tblPresence.Epoch AND tblClassify_%s.recID = tblPresence.recID WHERE test = 1 AND tblClassify_%s.hitRatio > 0.3"%(i,i,i,i,i,i,i,i,i,i,i,i)
-        sql = "SELECT tblClassify_%s.FreqCode, tblClassify_%s.Epoch, tblClassify_%s.recID, timeStamp, Power, Lag, tblClassify_%s.hitRatio, postTrue, postFalse, presence_number, overlapping, test FROM tblClassify_%s LEFT JOIN tblOverlap ON tblClassify_%s.FreqCode = tblOverlap.FreqCode AND tblClassify_%s.Epoch = tblOverlap.Epoch AND tblClassify_%s.recID = tblOverlap.recID LEFT JOIN tblPresence ON tblClassify_%s.FreqCode = tblPresence.FreqCode AND tblClassify_%s.Epoch = tblPresence.Epoch AND tblClassify_%s.recID = tblPresence.recID WHERE test = 1"%(i,i,i,i,i,i,i,i,i,i,i)
-
+        sql = "SELECT tblClassify_%s.FreqCode, tblClassify_%s.Epoch, tblClassify_%s.recID, timeStamp,presence_number, overlapping, hitRatio_A, hitRatio_M, test FROM tblClassify_%s LEFT JOIN tblOverlap ON tblClassify_%s.FreqCode = tblOverlap.FreqCode AND tblClassify_%s.Epoch = tblOverlap.Epoch AND tblClassify_%s.recID = tblOverlap.recID AND tblClassify_%s.recID = tblOverlap.recID LEFT JOIN tblPresence ON tblClassify_%s.FreqCode = tblPresence.FreqCode AND tblClassify_%s.Epoch = tblPresence.Epoch AND tblClassify_%s.recID = tblPresence.recID WHERE test = 1"%(i,i,i,i,i,i,i,i,i,i,i)       
         dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
         dat['overlapping'].fillna(0,inplace = True)
+        dat = dat[dat.overlapping == 0]
         if hitRatio_Filter == True:
-            dat = dat[dat.hitRatio > 0.10]
+            dat = dat[(dat.hitRatio_A > 0.10)]# | (dat.hitRatio_M > 0.10)]
         recapdata = recapdata.append(dat)
         del dat
     c = conn.cursor()
@@ -2696,18 +2746,23 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False):
 
 class cjs_data_prep():
     '''Class creates input files for Cormack Jolly Seber modeling in MARK'''
-    def __init__(self,receiver_list,receiver_to_recap, dbDir, input_type = 'query'):
+    def __init__(self,receiver_list,receiver_to_recap, dbDir, input_type = 'query', rel_loc = None, cap_loc = None):
         # Import Data using sql
         '''the default input type for this function is query, however'''
         print ("Starting extraction of recapture data conforming to the recievers chosen")
         conn = sqlite3.connect(dbDir)
         c = conn.cursor()
-        sql = 'SELECT tblRecaptures.FreqCode, Epoch, timeStamp, tblRecaptures.recID, TagType, overlapping FROM tblRecaptures LEFT JOIN tblMasterReceiver ON tblRecaptures.recID = tblMasterReceiver.recID LEFT JOIN tblMasterTag ON tblRecaptures.FreqCode = tblMasterTag.FreqCode WHERE tblRecaptures.recID = "%s"'%(receiver_list[0])        
+        sql = 'SELECT tblRecaptures.FreqCode, Epoch, timeStamp, tblRecaptures.recID, TagType, overlapping, RelLoc, CapLoc FROM tblRecaptures LEFT JOIN tblMasterReceiver ON tblRecaptures.recID = tblMasterReceiver.recID LEFT JOIN tblMasterTag ON tblRecaptures.FreqCode = tblMasterTag.FreqCode WHERE tblRecaptures.recID = "%s"'%(receiver_list[0])        
         for i in receiver_list[1:]:
             sql = sql + ' OR tblRecaptures.recID = "%s"'%(i)
-        self.data = pd.read_sql_query(sql,con = conn, parse_dates  = 'timeStamp',coerce_float  = True)
+        self.data = pd.read_sql_query(sql,con = conn,coerce_float  = True)
+        #self.data['timeStamp'] = self.data['timeStamp'].to_datetime()
         self.data = self.data[self.data.TagType == 'Study']
-        self.data = self.data[self.data.overlapping == 0]
+        self.data = self.data[self.data.overlapping == 0.0]
+        if rel_loc != None:
+            self.data = self.data[self.data.RelLoc == rel_loc]
+        if cap_loc != None:
+            self.data = self.data[self.data.CapLoc == cap_loc]
         c.close()
         print ("Finished sql")
         print ("Starting receiver to recapture occasion classification, with %s records, this takes time"%(len(self.data)))
@@ -2737,9 +2792,10 @@ class cjs_data_prep():
         cross_tab.fillna(value = 0, inplace = True)
         #Step 3: Map a simply if else statement, if value > 0,1 else 0'''
         cross_tab = cross_tab.applymap(lambda x:1 if x > 0 else 0)
+        self.inp = cross_tab
         # Check your work
         print (cross_tab.head(10))
-        cross_tab.to_csv(os.path.join(outputWS,'%s_cjs.csv')%(modelName))
+        cross_tab.to_csv(os.path.join(outputWS,'%s_cjs.csv'%(modelName)))
         
 class receiver_stats():
     '''Python class object that creates a receiver object of either raw or reduced 
