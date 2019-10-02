@@ -1942,14 +1942,14 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
         self.dbDir = dbDir
         conn = sqlite3.connect(dbDir)
         c = conn.cursor()
-        sql = 'SELECT tblRecaptures.FreqCode, Epoch, timeStamp, Node, TagType, presence_number, overlapping, CapLoc, RelLoc FROM tblRecaptures LEFT JOIN tblMasterReceiver ON tblRecaptures.recID = tblMasterReceiver.recID LEFT JOIN tblMasterTag ON tblRecaptures.FreqCode = tblMasterTag.FreqCode WHERE tblRecaptures.recID = "%s"'%(receiver_list[0])        
+        sql = 'SELECT tblRecaptures.FreqCode, Epoch, timeStamp, Node, TagType, presence_number, overlapping, CapLoc, RelLoc, test FROM tblRecaptures LEFT JOIN tblMasterReceiver ON tblRecaptures.recID = tblMasterReceiver.recID LEFT JOIN tblMasterTag ON tblRecaptures.FreqCode = tblMasterTag.FreqCode WHERE tblRecaptures.recID = "%s"'%(receiver_list[0])        
         for i in receiver_list[1:]:
             sql = sql + ' OR tblRecaptures.recID = "%s"'%(i)
         self.data = pd.read_sql_query(sql,con = conn)
         self.data['timeStamp'] = pd.to_datetime(self.data.timeStamp)
         self.data = self.data[self.data.TagType == 'Study']
+        self.data = self.data[self.data.test == 1]
         self.data = self.data[self.data.overlapping == 0]
-
         if rel_loc is not None:
             self.data = self.data[self.data.RelLoc == rel_loc]
         if cap_loc is not None:
@@ -1993,21 +1993,20 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
                 relDat = relDat[relDat.CapLoc == cap_loc]
             relDat['RelDate'] = pd.to_datetime(relDat.RelDate)
             relDat['Epoch'] = (relDat['RelDate'] - datetime.datetime(1970,1,1)).dt.total_seconds()
-            
+            print(relDat.RelDate.values)
             relDat.rename(columns = {'RelDate':'timeStamp'}, inplace = True)
             relDat['Node'] = np.repeat('rel',len(relDat))
             relDat['State'] = np.repeat(1,len(relDat))
             relDat['State'] = relDat['State'].astype(np.int32)
-
+            relDat.dropna(inplace =True)
             relDat['Overlapping'] = np.zeros(len(relDat))
-            print (relDat.head())
+            #print(relDat.timeStamp.values)
             c.close()
             self.data = self.data.append(relDat)
             
 
         self.data['State'] = pd.to_numeric(self.data['State'], errors='coerce')# make sure State is an integer
         self.data['State'] = self.data.State.astype(np.int32)
-        
         if last_presence_time0 == True:
             ''' sometimes when we are modeling downstream movement, it would be 
             beneficial to start enumerating movement from the last presence at 
@@ -2043,6 +2042,8 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
 
         # Identify first recapture times
         self.startTimes = self.data[self.data.State == 1].groupby(['FreqCode'])['Epoch'].min().to_frame()
+        #print(self.startTimes.head())
+
         self.startTimes.reset_index(drop = False, inplace = True)
         self.startTimes.Epoch = self.startTimes.Epoch.astype(np.int32)
         self.startTimes.rename(columns = {'Epoch':'FirstRecapture'},inplace = True)
@@ -2655,10 +2656,12 @@ class overlap_reduction():
                 # now that we have data, we need to summarize it, use group by to get min ans max epoch by freq code, recID and presence_number
                 pres_data = pres_data.append(presenceDat)
                 recap_data = recap_data.append(recapDat)
+                del presence_sql, recap_sql
+
             dat = pres_data.groupby(['FreqCode','presence_number'])['Epoch'].agg({'min_Epoch':np.min,'max_Epoch':np.max}).reset_index(drop = False)
             self.node_pres_dict[i] = dat
             self.node_recap_dict[i] = recap_data
-            del pres_data, recap_data, dat, recSQL, receivers, node_recs, presence_sql, recap_sql
+            del pres_data, recap_data, dat, recSQL, receivers, node_recs
         print ("Completed data management process for node %s"%(self.curr_node))
         c.close()
         
@@ -2698,16 +2701,17 @@ def russian_doll(overlap):
         if len(children) > 0:                                            # if there is no child node, who cares? there is no overlapping detections, we are at the middle doll
             for j in children:
                 child_dat = overlap.node_pres_dict[j]
-                child_dat = child_dat[child_dat.FreqCode == i]
                 if len(child_dat) > 0:
-                    min_epochs = child_dat.min_Epoch.values
-                    max_epochs = child_dat.max_Epoch.values
-                    for k in fishDat.Epoch.values:                          # for every row in the fish data                                            
-                        print ("Fish %s epoch %s overlap check at child %s"%(i,k,j))
-                        if np.logical_and(min_epochs <= k, max_epochs >k).any(): # if the current epoch is within a presence at a child receiver
-                            print ("Overlap Found, at %s fish %s was recaptured at both %s and %s"%(k,i,overlap.curr_node,j))
-                            fishDat.set_value(k,'overlapping',1)
-                            fishDat.set_value(k,'successor',j)
+                    child_dat = child_dat[child_dat.FreqCode == i]
+                    if len(child_dat) > 0:
+                        min_epochs = child_dat.min_Epoch.values
+                        max_epochs = child_dat.max_Epoch.values
+                        for k in fishDat.Epoch.values:                          # for every row in the fish data                                            
+                            print ("Fish %s epoch %s overlap check at child %s"%(i,k,j))
+                            if np.logical_and(min_epochs <= k, max_epochs >k).any(): # if the current epoch is within a presence at a child receiver
+                                print ("Overlap Found, at %s fish %s was recaptured at both %s and %s"%(k,i,overlap.curr_node,j))
+                                fishDat.set_value(k,'overlapping',1)
+                                fishDat.set_value(k,'successor',j)
         fishDat.reset_index(inplace = True, drop = True)
         fishDat.to_csv(os.path.join(overlap.outputWS,'%s_at_%s_soverlap.csv'%(i,overlap.curr_node)), index = False)
                 
@@ -2721,9 +2725,9 @@ def manage_node_overlap_data(inputWS, projectDB):
         os.remove(os.path.join(inputWS,f))
     c.close()
     
-def the_big_merge(outputWS,projectDB, hitRatio_Filter = False):
+def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filter = False):
     '''function takes classified data, merges across sites and then joins presence 
-    and overlapping data into one big file for import into Access for model building.'''
+    and overlapping data into one big file for model building.'''
     conn = sqlite3.connect(projectDB)                                              # connect to the database
     recSQL = "SELECT * FROM tblMasterReceiver"                                 # SQL code to import data from this node
     receivers = pd.read_sql(recSQL,con = conn)                                 # import data
@@ -2732,12 +2736,19 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False):
     
     for i in receivers:                                                            # for every receiver 
         print ("Start selecting and merging data for receiver %s"%(i))
-        sql = "SELECT tblClassify_%s.FreqCode, tblClassify_%s.Epoch, tblClassify_%s.recID, timeStamp,presence_number, overlapping, hitRatio_A, hitRatio_M, test FROM tblClassify_%s LEFT JOIN tblOverlap ON tblClassify_%s.FreqCode = tblOverlap.FreqCode AND tblClassify_%s.Epoch = tblOverlap.Epoch AND tblClassify_%s.recID = tblOverlap.recID AND tblClassify_%s.recID = tblOverlap.recID LEFT JOIN tblPresence ON tblClassify_%s.FreqCode = tblPresence.FreqCode AND tblClassify_%s.Epoch = tblPresence.Epoch AND tblClassify_%s.recID = tblPresence.recID WHERE test = 1"%(i,i,i,i,i,i,i,i,i,i,i)       
+        sql = '''SELECT tblClassify_%s.FreqCode, tblClassify_%s.Epoch, tblClassify_%s.recID, timeStamp,presence_number, overlapping, hitRatio_A, hitRatio_M, test, RelDate 
+        FROM tblClassify_%s 
+        LEFT JOIN tblMasterTag ON tblClassify_%s.FreqCode = tblMasterTag.FreqCode 
+        LEFT JOIN tblOverlap ON tblClassify_%s.FreqCode = tblOverlap.FreqCode AND tblClassify_%s.Epoch = tblOverlap.Epoch AND tblClassify_%s.recID = tblOverlap.recID 
+        LEFT JOIN tblPresence ON tblClassify_%s.FreqCode = tblPresence.FreqCode AND tblClassify_%s.Epoch = tblPresence.Epoch AND tblClassify_%s.recID = tblPresence.recID'''%(i,i,i,i,i,i,i,i,i,i,i)       
         dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
         dat['overlapping'].fillna(0,inplace = True)
         dat = dat[dat.overlapping == 0]
+        dat = dat[dat.test == 1]
         if hitRatio_Filter == True:
             dat = dat[(dat.hitRatio_A > 0.10)]# | (dat.hitRatio_M > 0.10)]
+        if pre_release_Filter == True:
+            dat = dat[(dat.timeStamp >= dat.RelDate)]
         recapdata = recapdata.append(dat)
         del dat
     c = conn.cursor()
@@ -2759,6 +2770,7 @@ class cjs_data_prep():
         #self.data['timeStamp'] = self.data['timeStamp'].to_datetime()
         self.data = self.data[self.data.TagType == 'Study']
         self.data = self.data[self.data.overlapping == 0.0]
+        self.data = self.data[self.data.test == 1.0]
         if rel_loc != None:
             self.data = self.data[self.data.RelLoc == rel_loc]
         if cap_loc != None:
@@ -2837,7 +2849,7 @@ class receiver_stats():
         fishDat = self.rec_dat[self.rec_dat.FreqCode == fish]
         self.presences = fishDat.groupby(['FreqCode'])['presence_number'].max()
         
-        
+    
         
           
 
