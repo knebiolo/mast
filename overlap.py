@@ -5,26 +5,30 @@ import abtas
 import os
 import warnings
 warnings.filterwarnings('ignore')
-import multiprocessing as mp
 import time
 if __name__ == "__main__":
     tS = time.time()
     # set up script parameters
-    project_dir = r'J:\1210\005\Calcs\Studies\3_3_19\2018\Test'
-    dbName = 'ultrasound_2018_test.db'          
+    project_dir = r'C:\Users\Alex Malvezzi\Desktop'
+    dbName = 'ultrasound_2019.db'          
     outputWS = os.path.join(project_dir,'Output','Scratch')
     figureWS = os.path.join(project_dir,'Output','Figures')
     projectDB = os.path.join(project_dir,'Data',dbName)
     # which node do you care about?
-    nodes = ['S01','S02','S03','S04','S05','S06','S07','S08','S09']
-    edges = [('S01','S05'),('S01','S06'),('S01','S07'),('S01','S08'),('S01','S09'),
-             ('S02','S05'),('S02','S06'),('S02','S07'),('S02','S08'),('S02','S09'),
-             ('S03','S05'),('S03','S06'),('S03','S07'),('S03','S08'),('S03','S09'),
-             ('S04','S05'),('S04','S06'),('S04','S07'),('S04','S08'),('S04','S09'),
-             ('S09','S05'),('S09','S06'),('S09','S07'),('S09','S08'),
-             ('S05','S08'),
-             ('S06','S08'),
-             ('S07','S08')]
+    nodes = ['S01','S02','S12','S13','S14','S15','S16','S17','S18','S19','S21','S22','S23','S24']
+    edges = [('S02','S01'),
+             ('S02','S01'),
+             ('S13','S14'),('S13','S15'),('S13','S12'),('S13','S16'),('S13','S17'),
+             ('S14','S15'),('S14','S16'),('S14','S17'),
+             ('S16','S13'),('S16','S15'),('S16','S22'),('S16','S18'),('S16','S19'),('S16','S17'),('S16','S14'),('S16','S23'),('S16','S24'),('S16','S21'),
+             ('S17','S18'),('S17','S19'),('S17','S21'),('S17','S13'),('S17','S24'),('S17','S14'),('S17','S22'),('S17','S23'),
+             ('S18','S16'),('S18','S17'),
+             ('S21','S16'),('S21','S17'),
+             ('S22','S16'),
+             ('S19','S18'),
+             ('S22','S21'),('S22','S16'),('S22','S17'),
+             ('S23','S16'),('S23','S17'),
+             ('S24','S16'),('S24','S17')]
     # Step 1, create an overlap object
     print ("Start creating overlap data objects - 1 per node")
     iters = []
@@ -34,8 +38,9 @@ if __name__ == "__main__":
     print ("Start Multiprocessing")
     print ("This will take a while")
     print ("Grab a coffee, call your mother.")    
-    pool = mp.Pool(processes = 8)                                              # the number of processes equals the number of processors you have
-    pool.map(abtas.russian_doll, iters)                                         # map the russian doll function over each training data object 
+    for i in iters:
+        abtas.russian_doll(i)
+
     print ("Overlap analysis complete proceed to data management")
     # Step 3, Manage Data   
     abtas.manage_node_overlap_data(outputWS,projectDB)
