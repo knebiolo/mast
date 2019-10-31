@@ -1089,14 +1089,14 @@ def calc_class_params_map(classify_object):
             classDF.drop(['conRecLength_M','consDet_M','detHist_M','hitRatio_M','seriesHit_M'], axis = 1, inplace = True)
             classDF.rename(columns = {'conRecLength_A':'conRecLength','consDet_A':'consDet','detHist_A':'detHist','hitRatio_A':'hitRatio','seriesHit_A':'seriesHit'}, inplace = True)
 
-        trainDF = trainDF[trainDF.Detection==0]
-        classDF = classDF[classDF.test==1]    
-        classDF['Channels']=np.repeat(1,len(classDF))
-#        classDF.rename(columns={"test":"Detection","fishCount":"FishCount","RowSeconds":"Seconds","RecType":"recType"},inplace=True)#inplace tells it to replace the existing dataframe
-        classDF.rename(columns={"test":"Detection","RowSeconds":"Seconds","RecType":"recType"},inplace=True)#inplace tells it to replace the existing dataframe
-        #Next we append the classdf to the traindf
-        trainDF = trainDF.append(classDF)  
-        #trainDF.to_sql('tblTrain_%s'%(classify_object.reclass_iter),index=False,con=conn)#we might want to allow for further iterations
+            trainDF = trainDF[trainDF.Detection==0]
+            classDF = classDF[classDF.test==1]    
+            classDF['Channels']=np.repeat(1,len(classDF))
+#            classDF.rename(columns={"test":"Detection","fishCount":"FishCount","RowSeconds":"Seconds","RecType":"recType"},inplace=True)#inplace tells it to replace the existing dataframe
+            classDF.rename(columns={"test":"Detection","RowSeconds":"Seconds","RecType":"recType"},inplace=True)#inplace tells it to replace the existing dataframe
+            #Next we append the classdf to the traindf
+            trainDF = trainDF.append(classDF)  
+            #trainDF.to_sql('tblTrain_%s'%(classify_object.reclass_iter),index=False,con=conn)#we might want to allow for further iterations
 
     c.close()
          
