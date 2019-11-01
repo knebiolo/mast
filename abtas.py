@@ -859,7 +859,7 @@ class training_data():
         else:
             self.PulseRate = 3.0
         if np.any(rates.MortRate.values == None) or len(rates.MortRate.values) == 0:
-            self.MortRate = 11.0
+            self.MortRate = 9999.0
         else:
             self.MortRate = rates.get_value(0,'MortRate')
         
@@ -973,7 +973,7 @@ class classify_data():
         self.recType = recType.get_value(0,'RecType')
         self.PulseRate = rates.get_value(0,'PulseRate')
         if np.any(rates.MortRate.values == None) or len(rates.MortRate.values) == 0:
-            self.MortRate = 11.0
+            self.MortRate = 9999.0
         else:
             self.MortRate = rates.get_value(0,'MortRate')
 
@@ -1086,6 +1086,7 @@ def calc_class_params_map(classify_object):
             trainDF = pd.read_sql("select * from tblTrain WHERE recType == '%s'"%(classify_object.recType),con=conn, coerce_float = True)#This will read in tblTrain and create a pandas dataframe        
 #            classDF = pd.read_sql("select test, FreqCode,Power,lag,lagDiff,fishCount,conRecLength,consDet,detHist,hitRatio,noiseRatio,seriesHit,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from tblClassify_%s_%s"%(site,classify_object.reclass_iter-1),con=conn)
             classDF = pd.read_sql("select test, FreqCode,Power,lag,lagDiff,conRecLength_A,consDet_A,detHist_A,hitRatio_A,seriesHit_A,conRecLength_M,consDet_M,detHist_M,hitRatio_M,seriesHit_M,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from tblClassify_%s_%s"%(site,classify_object.reclass_iter-1),con=conn)
+            classDF = classDF[classDF.postTrue_A > classDF.postTrue_M]
             classDF.drop(['conRecLength_M','consDet_M','detHist_M','hitRatio_M','seriesHit_M'], axis = 1, inplace = True)
             classDF.rename(columns = {'conRecLength_A':'conRecLength','consDet_A':'consDet','detHist_A':'detHist','hitRatio_A':'hitRatio','seriesHit_A':'seriesHit'}, inplace = True)
 
