@@ -87,13 +87,6 @@ def seriesHit (row,status,datObject,data):
     else:
         return 0
 
-def lagBack(df):
-    if df.backInTime == df.timeStamp:
-        lagB = 0
-    else:
-        lagB = df.backInTime - df.timeStamp
-    return lagB/np.timedelta64(1,'s')
-
 def status (row,datObject):
     '''Function determines whether or not a fish has died based upon its pulse rate.
     If the mort rate is a factor of the forward lag than the fish is declared dead.
@@ -329,26 +322,26 @@ def fishCount (row,datObject,data):
     return np.sum(np.isin(fishies,tags))
 
 
-def noiseRatio (row,datObject,data):
+def noiseRatio (row,duration,data,study_tags):
     
     ''' function calculates the ratio of miscoded, pure noise detections, to matching frequency/code 
     detections within the duration specified.
     
     In other words, what is the ratio of miscoded to correctly coded detections within the duration specified
     
-    datObject = the current classify_data or training_data object
+    duration = moving window length in minutes
     data = current data file
+    study_tags = list or list like object of study tags
     '''
-    tags = datObject.studyTags
-    rowSeconds = (row['RowSeconds'])
-    ll = rowSeconds - (datObject.duration * 60.0)
-    ul = rowSeconds + (datObject.duration * 60.0) 
+    rowSeconds = (row['Epoch'])
+    ll = rowSeconds - (duration * 60.0)
+    ul = rowSeconds + (duration * 60.0) 
     # extract data
-    trunc = data[(data.index >= ll) & (data.index <  ul)]               # truncate the dataset, we only care about these records
+    trunc = data[(data.Epoch >= ll) & (data.Epoch <  ul)]               # truncate the dataset, we only care about these records
     # calculate noise ratio 
     total = float(len(trunc))                                                   # how many records are there in this dataset?
     fishies = trunc.FreqCode.unique()
-    miscode = np.float(np.sum(np.isin(fishies,tags,invert = True)))
+    miscode = np.float(np.sum(np.isin(fishies,study_tags,invert = True)))
     return round((miscode/total),4)                                       # the noise ratio is the number of miscoded tags divided by the total number of records in the truncated dataset, which happens to be on a specified interval
     
 def MAP (row):
@@ -471,6 +464,9 @@ def orionImport(fileName,dbName,recName,switch = False, scanTime = None, channel
     Text parser uses simple column fixed column widths.
     
     '''
+    conn = sqlite3.connect(dbName, timeout=30.0)
+    c = conn.cursor()    
+    study_tags = pd.read_sql('SELECT FreqCode FROM tblMasterTag WHERE TagType == "Study" OR TagType == "Beacon"',con = conn).FreqCode.values
     
     recType = 'orion'
     if switch == False:
@@ -505,6 +501,7 @@ def orionImport(fileName,dbName,recName,switch = False, scanTime = None, channel
     telemDat = telemDat[telemDat.timeStamp.notnull()]
     telemDat['Epoch'] = (telemDat['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()        
     telemDat.drop (['Date','Time','Freq','Code','Site'],axis = 1, inplace = True)
+    telemDat['noiseRatio'] = telemDat.apply(noiseRatio, axis = 1, args = (5.0,telemDat,study_tags))            
     
     if switch == False:
         telemDat.drop(['Ant'], axis = 1, inplace = True)
@@ -512,8 +509,6 @@ def orionImport(fileName,dbName,recName,switch = False, scanTime = None, channel
         tuples = zip(telemDat.FreqCode.values,telemDat.recID.values,telemDat.Epoch.values)
         index = pd.MultiIndex.from_tuples(tuples, names=['FreqCode', 'recID','Epoch'])
         telemDat.set_index(index,inplace = True,drop = False)
-        conn = sqlite3.connect(dbName, timeout=30.0)
-        c = conn.cursor()       
         telemDat.to_sql('tblRaw',con = conn,index = False, if_exists = 'append')
         recParamLine = [(recName,recType,scanTime,channels,fileName)]
         conn.executemany('INSERT INTO tblReceiverParameters VALUES (?,?,?,?,?)',recParamLine)
@@ -528,8 +523,6 @@ def orionImport(fileName,dbName,recName,switch = False, scanTime = None, channel
             index = pd.MultiIndex.from_tuples(tuples, names=['FreqCode', 'recID','Epoch'])
             telemDat_sub.set_index(index,inplace = True,drop = False)
             telemDat_sub.drop(['Ant'], axis = 1, inplace = True)
-            conn = sqlite3.connect(dbName, timeout=30.0)
-            c = conn.cursor()       
             telemDat_sub.to_sql('tblRaw',con = conn,index = False, if_exists = 'append')
             recParamLine = [(site,recType,scanTime,channels,fileName)]
             conn.executemany('INSERT INTO tblReceiverParameters VALUES (?,?,?,?,?)',recParamLine)
@@ -617,7 +610,8 @@ def lotek_import(fileName,dbName,recName):
     
         conn = sqlite3.connect(dbName, timeout=30.0)
         c = conn.cursor()   
-        
+        study_tags = pd.read_sql('SELECT FreqCode FROM tblMasterTag WHERE TagType == "Study" OR TagType == "Beacon"',con = conn).FreqCode.values
+
         # with our data row, extract information using pandas fwf import procedure
         telemDat = pd.read_fwf(fileName,colspecs = [(0,8),(8,18),(18,28),(28,36),(36,51),(51,59)],names = ['Date','Time','ChannelID','TagID','Antenna','Power'],skiprows = dataRow)
         telemDat = telemDat.iloc[:-2]                                                   # remove last two rows, Lotek adds garbage at the end
@@ -633,7 +627,8 @@ def lotek_import(fileName,dbName,recName):
             telemDat = telemDat[telemDat.TagID != 999]
             telemDat['FreqCode'] = telemDat['Frequency'].astype(str) + ' ' + telemDat['TagID'].astype(int).astype(str)
             telemDat['timeStamp'] = pd.to_datetime(telemDat['Date'] + ' ' + telemDat['Time'])# create timestamp field from date and time and apply to index
-            telemDat['Epoch'] = (telemDat['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()    
+            telemDat['Epoch'] = (telemDat['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()
+            telemDat['noiseRatio'] = telemDat.apply(noiseRatio, axis = 1, args = (5.0,telemDat,study_tags))            
             telemDat.drop (['Date','Time','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
             telemDat['fileName'] = np.repeat(fileName,len(telemDat))
             telemDat['recID'] = np.repeat(recName,len(telemDat))
@@ -699,7 +694,7 @@ def lotek_import(fileName,dbName,recName):
     
         conn = sqlite3.connect(dbName, timeout=30.0)
         c = conn.cursor()   
-
+        study_tags = pd.read_sql('SELECT FreqCode FROM tblMasterTag WHERE TagType == "Study" OR TagType == "Beacon"',con = conn).FreqCode.values
         def id_to_freq(row,channelDict):
             channel = row['ChannelID']
             if np.int(channel) in channelDict:
@@ -726,6 +721,8 @@ def lotek_import(fileName,dbName,recName):
                 telemDat.drop (['Date','Time','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
                 telemDat['fileName'] = np.repeat(fileName,len(telemDat))
                 telemDat['recID'] = np.repeat(recName,len(telemDat))
+                telemDat['noiseRatio'] = telemDat.apply(noiseRatio, axis = 1, args = (5.0,telemDat,study_tags))            
+
                 tuples = zip(telemDat.FreqCode.values,telemDat.recID.values,telemDat.Epoch.values)
                 index = pd.MultiIndex.from_tuples(tuples, names=['FreqCode', 'recID','Epoch'])
                 telemDat.set_index(index,inplace = True,drop = False)
@@ -815,7 +812,7 @@ class training_data():
         '''
         conn = sqlite3.connect(projectDB, timeout=30.0)        
         c = conn.cursor()
-        sql = "SELECT FreqCode, Epoch, tblRaw.recID, timeStamp, Power, ScanTime, Channels FROM tblRaw LEFT JOIN tblReceiverParameters ON tblRaw.fileName = tblReceiverParameters.fileName WHERE FreqCode == '%s' AND tblRaw.recID == '%s';"%(i,site)
+        sql = "SELECT FreqCode, Epoch, tblRaw.recID, timeStamp, Power, noiseRatio, ScanTime, Channels FROM tblRaw LEFT JOIN tblReceiverParameters ON tblRaw.fileName = tblReceiverParameters.fileName WHERE FreqCode == '%s' AND tblRaw.recID == '%s';"%(i,site)
         self.histDF = pd.read_sql(sql,con = conn, parse_dates  = 'timeStamp',coerce_float  = True)
         sql = 'SELECT PulseRate,MortRate FROM tblMasterTag WHERE FreqCode == "%s"'%(i)
         rates = pd.read_sql(sql,con = conn)
@@ -830,7 +827,7 @@ class training_data():
         # do some data management when importing training dataframe
         self.histDF['recID1'] = np.repeat(site,len(self.histDF))
         self.histDF['timeStamp'] = pd.to_datetime(self.histDF['timeStamp'])
-        self.histDF[['Power','Epoch']] = self.histDF[['Power','Epoch']].apply(pd.to_numeric)                  # sometimes we import from SQLite and our number fields are objects, fuck that noise, let's make sure we are good
+        self.histDF[['Power','Epoch','noiseRatio',]] = self.histDF[['Power','Epoch','noiseRatio']].apply(pd.to_numeric)                  # sometimes we import from SQLite and our number fields are objects, fuck that noise, let's make sure we are good
         self.histDF['RowSeconds'] = self.histDF['Epoch']
         self.histDF.sort_values(by = 'Epoch', inplace = True)
         self.histDF.set_index('Epoch', drop = False, inplace = True)
@@ -895,7 +892,6 @@ def calc_train_params_map(trainee):                                             
     histDF.lagDiff.fillna(999999999,inplace = True)
     histDF = detHist(histDF,trainee.PulseRate,trainee.det,training = True)             # calculate detection history
     histDF['seriesHit'] = histDF['lag'].apply(lambda x: 1 if x in trainee.alive_factors else 0) 
-    #histDF['noiseRatio'] = histDF.apply(noiseRatio, axis = 1, args = (trainee,allData))            
     #histDF['FishCount'] = histDF.apply(fishCount, axis = 1, args = (trainee,allData))
     histDF.set_index('timeStamp',inplace = True, drop = True) 
     histDF.drop(['recID1','RowSeconds'],axis = 1, inplace = True)
@@ -940,7 +936,7 @@ class classify_data():
         '''
         conn = sqlite3.connect(projectDB, timeout=30.0)        
         c = conn.cursor()
-        sql = "SELECT FreqCode, Epoch, tblRaw.recID, timeStamp, Power, ScanTime, Channels, recType FROM tblRaw LEFT JOIN tblReceiverParameters ON tblRaw.fileName = tblReceiverParameters.fileName WHERE FreqCode == '%s' AND tblRaw.recID == '%s';"%(i,site)
+        sql = "SELECT FreqCode, Epoch, tblRaw.recID, timeStamp, Power, noiseRatio, ScanTime, Channels, recType FROM tblRaw LEFT JOIN tblReceiverParameters ON tblRaw.fileName = tblReceiverParameters.fileName WHERE FreqCode == '%s' AND tblRaw.recID == '%s';"%(i,site)
         #self.histDF = pd.read_sql(sql,con = conn, parse_dates  = 'timeStamp',coerce_float  = True)
         self.histDF = pd.read_sql(sql,con = conn,coerce_float  = True)
 
@@ -993,11 +989,11 @@ def likelihood(assumption,classify_object,status = 'A'):
     '''calculates likelihood based on true or false assumption and fields provided to classify object'''
     fields = classify_object.fields
     if status == 'A':
-        trueFields = {'conRecLength':'LconRecT_A','consDet':'LconsDetT_A','hitRatio':'LHitRatioT_A','noiseRatio':'LnoiseT_A','seriesHit':'LseriesHitT_A','power':'LPowerT','lagDiff':'LlagT'}
-        falseFields = {'conRecLength':'LconRecF_A','consDet':'LconsDetF_A','hitRatio':'LHitRatioF_A','noiseRatio':'LnoiseF_A','seriesHit':'LseriesHitF_A','power':'LPowerF','lagDiff':'LlagF'}
+        trueFields = {'conRecLength':'LconRecT_A','consDet':'LconsDetT_A','hitRatio':'LHitRatioT_A','noiseRatio':'LnoiseT','seriesHit':'LseriesHitT_A','power':'LPowerT','lagDiff':'LlagT'}
+        falseFields = {'conRecLength':'LconRecF_A','consDet':'LconsDetF_A','hitRatio':'LHitRatioF_A','noiseRatio':'LnoiseF','seriesHit':'LseriesHitF_A','power':'LPowerF','lagDiff':'LlagF'}
     else:
-        trueFields = {'conRecLength':'LconRecT_M','consDet':'LconsDetT_M','hitRatio':'LHitRatioT_M','noiseRatio':'LnoiseT_M','seriesHit':'LseriesHitT_M','power':'LPowerT','lagDiff':'LlagT'}
-        falseFields = {'conRecLength':'LconRecF_M','consDet':'LconsDetF_M','hitRatio':'LHitRatioF_M','noiseRatio':'LnoiseF_M','seriesHit':'LseriesHitF_M','power':'LPowerF','lagDiff':'LlagF'}
+        trueFields = {'conRecLength':'LconRecT_M','consDet':'LconsDetT_M','hitRatio':'LHitRatioT_M','noiseRatio':'LnoiseT','seriesHit':'LseriesHitT_M','power':'LPowerT','lagDiff':'LlagT'}
+        falseFields = {'conRecLength':'LconRecF_M','consDet':'LconsDetF_M','hitRatio':'LHitRatioF_M','noiseRatio':'LnoiseF','seriesHit':'LseriesHitF_M','power':'LPowerF','lagDiff':'LlagF'}
 
 
     if assumption == True:
@@ -1062,7 +1058,7 @@ def calc_class_params_map(classify_object):
     classify_object.histDF = detHist(classify_object.histDF,classify_object.PulseRate,classify_object.det)             # calculate detection history
     classify_object.histDF = detHist(classify_object.histDF,classify_object.MortRate,classify_object.det,'M')             # calculate detection history
     classify_object.histDF['powerBin'] = (classify_object.histDF.Power//10)*10
-    #classify_object.histDF['noiseBin'] = (classify_object.histDF.noiseRatio//.1)*.1
+    classify_object.histDF['noiseBin'] = (classify_object.histDF.noiseRatio//.1)*.1
     classify_object.histDF['lagDiffBin'] = (classify_object.histDF.lagDiff//10)*.10
     
     #get training data
@@ -1078,7 +1074,7 @@ def calc_class_params_map(classify_object):
         if classify_object.reclass_iter<=2:
             trainDF = pd.read_sql("select * from tblTrain WHERE recType == '%s'"%(classify_object.recType),con=conn, coerce_float = True)#This will read in tblTrain and create a pandas dataframe
 #            classDF = pd.read_sql("select test, FreqCode,Power,lag,lagDiff,fishCount,conRecLength,consDet,detHist,hitRatio,noiseRatio,seriesHit,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from tblClassify_%s"%(site),con=conn)
-            classDF = pd.read_sql("select test, FreqCode,Power,lag,lagDiff,conRecLength_A,consDet_A,detHist_A,hitRatio_A,seriesHit_A,conRecLength_M,consDet_M,detHist_M,hitRatio_M,seriesHit_M,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from tblClassify_%s"%(site),con=conn)
+            classDF = pd.read_sql("select test, FreqCode,Power,noiseRatio, lag,lagDiff,conRecLength_A,consDet_A,detHist_A,hitRatio_A,seriesHit_A,conRecLength_M,consDet_M,detHist_M,hitRatio_M,seriesHit_M,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from tblClassify_%s"%(site),con=conn)
             classDF = classDF[classDF.postTrue_A > classDF.postTrue_M]
             classDF.drop(['conRecLength_M','consDet_M','detHist_M','hitRatio_M','seriesHit_M'], axis = 1, inplace = True)
             classDF.rename(columns = {'conRecLength_A':'conRecLength','consDet_A':'consDet','detHist_A':'detHist','hitRatio_A':'hitRatio','seriesHit_A':'seriesHit'}, inplace = True)
@@ -1086,7 +1082,7 @@ def calc_class_params_map(classify_object):
         else:
             trainDF = pd.read_sql("select * from tblTrain WHERE recType == '%s'"%(classify_object.recType),con=conn, coerce_float = True)#This will read in tblTrain and create a pandas dataframe        
 #            classDF = pd.read_sql("select test, FreqCode,Power,lag,lagDiff,fishCount,conRecLength,consDet,detHist,hitRatio,noiseRatio,seriesHit,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from tblClassify_%s_%s"%(site,classify_object.reclass_iter-1),con=conn)
-            classDF = pd.read_sql("select test, FreqCode,Power,lag,lagDiff,conRecLength_A,consDet_A,detHist_A,hitRatio_A,seriesHit_A,conRecLength_M,consDet_M,detHist_M,hitRatio_M,seriesHit_M,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from tblClassify_%s_%s"%(site,classify_object.reclass_iter-1),con=conn)
+            classDF = pd.read_sql("select test, FreqCode,Power,noiseRatio, lag,lagDiff,conRecLength_A,consDet_A,detHist_A,hitRatio_A,seriesHit_A,conRecLength_M,consDet_M,detHist_M,hitRatio_M,seriesHit_M,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from tblClassify_%s_%s"%(site,classify_object.reclass_iter-1),con=conn)
             classDF = classDF[classDF.postTrue_A > classDF.postTrue_M]
             classDF.drop(['conRecLength_M','consDet_M','detHist_M','hitRatio_M','seriesHit_M'], axis = 1, inplace = True)
             classDF.rename(columns = {'conRecLength_A':'conRecLength','consDet_A':'consDet','detHist_A':'detHist','hitRatio_A':'hitRatio','seriesHit_A':'seriesHit'}, inplace = True)
@@ -1108,11 +1104,11 @@ def calc_class_params_map(classify_object):
     trainDF['seriesHit'] = trainDF.seriesHit.astype(int)
     trainDF['consDet'] = trainDF.consDet.astype(int)
     trainDF['detHist'] = trainDF.detHist.astype(str)
-    #trainDF['noiseRatio'] = trainDF.noiseRatio.astype(float).round(4)
+    trainDF['noiseRatio'] = trainDF.noiseRatio.astype(float).round(4)
     trainDF['conRecLength'] = trainDF.conRecLength.astype(int)
     trainDF['hitRatio'] = trainDF.hitRatio.astype(float).round(4)
     trainDF['powerBin'] = (trainDF.Power//10)*10
-    #trainDF['noiseBin'] = (trainDF.noiseRatio//.1)*.1
+    trainDF['noiseBin'] = (trainDF.noiseRatio//.1)*.1
     trainDF['lagDiffBin'] = (trainDF.lagDiff//10)*.10
     
     # making sure our classify object data types match
@@ -1124,7 +1120,7 @@ def calc_class_params_map(classify_object):
     classify_object.histDF.detHist_M = classify_object.histDF.detHist_M.astype(str)
     classify_object.histDF.conRecLength_A = classify_object.histDF.conRecLength_A.astype(int)
     classify_object.histDF.conRecLength_M = classify_object.histDF.conRecLength_M.astype(int)
-    #classify_object.histDF.noiseRatio = classify_object.histDF.noiseRatio.astype(float).round(4)
+    classify_object.histDF.noiseRatio = classify_object.histDF.noiseRatio.astype(float).round(4)
     classify_object.histDF['HT'] = np.repeat(1,len(classify_object.histDF))
     classify_object.histDF['HF'] = np.repeat(0,len(classify_object.histDF))
     classify_object.histDF.hitRatio_A = classify_object.histDF.hitRatio_A.astype(float).round(4) 
@@ -1229,13 +1225,13 @@ def calc_class_params_map(classify_object):
     classify_object.histDF = pd.merge(left = classify_object.histDF, right = hitRatioCount, how = u'left', left_on = ['HF','hitRatio_M'], right_on = ['HF','hitRatio'])
     classify_object.histDF.drop(labels = ['hitRatio_x','hitRatio_y'], axis = 1, inplace = True)
      
-#    # NoiseR$atio
-#    noiseCount = trainDF.groupby(['Detection','noiseBin'])['noiseBin'].count()
-#    noiseCount = pd.Series(noiseCount, name = 'noiseCount_T')
-#    noiseCount = pd.DataFrame(noiseCount).reset_index().rename(columns = {'Detection':'HT'})
-#    classify_object.histDF = pd.merge(left = classify_object.histDF, right = noiseCount, how = u'left', left_on = ['HT','noiseBin'], right_on = ['HT','noiseBin'])
-#    noiseCount = noiseCount.rename(columns = {'HT':'HF','noiseCount_T':'noiseCount_F'})
-#    classify_object.histDF = pd.merge(left = classify_object.histDF, right = noiseCount, how = u'left', left_on = ['HF','noiseBin'], right_on = ['HF','noiseBin'])
+    # NoiseR$atio
+    noiseCount = trainDF.groupby(['Detection','noiseBin'])['noiseBin'].count()
+    noiseCount = pd.Series(noiseCount, name = 'noiseCount_T')
+    noiseCount = pd.DataFrame(noiseCount).reset_index().rename(columns = {'Detection':'HT'})
+    classify_object.histDF = pd.merge(left = classify_object.histDF, right = noiseCount, how = u'left', left_on = ['HT','noiseBin'], right_on = ['HT','noiseBin'])
+    noiseCount = noiseCount.rename(columns = {'HT':'HF','noiseCount_T':'noiseCount_F'})
+    classify_object.histDF = pd.merge(left = classify_object.histDF, right = noiseCount, how = u'left', left_on = ['HF','noiseBin'], right_on = ['HF','noiseBin'])
 
     # Lag Bin
     lagCount = trainDF.groupby(['Detection','lagDiffBin'])['lagDiffBin'].count()
@@ -1271,7 +1267,7 @@ def calc_class_params_map(classify_object):
     classify_object.histDF['LconsDetF_A'] = (classify_object.histDF['consDetACountF'] + 1)/classify_object.histDF['LDenomCount_F']    # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
     classify_object.histDF['LHitRatioF_A'] = (classify_object.histDF['hitRatioACountF'] + 1)/classify_object.histDF['LDenomCount_F']    # calculate the likelihood of this row's particular seriesHit given the detection is a false positive    
     classify_object.histDF['LPowerF'] = (classify_object.histDF['powerCount_F'] + 1)/classify_object.histDF['LDenomCount_F']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-#    classify_object.histDF['LnoiseF'] = (classify_object.histDF['noiseCount_F'] + 1)/classify_object.histDF['LDenomCount_F']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive      
+    classify_object.histDF['LnoiseF'] = (classify_object.histDF['noiseCount_F'] + 1)/classify_object.histDF['LDenomCount_F']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive      
     classify_object.histDF['LlagF'] = (classify_object.histDF['lagDiffCount_F'] + 1)/classify_object.histDF['LDenomCount_F']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive      
 
         
@@ -1282,7 +1278,7 @@ def calc_class_params_map(classify_object):
     classify_object.histDF['LconsDetT_A'] = (classify_object.histDF['consDetACountT'] + 1)/classify_object.histDF['LDenomCount_T']    # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
     classify_object.histDF['LHitRatioT_A'] = (classify_object.histDF['hitRatioACountT'] + 1)/classify_object.histDF['LDenomCount_T']    # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
     classify_object.histDF['LPowerT'] = (classify_object.histDF['powerCount_T'] + 1)/classify_object.histDF['LDenomCount_T']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-#    classify_object.histDF['LnoiseT'] = (classify_object.histDF['noiseCount_T'] + 1)/classify_object.histDF['LDenomCount_T']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive        
+    classify_object.histDF['LnoiseT'] = (classify_object.histDF['noiseCount_T'] + 1)/classify_object.histDF['LDenomCount_T']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive        
     classify_object.histDF['LlagT'] = (classify_object.histDF['lagDiffCount_T'] + 1)/classify_object.histDF['LDenomCount_T']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive      
 
     # calculation of the probability of a false positive given the data
@@ -1292,7 +1288,7 @@ def calc_class_params_map(classify_object):
     classify_object.histDF['LconsDetF_M'] = (classify_object.histDF['consDetMCountF'] + 1)/classify_object.histDF['LDenomCount_F']    # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
     classify_object.histDF['LHitRatioF_M'] = (classify_object.histDF['hitRatioMCountF'] + 1)/classify_object.histDF['LDenomCount_F']    # calculate the likelihood of this row's particular seriesHit given the detection is a false positive    
     classify_object.histDF['LPowerF'] = (classify_object.histDF['powerCount_F'] + 1)/classify_object.histDF['LDenomCount_F']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-#    classify_object.histDF['LnoiseF'] = (classify_object.histDF['noiseCount_F'] + 1)/classify_object.histDF['LDenomCount_F']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive      
+    classify_object.histDF['LnoiseF'] = (classify_object.histDF['noiseCount_F'] + 1)/classify_object.histDF['LDenomCount_F']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive      
     classify_object.histDF['LlagF'] = (classify_object.histDF['lagDiffCount_F'] + 1)/classify_object.histDF['LDenomCount_F']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive      
 
         
@@ -1303,7 +1299,7 @@ def calc_class_params_map(classify_object):
     classify_object.histDF['LconsDetT_M'] = (classify_object.histDF['consDetMCountT'] + 1)/classify_object.histDF['LDenomCount_T']    # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
     classify_object.histDF['LHitRatioT_M'] = (classify_object.histDF['hitRatioMCountT'] + 1)/classify_object.histDF['LDenomCount_T']    # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
     classify_object.histDF['LPowerT'] = (classify_object.histDF['powerCount_T'] + 1)/classify_object.histDF['LDenomCount_T']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-#    classify_object.histDF['LnoiseT'] = (classify_object.histDF['noiseCount_T'] + 1)/classify_object.histDF['LDenomCount_T']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive        
+    classify_object.histDF['LnoiseT'] = (classify_object.histDF['noiseCount_T'] + 1)/classify_object.histDF['LDenomCount_T']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive        
     classify_object.histDF['LlagT'] = (classify_object.histDF['lagDiffCount_T'] + 1)/classify_object.histDF['LDenomCount_T']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive      
 
 
@@ -1355,19 +1351,19 @@ def classDatAppend(site,inputWS,projectDB,reclass_iter = None):
         dat = pd.read_csv(os.path.join(inputWS,f),dtype = {"detHist_A":str,"detHist_M":str})
         #dat.drop(['recID1'],axis = 1,inplace = True)
         dtype = {'FreqCode':'TEXT', 'Epoch': 'INTEGER', 'recID':'TEXT','timeStamp':'TIMESTAMP', 'Power':'REAL', 'ScanTime':'REAL',
-                 'Channels':'REAL', 'RecType':'TEXT', 'recID1':'TEXT', 'RowSeconds':'REAL', 'lag':'REAL', 'lagDiff':'REAL',
+                 'Channels':'REAL', 'RecType':'TEXT', 'recID1':'TEXT', 'RowSeconds':'REAL', 'lag':'REAL', 'lagDiff':'REAL','noiseRatio':'REAL',
                  'seriesHit_A':'INTEGER', 'seriesHit_M':'INTEGER', 'consDet_A':'INTEGER', 'hitRatio_A':'REAL', 'detHist_A':'TEXT',
                  'conRecLength_A':'INTEGER', 'consDet_M':'INTEGER', 'hitRatio_M':'REAL', 'detHist_M':'TEXT','conRecLength_M':'INTEGER',
                  'powerBin':'REAL', 'lagDiffBin':'REAL', 'HT':'INTEGER', 'HF':'INTEGER', 'seriesHitACountT':'INTEGER', 
                  'seriesHitACountF':'INTEGER', 'consDetACountT':'INTEGER','consDetACountF':'INTEGER', 'detHistACountT':'INTEGER',
                  'detHistACountF':'INTEGER','conRecLengthACountT':'INTEGER', 'conRecLengthACountF':'INTEGER', 'hitRatioACountT':'INTEGER',
-                 'hitRatioACountF':'INTEGER', 'powerCount_T':'INTEGER','powerCount_F':'INTEGER', 'seriesHitMCountT':'INTEGER',
+                 'hitRatioACountF':'INTEGER', 'powerCount_T':'INTEGER','powerCount_F':'INTEGER','noiseCount_T':'INTEGER','noiseCount_F':'INTEGER','seriesHitMCountT':'INTEGER',
                  'seriesHitMCountF':'INTEGER', 'consDetMCountT':'INTEGER', 'consDetMCountF':'INTEGER', 'detHistMCountT':'INTEGER', 
                  'detHistMCountF':'INTEGER', 'conRecLengthMCountT':'INTEGER', 'conRecLengthMCountF':'INTEGER', 'hitRatioMCountT':'INTEGER',
                  'hitRatioMCountF':'INTEGER', 'lagDiffCount_T':'INTEGER', 'lagDiffCount_F':'INTEGER', 'priorCount_T':'INTEGER', 
                  'priorCount_F':'INTEGER', 'LDenomCount_T':'INTEGER', 'LDenomCount_F':'INTEGER', 'priorF':'REAL', 'LconRecF_A':'REAL',
-                 'LseriesHitF_A':'REAL', 'LconsDetF_A':'REAL', 'LHitRatioF_A':'REAL', 'LPowerF':'REAL', 'LlagF':'REAL','priorT':'REAL',
-                 'LconRecT_A':'REAL', 'LseriesHitT_A':'REAL', 'LconsDetT_A':'REAL', 'LHitRatioT_A':'REAL','LPowerT':'REAL', 'LlagT':'REAL',
+                 'LseriesHitF_A':'REAL', 'LconsDetF_A':'REAL', 'LHitRatioF_A':'REAL', 'LPowerF':'REAL','LnoiseF':'REAL', 'LlagF':'REAL','priorT':'REAL',
+                 'LconRecT_A':'REAL', 'LseriesHitT_A':'REAL', 'LconsDetT_A':'REAL', 'LHitRatioT_A':'REAL','LPowerT':'REAL','LnoiseT':'REAL','LlagT':'REAL',
                  'LconRecF_M':'REAL', 'LseriesHitF_M':'REAL', 'LconsDetF_M':'REAL','LHitRatioF_M':'REAL', 'LconRecT_M':'REAL', 
                  'LseriesHitT_M':'REAL', 'LconsDetT_M':'REAL','LHitRatioT_M':'REAL', 'LikelihoodTrue_A':'REAL', 'LikelihoodFalse_A':'REAL',
                  'LikelihoodTrue_M':'REAL', 'LikelihoodFalse_M':'REAL', 'logLikelihoodRatio_A':'REAL','logLikelihoodRatio_M':'REAL', 
@@ -1530,8 +1526,11 @@ class cross_validated():
         testDat['LikelihoodFalse'] = testDat['LPowerF'] * testDat['LHitRatioF'] * testDat['LconRecF'] * testDat['LseriesHitF'] * testDat['LconsDetF']
         
         # Calculate the posterior probability of each Hypothesis occuring
-        testDat['postTrue'] = testDat['priorT'] * testDat['LikelihoodTrue']
-        testDat['postFalse'] = testDat['priorF'] * testDat['LikelihoodFalse']
+#        testDat['postTrue'] = testDat['priorT'] * testDat['LikelihoodTrue']
+#        testDat['postFalse'] = testDat['priorF'] * testDat['LikelihoodFalse']
+        testDat['postTrue'] = testDat['LikelihoodTrue']
+        testDat['postFalse'] = testDat['LikelihoodFalse']
+
         testDat['T2F_ratio'] = testDat['postTrue'] / testDat['postFalse']
         # classify detection as true or false based on MAP hypothesis
    
@@ -1738,24 +1737,24 @@ class classification_results():
             plt.savefig(os.path.join(self.figureWS,"%s_conRecLength_class.png"%(self.recType)),bbox_inches = 'tight')
         print ("Consecutive Hit Length figure created, check your output Workspace")
 
-#        # Noise Ratio
-#        noiseBins =np.arange(0,1.1,0.1)
-#
-#        plt.figure(figsize = (6,3)) 
-#        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-#        axs[0].hist(trues.noiseRatio.values, noiseBins)
-#        axs[1].hist(falses.noiseRatio.values, noiseBins)
-#        axs[0].set_xlabel('Noise Ratio')  
-#        axs[0].set_title('True')
-#        axs[1].set_xlabel('Noise Ratio')
-#        axs[1].set_title('False Positive')
-#        axs[0].set_ylabel('Probability Density')
-#        if self.site != None:
-#           plt.savefig(os.path.join(self.figureWS,"%s_%s_noiseRatio_class.png"%(self.recType,self.site)),bbox_inches = 'tight')
-#        else:
-#           plt.savefig(os.path.join(self.figureWS,"%s_noiseRatio_class.png"%(self.recType)),bbox_inches = 'tight')
+        # Noise Ratio
+        noiseBins =np.arange(0,1.1,0.1)
 
-#        print ("Noise Ratio figure created, check your output Workspace" )
+        plt.figure(figsize = (6,3)) 
+        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
+        axs[0].hist(trues.noiseRatio.values, noiseBins)
+        axs[1].hist(falses.noiseRatio.values, noiseBins)
+        axs[0].set_xlabel('Noise Ratio')  
+        axs[0].set_title('True')
+        axs[1].set_xlabel('Noise Ratio')
+        axs[1].set_title('False Positive')
+        axs[0].set_ylabel('Probability Density')
+        if self.site != None:
+           plt.savefig(os.path.join(self.figureWS,"%s_%s_noiseRatio_class.png"%(self.recType,self.site)),bbox_inches = 'tight')
+        else:
+           plt.savefig(os.path.join(self.figureWS,"%s_noiseRatio_class.png"%(self.recType)),bbox_inches = 'tight')
+
+        print ("Noise Ratio figure created, check your output Workspace" )
 
 #        # plot fish present
 #        minCount = self.class_stats_data.fishCount.min()//10 * 10
@@ -1861,7 +1860,7 @@ class training_results():
         self.train_stats_data['lagDiff'] = self.train_stats_data.lagDiff.astype(float)
         self.train_stats_data['conRecLength'] = self.train_stats_data.conRecLength.astype(float)
         self.train_stats_data['noiseRatio'] = self.train_stats_data.noiseRatio.astype(float)
-        self.train_stats_data['FishCount'] = self.train_stats_data.FishCount.astype(float)
+        #self.train_stats_data['FishCount'] = self.train_stats_data.FishCount.astype(float)
 
         trues = self.train_stats_data[self.train_stats_data.Detection == '1'] 
         falses = self.train_stats_data[self.train_stats_data.Detection == '0'] 
@@ -1944,24 +1943,24 @@ class training_results():
 
         print ("Consecutive Hit Length figure created, check your output Workspace")
 
-#        # Noise Ratio
-#        noiseBins =np.arange(0,1.1,0.1)
-#
-#        plt.figure() 
-#        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True,figsize = figSize)
-#        axs[0].hist(trues.noiseRatio.values, noiseBins, density = True)
-#        axs[1].hist(falses.noiseRatio.values, noiseBins, density = True)
-#        axs[0].set_xlabel('Noise Ratio')  
-#        axs[0].set_title('True')
-#        axs[1].set_xlabel('Noise Ratio')
-#        axs[1].set_title('False Positive')
-#        axs[0].set_ylabel('Probability Density')
-#        if self.site != None:
-#           plt.savefig(os.path.join(self.figureWS,"%s_%s_noiseRatio_train.png"%(self.recType,self.site)),bbox_inches = 'tight')
-#        else:
-#           plt.savefig(os.path.join(self.figureWS,"%s_noiseRatio_train.png"%(self.recType)),bbox_inches = 'tight')
+        # Noise Ratio
+        noiseBins =np.arange(0,1.1,0.1)
 
-#        print ("Noise Ratio figure created, check your output Workspace")
+        plt.figure() 
+        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True,figsize = figSize)
+        axs[0].hist(trues.noiseRatio.values, noiseBins, density = True)
+        axs[1].hist(falses.noiseRatio.values, noiseBins, density = True)
+        axs[0].set_xlabel('Noise Ratio')  
+        axs[0].set_title('True')
+        axs[1].set_xlabel('Noise Ratio')
+        axs[1].set_title('False Positive')
+        axs[0].set_ylabel('Probability Density')
+        if self.site != None:
+           plt.savefig(os.path.join(self.figureWS,"%s_%s_noiseRatio_train.png"%(self.recType,self.site)),bbox_inches = 'tight')
+        else:
+           plt.savefig(os.path.join(self.figureWS,"%s_noiseRatio_train.png"%(self.recType)),bbox_inches = 'tight')
+
+        print ("Noise Ratio figure created, check your output Workspace")
 #
 #        # plot fish present
 #        minCount = self.train_stats_data.FishCount.min()//10 * 10
@@ -2818,6 +2817,8 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
         dat['overlapping'].fillna(0,inplace = True)
         dat = dat[dat.overlapping == 0]
         dat = dat[dat.test == 1]
+        dat['RelDate'] = pd.to_datetime(dat.RelDate)
+        dat['timeStamp'] = pd.to_datetime(dat.timeStamp)
         if hitRatio_Filter == True:
             dat = dat[(dat.hitRatio_A > 0.10)]# | (dat.hitRatio_M > 0.10)]
         if pre_release_Filter == True:
