@@ -1697,7 +1697,7 @@ class classification_results():
         axs[0].set_title('True')
         axs[1].set_xlabel('%s Signal Power'%(self.recType))
         axs[1].set_title('False Positive')
-        axs[0].set_ylabel('Probability Density')
+        axs[0].set_ylabel('Frequency')
         if self.site != None:
             plt.savefig(os.path.join(self.figureWS,"%s_%s_powerCompare_class.png"%(self.recType,self.site)),bbox_inches = 'tight')
         else:
@@ -1715,7 +1715,7 @@ class classification_results():
         axs[0].set_title('True')
         axs[1].set_xlabel('Lag Differences')
         axs[1].set_title('False Positive')
-        axs[0].set_ylabel('Probability Density')
+        axs[0].set_ylabel('Frequency')
         if self.site != None:
             plt.savefig(os.path.join(self.figureWS,"%s_%s_lagDifferences_class.png"%(self.recType,self.site)),bbox_inches = 'tight')
         else:
@@ -1733,7 +1733,7 @@ class classification_results():
         axs[0].set_title('True')
         axs[1].set_xlabel('Consecutive Hit Length')
         axs[1].set_title('False Positive')
-        axs[0].set_ylabel('Probability Density')
+        axs[0].set_ylabel('Frequency')
         if self.site != None:
             plt.savefig(os.path.join(self.figureWS,"%s_%s_conRecLength_class.png"%(self.recType,self.site)),bbox_inches = 'tight')
         else:
@@ -1751,7 +1751,7 @@ class classification_results():
         axs[0].set_title('True')
         axs[1].set_xlabel('Noise Ratio')
         axs[1].set_title('False Positive')
-        axs[0].set_ylabel('Probability Density')
+        axs[0].set_ylabel('Frequency')
         if self.site != None:
            plt.savefig(os.path.join(self.figureWS,"%s_%s_noiseRatio_class.png"%(self.recType,self.site)),bbox_inches = 'tight')
         else:
@@ -1793,7 +1793,7 @@ class classification_results():
         axs[0].set_title('True')
         axs[1].set_xlabel('Log Likelihood Ratio')
         axs[1].set_title('False Positive')
-        axs[0].set_ylabel('Probability Density')
+        axs[0].set_ylabel('Frequency')
         if self.site != None:
            plt.savefig(os.path.join(self.figureWS,"%s_%s_logLikeRatio_class.png"%(self.recType,self.site)),bbox_inches = 'tight')
         else:
@@ -1802,19 +1802,22 @@ class classification_results():
         print ("Log Likelihood Figure Created, check output workspace")
         
         # plot the log of the posterior ratio 
-        minPostRatio = self.class_stats_data.logPostRatio_A.min()//1 * 1
-        maxPostRatio = self.class_stats_data.logPostRatio_A.max()//1 * 1
-        ratioBins =np.arange(minPostRatio,maxPostRatio+1,2)
+        minPostRatio = self.class_stats_data.logPostRatio_A.min()
+        maxPostRatio = self.class_stats_data.logPostRatio_A.max()
+        postRatioBins = np.linspace(minPostRatio,maxPostRatio,10)
+        print(minPostRatio)
+        print(maxPostRatio)
+        print(postRatioBins)
         
         plt.figure(figsize = (6,3)) 
         fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-        axs[0].hist(trues.logPostRatio_A.values, ratioBins)
-        axs[1].hist(falses.logPostRatio_A.values, ratioBins)
-        axs[0].set_xlabel('Log Likelihood Ratio')  
+        axs[0].hist(trues.logPostRatio_A.values, postRatioBins)
+        axs[1].hist(falses.logPostRatio_A.values, postRatioBins)
+        axs[0].set_xlabel('Log Posterior Ratio')  
         axs[0].set_title('True')
-        axs[1].set_xlabel('Log Likelihood Ratio')
+        axs[1].set_xlabel('Log Posterior Ratio')
         axs[1].set_title('False Positive')
-        axs[0].set_ylabel('Probability Density')
+        axs[0].set_ylabel('Frequency')
         if self.site != None:
            plt.savefig(os.path.join(self.figureWS,"%s_%s_logPostRatio_class.png"%(self.recType,self.site)),bbox_inches = 'tight')
         else:
@@ -2477,69 +2480,7 @@ class fish_history():
             y = row[1][1]
             ax.text(x,y,0,label,fontsize = 8)
         plt.show()
-
-def mortality_class(row):
-    '''A function, similar to series hit, that classifies rows as mortality. 
-    
-    To be run on a mortality dataframe object.
-        '''   
-    # extract what we need from the row 
-    lagB = abs(row['lagB'])
-    lagF = abs(row['lagF'])
-    mortRate = row['MortRate']
-    '''if the lag B is less than or equal to 5 minutes, get the factors of 
-    the log, MortRate should be in there somewhere.  Why only 5 minutes? 
-    the fish is dead and not moving and this is an iterative search within 
-    an iterative search operating over millions of rows of data.  I get bored.'''
-    if lagB <= 300:
-        factB = factors(lagB)
-    else:
-        factB = ['0']
-    if lagB <= 300:
-        factF = factors(lagF)
-    else:
-        factF = ['0']
-    backMort = 0
-    for i in factB:
-        if mortRate - 1 <= i <= mortRate + 1:
-            backMort = 1
-    forwardMort = 0
-    for j in factF:
-        if mortRate - 1 <= j <= mortRate + 1:
-            forwardMort = 1
-    if backMort == 1 and forwardMort == 1:
-        return 1
-    else:
-        return 0
-
-class mortality():
-    ''' A class object to first extract data by site,and fish to see if records
-    mimic a dead pulse.  If the lag forward and backward is equal to +/- 1 from the 
-    mort rate (or mort rate is factor), then the fish is dead.  
-    
-    We need both lags to trigger a death time'''
-    
-    def __init__ (self, site, dBase):
-        print ("Starting to extract data for site %s"%(site))
-        conn = sqlite3.connect(dBase)
-        sql = "SELECT tblMasterTag.FreqCode, Epoch, recID, lagB, lagF, MortRate, test FROM tblClassify_%s LEFT JOIN tblMasterTag ON tblClassify_%s.FreqCode = tblMasterTag.FreqCode"%(site,site) 
-        self.mort_df = pd.read_sql(sql, con = conn, coerce_float = True)  
-        print ("Import Completed, start Mortality Calculations")      
-        self.mort_df['mortality'] = self.mort_df.apply(mortality_class, axis = 1)             # determine whether or not a row record is in series 
-        self.site = site
-        self.dBase = dBase
-        
-    def summary(self):
-        ''' Run some summary statistics, get time of death for each animal that died'''
-        dead = self.mort_df[self.mort_df.mortality == 1]
-        deadFish = dead.groupby(['FreqCode'])['Epoch'].min().to_frame().rename(columns = {'Epoch':'time_of_death'})
-        deadFish['time_of_death'] = pd.to_datetime(deadFish['time_of_death'], unit ='s')
-        deadFish['Site'] = np.repeat(self.site,len(deadFish))
-        print ("Time of death for those fish that died at site %s"%(self.site))
-        print (deadFish)
-        conn = sqlite3.connect(self.dBase)
-        deadFish.to_sql('tblMortality',con = conn,index = False, if_exists = 'append', chunksize = 1000) 
-            
+           
 class bout():
     '''Python class object to delineate when bouts occur at receiver.'''
     def __init__ (self,node,dBase,lag_window, time_limit):
@@ -2720,7 +2661,7 @@ class overlap_reduction():
         
         Nodes must be a list of nodes and edges must be a list of tuples.
         Edge example: [(1,2),(2,3)], 
-        Edges always in format of [(from,to)] or [(outer,inner) or [(child,parent)]]'''
+        Edges always in format of [(from,to)] or [(outer,inner)] or [(child,parent)]'''
         
         # Step 1, create a directed graph from list of edges
         self.G = nx.DiGraph()
