@@ -1661,6 +1661,8 @@ class classification_results():
 
         trues = self.class_stats_data[self.class_stats_data.test == 1] 
         falses = self.class_stats_data[self.class_stats_data.test == 0] 
+        self.trues = trues
+        self.falses = falses
         
         # plot hit ratio histograms by detection class
         hitRatioBins =np.linspace(0,1.0,11)
@@ -1777,10 +1779,10 @@ class classification_results():
 
 #        print ("Fish Present Figure Created, check output workspace")
 
-        # plot the log of the posterior ratio 
-        minPostRatio = self.class_stats_data.logLikelihoodRatio_A.min()//1 * 1
-        maxPostRatio = self.class_stats_data.logLikelihoodRatio_A.max()//1 * 1
-        ratioBins =np.arange(minPostRatio,maxPostRatio+1,2)
+        # plot the log likelihood ratio 
+        minLogRatio = self.class_stats_data.logLikelihoodRatio_A.min()//1 * 1
+        maxLogRatio = self.class_stats_data.logLikelihoodRatio_A.max()//1 * 1
+        ratioBins =np.arange(minLogRatio,maxLogRatio+1,2)
         
         plt.figure(figsize = (6,3)) 
         fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
@@ -1796,7 +1798,28 @@ class classification_results():
         else:
            plt.savefig(os.path.join(self.figureWS,"%s_logLikeRatio_class.png"%(self.recType)),bbox_inches = 'tight')
 
-        print ("Fish Present Figure Created, check output workspace")
+        print ("Log Likelihood Figure Created, check output workspace")
+        
+        # plot the log of the posterior ratio 
+        minPostRatio = self.class_stats_data.logPostRatio_A.min()//1 * 1
+        maxPostRatio = self.class_stats_data.logPostRatio_A.max()//1 * 1
+        ratioBins =np.arange(minPostRatio,maxPostRatio+1,2)
+        
+        plt.figure(figsize = (6,3)) 
+        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
+        axs[0].hist(trues.logPostRatio_A.values, ratioBins)
+        axs[1].hist(falses.logPostRatio_A.values, ratioBins)
+        axs[0].set_xlabel('Log Likelihood Ratio')  
+        axs[0].set_title('True')
+        axs[1].set_xlabel('Log Likelihood Ratio')
+        axs[1].set_title('False Positive')
+        axs[0].set_ylabel('Probability Density')
+        if self.site != None:
+           plt.savefig(os.path.join(self.figureWS,"%s_%s_logPostRatio_class.png"%(self.recType,self.site)),bbox_inches = 'tight')
+        else:
+           plt.savefig(os.path.join(self.figureWS,"%s_logPostRatio_class.png"%(self.recType)),bbox_inches = 'tight')
+
+        print ("Log Posterior Ratio Figure Created, check output workspace")
 
 
 class training_results():
