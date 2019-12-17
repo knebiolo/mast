@@ -2233,7 +2233,6 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
                         stateTable = stateTable.append(row)                    # add the row to the state table data frame  
                         time0 = j[1]['Epoch']
                 print ("State Table Completed for Fish %s"%(i))
-                stateTable['fuck'] = stateTable.t1 - stateTable.t0
 
                 stateTable['t0'] = pd.to_datetime(stateTable.t0.values, unit = 's') # get timestamp values
                 stateTable['t1'] = pd.to_datetime(stateTable.t1.values, unit = 's') # get timestamp values
@@ -2809,7 +2808,7 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
     
     for i in receivers:                                                            # for every receiver 
         print ("Start selecting and merging data for receiver %s"%(i))
-        sql = '''SELECT tblClassify_%s.FreqCode, tblClassify_%s.Epoch, tblClassify_%s.recID, timeStamp,presence_number, overlapping, hitRatio_A, hitRatio_M, test, RelDate 
+        sql = '''SELECT tblClassify_%s.FreqCode, tblClassify_%s.Epoch, tblClassify_%s.recID, timeStamp,presence_number, overlapping, hitRatio_A, hitRatio_M, detHist_A, detHist_M, lag, lagDiff, test, RelDate 
         FROM tblClassify_%s 
         LEFT JOIN tblMasterTag ON tblClassify_%s.FreqCode = tblMasterTag.FreqCode 
         LEFT JOIN tblOverlap ON tblClassify_%s.FreqCode = tblOverlap.FreqCode AND tblClassify_%s.Epoch = tblOverlap.Epoch AND tblClassify_%s.recID = tblOverlap.recID 
@@ -2825,6 +2824,7 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
         recapdata = recapdata.append(dat)
         del dat
     c = conn.cursor()
+    recapdata.drop_duplicates(keep = 'first', inplace = True)
     recapdata.to_sql('tblRecaptures',con = conn,index = False)
     c.close()
 
