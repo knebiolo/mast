@@ -1346,7 +1346,7 @@ def classDatAppend(site,inputWS,projectDB,reclass_iter = None):
     c = conn.cursor()
     for f in files:
         if reclass_iter == None:
-            out_name = 'tblClassify_%s'%(site)
+            out_name = 'tblClassify_%s_1'%(site)
         else:
             out_name = 'tblClassify_%s_%s'%(site,reclass_iter)
         dat = pd.read_csv(os.path.join(inputWS,f),dtype = {"detHist_A":str,"detHist_M":str})
@@ -1594,7 +1594,7 @@ class classification_results():
         conn = sqlite3.connect(self.projectDB)                                              # connect to the database
         #self.class_stats_data = pd.DataFrame(columns = ['FreqCode','Epoch','recID','Power','hitRatio','postTrue','postFalse','test','lagDiff','conRecLength','noiseRatio','fishCount', 'logLikelihoodRatio'])                # set up an empty data frame
         self.class_stats_data = pd.DataFrame(columns = ['FreqCode','Epoch','recID','Power','hitRatio_A','hitRatio_M','postTrue_A','postTrue_M','postFalse_A','postFalse_M','test','lagDiff','conRecLength_A', 'conRecLength_M','logLikelihoodRatio'])                # set up an empty data frame
-
+        self.reclass_iter = reclass_iter
         self.site = site
         if site == None:
             recSQL = "SELECT * FROM tblMasterReceiver WHERE RecType = '%s'"%(self.recType) # SQL code to import data from this node
@@ -1678,7 +1678,11 @@ class classification_results():
         axs[1].set_title('False Positive')
         axs[0].set_ylabel('Probability Density')
         if self.site != None:
-            plt.savefig(os.path.join(self.figureWS,"%s_%s_hitRatioCompare_class.png"%(self.recType,self.site)),bbox_inches = 'tight')
+            if self.reclass_iter == None:
+                plt.savefig(os.path.join(self.figureWS,"%s_%s_1_hitRatioCompare_class.png"%(self.recType,self.site)),bbox_inches = 'tight')
+            else:
+                plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_hitRatioCompare_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
+            
         else:
             plt.savefig(os.path.join(self.figureWS,"%s_hitRatioCompare_class.png"%(self.recType)),bbox_inches = 'tight')
 
@@ -1699,7 +1703,10 @@ class classification_results():
         axs[1].set_title('False Positive')
         axs[0].set_ylabel('Frequency')
         if self.site != None:
-            plt.savefig(os.path.join(self.figureWS,"%s_%s_powerCompare_class.png"%(self.recType,self.site)),bbox_inches = 'tight')
+            if self.reclass_iter == None:
+                plt.savefig(os.path.join(self.figureWS,"%s_%s_1_powerCompare_class.png"%(self.recType,self.site)),bbox_inches = 'tight')
+            else:
+                plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_powerCompare_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
         else:
             plt.savefig(os.path.join(self.figureWS,"%s_powerCompare_class.png"%(self.recType)),bbox_inches = 'tight')
         print ("Signal Power figure created, check your output Workspace")
@@ -1717,7 +1724,10 @@ class classification_results():
         axs[1].set_title('False Positive')
         axs[0].set_ylabel('Frequency')
         if self.site != None:
-            plt.savefig(os.path.join(self.figureWS,"%s_%s_lagDifferences_class.png"%(self.recType,self.site)),bbox_inches = 'tight')
+            if self.reclass_iter == None:
+                plt.savefig(os.path.join(self.figureWS,"%s_%s_1_lagDifferences_class.png"%(self.recType,self.site)),bbox_inches = 'tight')
+            else:
+                plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_lagDifferences_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')                
         else:
             plt.savefig(os.path.join(self.figureWS,"%s_lagDifferences_class.png"%(self.recType)),bbox_inches = 'tight')
         print ("Lag differences figure created, check your output Workspace")
@@ -1735,7 +1745,10 @@ class classification_results():
         axs[1].set_title('False Positive')
         axs[0].set_ylabel('Frequency')
         if self.site != None:
-            plt.savefig(os.path.join(self.figureWS,"%s_%s_conRecLength_class.png"%(self.recType,self.site)),bbox_inches = 'tight')
+            if self.reclass_iter == None:
+                plt.savefig(os.path.join(self.figureWS,"%s_%s_1_conRecLength_class.png"%(self.recType,self.site)),bbox_inches = 'tight')
+            else:
+                plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_conRecLength_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')                
         else:
             plt.savefig(os.path.join(self.figureWS,"%s_conRecLength_class.png"%(self.recType)),bbox_inches = 'tight')
         print ("Consecutive Hit Length figure created, check your output Workspace")
@@ -1753,7 +1766,11 @@ class classification_results():
         axs[1].set_title('False Positive')
         axs[0].set_ylabel('Frequency')
         if self.site != None:
-           plt.savefig(os.path.join(self.figureWS,"%s_%s_noiseRatio_class.png"%(self.recType,self.site)),bbox_inches = 'tight')
+            if self.reclass_iter == None:
+                plt.savefig(os.path.join(self.figureWS,"%s_%s_1_noiseRatio_class.png"%(self.recType,self.site)),bbox_inches = 'tight')
+            else:
+                plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_noiseRatio_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
+              
         else:
            plt.savefig(os.path.join(self.figureWS,"%s_noiseRatio_class.png"%(self.recType)),bbox_inches = 'tight')
 
@@ -1795,9 +1812,13 @@ class classification_results():
         axs[1].set_title('False Positive')
         axs[0].set_ylabel('Frequency')
         if self.site != None:
-           plt.savefig(os.path.join(self.figureWS,"%s_%s_logLikeRatio_class.png"%(self.recType,self.site)),bbox_inches = 'tight')
+            if self.reclass_iter == None:
+                plt.savefig(os.path.join(self.figureWS,"%s_%s_1_logLikeRatio_class.png"%(self.recType,self.site)),bbox_inches = 'tight')
+            else:
+                plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_logLikeRatio_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
+
         else:
-           plt.savefig(os.path.join(self.figureWS,"%s_logLikeRatio_class.png"%(self.recType)),bbox_inches = 'tight')
+            plt.savefig(os.path.join(self.figureWS,"%s_logLikeRatio_class.png"%(self.recType)),bbox_inches = 'tight')
 
         print ("Log Likelihood Figure Created, check output workspace")
         
@@ -1805,9 +1826,7 @@ class classification_results():
         minPostRatio = self.class_stats_data.logPostRatio_A.min()
         maxPostRatio = self.class_stats_data.logPostRatio_A.max()
         postRatioBins = np.linspace(minPostRatio,maxPostRatio,10)
-        print(minPostRatio)
-        print(maxPostRatio)
-        print(postRatioBins)
+
         
         plt.figure(figsize = (6,3)) 
         fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
@@ -1819,9 +1838,13 @@ class classification_results():
         axs[1].set_title('False Positive')
         axs[0].set_ylabel('Frequency')
         if self.site != None:
-           plt.savefig(os.path.join(self.figureWS,"%s_%s_logPostRatio_class.png"%(self.recType,self.site)),bbox_inches = 'tight')
+            if self.reclass_iter == None:
+                plt.savefig(os.path.join(self.figureWS,"%s_%s_1_logPostRatio_class.png"%(self.recType,self.site)),bbox_inches = 'tight')
+            else:
+                plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_logPostRatio_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
+                
         else:
-           plt.savefig(os.path.join(self.figureWS,"%s_logPostRatio_class.png"%(self.recType)),bbox_inches = 'tight')
+            plt.savefig(os.path.join(self.figureWS,"%s_logPostRatio_class.png"%(self.recType)),bbox_inches = 'tight')
 
         print ("Log Posterior Ratio Figure Created, check output workspace")
 
