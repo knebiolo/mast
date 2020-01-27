@@ -1339,16 +1339,13 @@ def calc_class_params_map(classify_object):
     classify_object.histDF.to_csv(os.path.join(classify_object.scratchWS,"%s.csv"%(classify_object.i)))
     del trainDF
 
-def classDatAppend(site,inputWS,projectDB,reclass_iter = None):
+def classDatAppend(site,inputWS,projectDB,reclass_iter = 1):
     # As soon as I figure out how to do this function is moot.
     files = os.listdir(inputWS)
     conn = sqlite3.connect(projectDB)
     c = conn.cursor()
     for f in files:
-        if reclass_iter == None:
-            out_name = 'tblClassify_%s_1'%(site)
-        else:
-            out_name = 'tblClassify_%s_%s'%(site,reclass_iter)
+        out_name = 'tblClassify_%s_%s'%(site,reclass_iter)
         dat = pd.read_csv(os.path.join(inputWS,f),dtype = {"detHist_A":str,"detHist_M":str})
         #dat.drop(['recID1'],axis = 1,inplace = True)
         dtype = {'FreqCode':'TEXT', 'Epoch': 'INTEGER', 'recID':'TEXT','timeStamp':'TIMESTAMP', 'Power':'REAL', 'ScanTime':'REAL',
@@ -1585,7 +1582,7 @@ class cross_validated():
 
 class classification_results():
     '''Python class object to hold the results of false positive classification'''
-    def __init__(self,recType,projectDB,figureWS,site = None, reclass_iter = None):
+    def __init__(self,recType,projectDB,figureWS,site = None, reclass_iter = 1):
         self.recType = recType
         self.projectDB = projectDB
         self.figureWS = figureWS
@@ -1603,16 +1600,14 @@ class classification_results():
             for i in receivers:                                                # for every receiver 
                 print ("Start selecting and merging data for receiver %s"%(i))
                 #sql = "SELECT FreqCode, Epoch, recID, Power, hitRatio, postTrue, postFalse, test, lagDiff, conRecLength, noiseRatio, fishCount, logLikelihoodRatio FROM tblClassify_%s "%(i)
-                sql = "SELECT * FROM tblClassify_%s "%(i)
+                sql = "SELECT * FROM tblClassify_%s_%s "%(i, reclass_iter)
                 dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
                 self.class_stats_data = self.class_stats_data.append(dat)
                 del dat 
         else:
             print ("Start selecting and merging data for receiver %s"%(site))
-            if reclass_iter == None:
-                sql = "SELECT * FROM tblClassify_%s"%(site)
-            else:
-                sql = "SELECT * FROM tblClassify_%s_%s"%(site,reclass_iter)
+
+            sql = "SELECT * FROM tblClassify_%s_%s"%(site, reclass_iter)
             dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
             self.class_stats_data = self.class_stats_data.append(dat)
             del dat 
