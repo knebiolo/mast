@@ -704,7 +704,11 @@ def lotek_import(fileName,dbName,recName):
         
         # with our data row, extract information using pandas fwf import procedure
         if lotek400 == False:
+            print (dataRow)
+            
             telemDat = pd.read_fwf(os.path.join(fileName),colspecs = [(0,5),(5,14),(14,20),(20,26),(26,30),(30,36)],names = ['DayNumber','Time','ChannelID','Power','Antenna','TagID'],skiprows = dataRow)
+            print (telemDat.head())
+            fuck
             telemDat = telemDat.iloc[:-2]                                                   # remove last two rows, Lotek adds garbage at the end
             telemDat.dropna(inplace = True)
             if len(telemDat) > 0:
@@ -2553,31 +2557,36 @@ class bout():
                     knot_ssr[(k1,k2)] = ssr_sum                                     # add that sum to the dictionary
             knotDF = pd.DataFrame.from_dict(knot_ssr, orient = 'index').reset_index()
             knotDF.rename(columns = {'index':'knots',0:'SSR'}, inplace = True)
-            min_knot_idx = knotDF['SSR'].idxmin()
-            minKnot = knotDF.iloc[min_knot_idx,0]
-            # You Can Plot If You Want To
-            if plotOutputWS != None:
-                k1 = minKnot[0]
-                k2 = minKnot[1]
-                dat1 = det_lag_DF.iloc[0:k1]
-                dat2 = det_lag_DF.iloc[k1:k2]
-                dat3 = det_lag_DF.iloc[k2:]
-                mod1 = smf.ols('log_lag_freq~det_lag', data = dat1).fit()     # fit models to the data
-                mod2 = smf.ols('log_lag_freq~det_lag', data = dat2).fit()
-                mod3 = smf.ols('log_lag_freq~det_lag', data = dat3).fit()
-                x1 = np.linspace(dat1.det_lag.min(), dat1.det_lag.max(), 100)
-                x2 = np.linspace(dat2.det_lag.min(), dat2.det_lag.max(), 100) 
-                x3 = np.linspace(dat3.det_lag.min(), dat3.det_lag.max(), 100)              
-                plt.figure(figsize = (3,3))    
-                plt.plot(det_lag_DF.det_lag.values, det_lag_DF.log_lag_freq.values, "o")        
-                plt.plot(x1, mod1.params[1]*x1+mod1.params[0], color = 'red')
-                plt.plot(x2, mod2.params[1]*x2+mod2.params[0], color = 'red')
-                plt.plot(x3, mod3.params[1]*x3+mod3.params[0], color = 'red')
-                plt.xlabel('Detection Lag (s)')
-                plt.ylabel('Log Lag Count')
-                plt.title('Bout Length Site %s \n %s seconds'%(self.node, det_lag_DF.det_lag.values[minKnot[1]]))
-                plt.ylim(0,max(det_lag_DF.log_lag_freq.values)+1)
-                plt.savefig(os.path.join(plotOutputWS,"BoutsAtSite%s.png"%(self.node)))
+            print(knotDF)
+            if len(knotDF) == 0:
+                minKnot = 7200
+                return minKnot
+            else:
+                min_knot_idx = knotDF['SSR'].idxmin()
+                minKnot = knotDF.iloc[min_knot_idx,0]
+                # You Can Plot If You Want To
+                if plotOutputWS != None:
+                    k1 = minKnot[0]
+                    k2 = minKnot[1]
+                    dat1 = det_lag_DF.iloc[0:k1]
+                    dat2 = det_lag_DF.iloc[k1:k2]
+                    dat3 = det_lag_DF.iloc[k2:]
+                    mod1 = smf.ols('log_lag_freq~det_lag', data = dat1).fit()     # fit models to the data
+                    mod2 = smf.ols('log_lag_freq~det_lag', data = dat2).fit()
+                    mod3 = smf.ols('log_lag_freq~det_lag', data = dat3).fit()
+                    x1 = np.linspace(dat1.det_lag.min(), dat1.det_lag.max(), 100)
+                    x2 = np.linspace(dat2.det_lag.min(), dat2.det_lag.max(), 100) 
+                    x3 = np.linspace(dat3.det_lag.min(), dat3.det_lag.max(), 100)              
+                    plt.figure(figsize = (3,3))    
+                    plt.plot(det_lag_DF.det_lag.values, det_lag_DF.log_lag_freq.values, "o")        
+                    plt.plot(x1, mod1.params[1]*x1+mod1.params[0], color = 'red')
+                    plt.plot(x2, mod2.params[1]*x2+mod2.params[0], color = 'red')
+                    plt.plot(x3, mod3.params[1]*x3+mod3.params[0], color = 'red')
+                    plt.xlabel('Detection Lag (s)')
+                    plt.ylabel('Log Lag Count')
+                    plt.title('Bout Length Site %s \n %s seconds'%(self.node, det_lag_DF.det_lag.values[minKnot[1]]))
+                    plt.ylim(0,max(det_lag_DF.log_lag_freq.values)+1)
+                    plt.savefig(os.path.join(plotOutputWS,"BoutsAtSite%s.png"%(self.node)))
         
             return det_lag_DF.det_lag.values[minKnot[1]]
 
@@ -2761,11 +2770,16 @@ def manage_node_overlap_data(inputWS, projectDB):
         os.remove(os.path.join(inputWS,f))
     c.close()
     
-def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filter = False):
+def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filter = False, rec_list = None):
     '''function takes classified data, merges across sites and then joins presence 
     and overlapping data into one big file for model building.'''
     conn = sqlite3.connect(projectDB)                                              # connect to the database
-    recSQL = "SELECT * FROM tblMasterReceiver"                                 # SQL code to import data from this node
+    if rec_list != None:
+        recSQL = "SELECT * FROM tblMasterReceiver WHERE recID = '%s'"%(rec_list[0])
+        for i in rec_list[1:]:
+            recSQL = recSQL + " OR recID = '%s'"%(i)
+    else:   
+        recSQL = "SELECT * FROM tblMasterReceiver"                                 # SQL code to import data from this node
     receivers = pd.read_sql(recSQL,con = conn)                                 # import data
     receivers = receivers.recID.unique()                                       # get the unique receivers associated with this node    
     recapdata = pd.DataFrame(columns = ['FreqCode','Epoch','recID','timeStamp'])                # set up an empty data frame
