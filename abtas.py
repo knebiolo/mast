@@ -1467,14 +1467,14 @@ class cross_validated():
         testDat = pd.merge(left = testDat, right = powerCount, how = u'left', left_on = ['HF','powerBin'], right_on = ['HF','powerBin'])
         #testDat.drop(['hitRatio_x','hitRatio_y'], axis = 1, inplace = True)    
         
-#        # NoiseR$atio
-#        noiseCount = trainDat.groupby(['Detection','noiseBin'])['noiseBin'].count()
-#        noiseCount = pd.Series(noiseCount, name = 'noiseCount_T')
-#        noiseCount = pd.DataFrame(noiseCount).reset_index().rename(columns = {'Detection':'HT'})
-#        testDat = pd.merge(left = testDat, right = noiseCount, how = u'left', left_on = ['HT','noiseBin'], right_on = ['HT','noiseBin'])
-#        noiseCount = noiseCount.rename(columns = {'HT':'HF','noiseCount_T':'noiseCount_F'})
-#        testDat = pd.merge(left = testDat, right = noiseCount, how = u'left', left_on = ['HF','noiseBin'], right_on = ['HF','noiseBin'])
-#        #testDat.drop(['hitRatio_x','hitRatio_y'], axis = 1, inplace = True)        
+        # NoiseR$atio
+        noiseCount = trainDat.groupby(['Detection','noiseBin'])['noiseBin'].count()
+        noiseCount = pd.Series(noiseCount, name = 'noiseCount_T')
+        noiseCount = pd.DataFrame(noiseCount).reset_index().rename(columns = {'Detection':'HT'})
+        testDat = pd.merge(left = testDat, right = noiseCount, how = u'left', left_on = ['HT','noiseBin'], right_on = ['HT','noiseBin'])
+        noiseCount = noiseCount.rename(columns = {'HT':'HF','noiseCount_T':'noiseCount_F'})
+        testDat = pd.merge(left = testDat, right = noiseCount, how = u'left', left_on = ['HF','noiseBin'], right_on = ['HF','noiseBin'])
+        #testDat.drop(['hitRatio_x','hitRatio_y'], axis = 1, inplace = True)        
     
         testDat = testDat.fillna(0)                                                # Nan gives us heartburn, fill them with zeros
         # Calculate Number of True and False Positive Detections in Training Dataset
@@ -1500,7 +1500,7 @@ class cross_validated():
         testDat['LseriesHitF'] = (testDat['seriesHitCountF'] + 1)/testDat['LDenomCount_F'] # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
         testDat['LconsDetF'] = (testDat['consDetCountF'] + 1)/testDat['LDenomCount_F']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
         testDat['LPowerF'] = (testDat['powerCount_F'] + 1)/testDat['LDenomCount_F']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-#        testDat['LnoiseF'] = (testDat['noiseCount_F'] + 1)/testDat['LDenomCount_F']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+        testDat['LnoiseF'] = (testDat['noiseCount_F'] + 1)/testDat['LDenomCount_F']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
             
         # calculation of the probability of a true detection given the data
         testDat['priorT'] = round(priorCountT/float(len(trainDat)),5)                      # calculate the prior probability of a true detection from the training dataset            
@@ -1509,13 +1509,13 @@ class cross_validated():
         testDat['LseriesHitT'] = (testDat['seriesHitCountT'] + 1)/testDat['LDenomCount_T'] # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
         testDat['LconsDetT'] = (testDat['consDetCountT'] + 1)/testDat['LDenomCount_T']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
         testDat['LPowerT'] = (testDat['powerCount_T'] + 1)/testDat['LDenomCount_F']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-#        testDat['LnoiseT'] = (testDat['noiseCount_T'] + 1)/testDat['LDenomCount_F']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+        testDat['LnoiseT'] = (testDat['noiseCount_T'] + 1)/testDat['LDenomCount_F']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
         
         # Calculate the likelihood of each hypothesis being true   
         #testDat['LikelihoodTrue'] = likelihood(True,self)
         #testDat['LikelihoodFalse'] = likelihood(False,self)
-        testDat['LikelihoodTrue'] = testDat['LPowerT'] * testDat['LHitRatioT'] * testDat['LconRecT'] * testDat['LseriesHitT'] * testDat['LconsDetT']
-        testDat['LikelihoodFalse'] = testDat['LPowerF'] * testDat['LHitRatioF'] * testDat['LconRecF'] * testDat['LseriesHitF'] * testDat['LconsDetF']
+        testDat['LikelihoodTrue'] = testDat['LPowerT'] * testDat['LHitRatioT'] * testDat['LconRecT'] * testDat['LseriesHitT'] * testDat['LconsDetT'] * testDat['LnoiseT']
+        testDat['LikelihoodFalse'] = testDat['LPowerF'] * testDat['LHitRatioF'] * testDat['LconRecF'] * testDat['LseriesHitF'] * testDat['LconsDetF'] * testDat['LnoiseF']
         
         # Calculate the posterior probability of each Hypothesis occuring
 #        testDat['postTrue'] = testDat['priorT'] * testDat['LikelihoodTrue']
