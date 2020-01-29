@@ -1075,22 +1075,12 @@ def calc_class_params_map(classify_object):
         sql = "SELECT * FROM tblTrain WHERE recType == '%s'"%(classify_object.recType)
         trainDF = pd.read_sql(sql,con = conn, coerce_float = True)
     else:
-        if classify_object.reclass_iter<=2:
-            trainDF = pd.read_sql("select * from tblTrain WHERE recType == '%s'"%(classify_object.recType),con=conn, coerce_float = True)#This will read in tblTrain and create a pandas dataframe
-#            classDF = pd.read_sql("select test, FreqCode,Power,lag,lagDiff,fishCount,conRecLength,consDet,detHist,hitRatio,noiseRatio,seriesHit,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from tblClassify_%s"%(site),con=conn)
-#            classDF = pd.read_sql("select test, FreqCode,Power,noiseRatio, lag,lagDiff,conRecLength_A,consDet_A,detHist_A,hitRatio_A,seriesHit_A,conRecLength_M,consDet_M,detHist_M,hitRatio_M,seriesHit_M,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from tblClassify_%s"%(site),con=conn)
-            classDF = pd.read_sql("select test, FreqCode,Power,noiseRatio, lag,lagDiff,conRecLength_A,consDet_A,detHist_A,hitRatio_A,seriesHit_A,conRecLength_M,consDet_M,detHist_M,hitRatio_M,seriesHit_M,postTrue_A,postTrue_M,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from tblClassify_%s"%(site),con=conn)
-            classDF = classDF[classDF.postTrue_A >= classDF.postTrue_M]
-            classDF.drop(['conRecLength_M','consDet_M','detHist_M','hitRatio_M','seriesHit_M'], axis = 1, inplace = True)
-            classDF.rename(columns = {'conRecLength_A':'conRecLength','consDet_A':'consDet','detHist_A':'detHist','hitRatio_A':'hitRatio','seriesHit_A':'seriesHit'}, inplace = True)
-
-        else:
-            trainDF = pd.read_sql("select * from tblTrain WHERE recType == '%s'"%(classify_object.recType),con=conn, coerce_float = True)#This will read in tblTrain and create a pandas dataframe        
+        trainDF = pd.read_sql("select * from tblTrain WHERE recType == '%s'"%(classify_object.recType),con=conn, coerce_float = True)#This will read in tblTrain and create a pandas dataframe        
 #            classDF = pd.read_sql("select test, FreqCode,Power,lag,lagDiff,fishCount,conRecLength,consDet,detHist,hitRatio,noiseRatio,seriesHit,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from tblClassify_%s_%s"%(site,classify_object.reclass_iter-1),con=conn)
-            classDF = pd.read_sql("select test, FreqCode,Power,noiseRatio, lag,lagDiff,conRecLength_A,consDet_A,detHist_A,hitRatio_A,seriesHit_A,conRecLength_M,consDet_M,detHist_M,hitRatio_M,seriesHit_M,postTrue_A,postTrue_M,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from tblClassify_%s_%s"%(site,classify_object.reclass_iter-1),con=conn)
-            classDF = classDF[classDF.postTrue_A >= classDF.postTrue_M]
-            classDF.drop(['conRecLength_M','consDet_M','detHist_M','hitRatio_M','seriesHit_M'], axis = 1, inplace = True)
-            classDF.rename(columns = {'conRecLength_A':'conRecLength','consDet_A':'consDet','detHist_A':'detHist','hitRatio_A':'hitRatio','seriesHit_A':'seriesHit'}, inplace = True)
+        classDF = pd.read_sql("select test, FreqCode,Power,noiseRatio, lag,lagDiff,conRecLength_A,consDet_A,detHist_A,hitRatio_A,seriesHit_A,conRecLength_M,consDet_M,detHist_M,hitRatio_M,seriesHit_M,postTrue_A,postTrue_M,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from tblClassify_%s_%s"%(site,classify_object.reclass_iter-1),con=conn)
+        classDF = classDF[classDF.postTrue_A >= classDF.postTrue_M]
+        classDF.drop(['conRecLength_M','consDet_M','detHist_M','hitRatio_M','seriesHit_M'], axis = 1, inplace = True)
+        classDF.rename(columns = {'conRecLength_A':'conRecLength','consDet_A':'consDet','detHist_A':'detHist','hitRatio_A':'hitRatio','seriesHit_A':'seriesHit'}, inplace = True)
 
         trainDF = trainDF[trainDF.Detection==0]
         classDF = classDF[classDF.test==1]    
@@ -1343,16 +1333,13 @@ def calc_class_params_map(classify_object):
     classify_object.histDF.to_csv(os.path.join(classify_object.scratchWS,"%s.csv"%(classify_object.i)))
     del trainDF
 
-def classDatAppend(site,inputWS,projectDB,reclass_iter = None):
+def classDatAppend(site,inputWS,projectDB,reclass_iter = 1):
     # As soon as I figure out how to do this function is moot.
     files = os.listdir(inputWS)
     conn = sqlite3.connect(projectDB)
     c = conn.cursor()
     for f in files:
-        if reclass_iter == None:
-            out_name = 'tblClassify_%s'%(site)
-        else:
-            out_name = 'tblClassify_%s_%s'%(site,reclass_iter)
+        out_name = 'tblClassify_%s_%s'%(site,reclass_iter)
         dat = pd.read_csv(os.path.join(inputWS,f),dtype = {"detHist_A":str,"detHist_M":str})
         #dat.drop(['recID1'],axis = 1,inplace = True)
         dtype = {'FreqCode':'TEXT', 'Epoch': 'INTEGER', 'recID':'TEXT','timeStamp':'TIMESTAMP', 'Power':'REAL', 'ScanTime':'REAL',
@@ -1589,7 +1576,7 @@ class cross_validated():
 
 class classification_results():
     '''Python class object to hold the results of false positive classification'''
-    def __init__(self,recType,projectDB,figureWS,site = None, reclass_iter = None):
+    def __init__(self,recType,projectDB,figureWS,site = None, reclass_iter = 1):
         self.recType = recType
         self.projectDB = projectDB
         self.figureWS = figureWS
@@ -1598,7 +1585,7 @@ class classification_results():
         conn = sqlite3.connect(self.projectDB)                                              # connect to the database
         #self.class_stats_data = pd.DataFrame(columns = ['FreqCode','Epoch','recID','Power','hitRatio','postTrue','postFalse','test','lagDiff','conRecLength','noiseRatio','fishCount', 'logLikelihoodRatio'])                # set up an empty data frame
         self.class_stats_data = pd.DataFrame(columns = ['FreqCode','Epoch','recID','Power','hitRatio_A','hitRatio_M','postTrue_A','postTrue_M','postFalse_A','postFalse_M','test','lagDiff','conRecLength_A', 'conRecLength_M','logLikelihoodRatio'])                # set up an empty data frame
-
+        self.reclass_iter = reclass_iter
         self.site = site
         if site == None:
             recSQL = "SELECT * FROM tblMasterReceiver WHERE RecType = '%s'"%(self.recType) # SQL code to import data from this node
@@ -1607,16 +1594,14 @@ class classification_results():
             for i in receivers:                                                # for every receiver 
                 print ("Start selecting and merging data for receiver %s"%(i))
                 #sql = "SELECT FreqCode, Epoch, recID, Power, hitRatio, postTrue, postFalse, test, lagDiff, conRecLength, noiseRatio, fishCount, logLikelihoodRatio FROM tblClassify_%s "%(i)
-                sql = "SELECT * FROM tblClassify_%s "%(i)
+                sql = "SELECT * FROM tblClassify_%s_%s "%(i, reclass_iter)
                 dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
                 self.class_stats_data = self.class_stats_data.append(dat)
                 del dat 
         else:
             print ("Start selecting and merging data for receiver %s"%(site))
-            if reclass_iter == None:
-                sql = "SELECT * FROM tblClassify_%s"%(site)
-            else:
-                sql = "SELECT * FROM tblClassify_%s_%s"%(site,reclass_iter)
+
+            sql = "SELECT * FROM tblClassify_%s_%s"%(site, reclass_iter)
             dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
             self.class_stats_data = self.class_stats_data.append(dat)
             del dat 
@@ -1682,7 +1667,8 @@ class classification_results():
         axs[1].set_title('False Positive')
         axs[0].set_ylabel('Probability Density')
         if self.site != None:
-            plt.savefig(os.path.join(self.figureWS,"%s_%s_hitRatioCompare_class.png"%(self.recType,self.site)),bbox_inches = 'tight')
+            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_hitRatioCompare_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
+            
         else:
             plt.savefig(os.path.join(self.figureWS,"%s_hitRatioCompare_class.png"%(self.recType)),bbox_inches = 'tight')
 
@@ -1703,7 +1689,7 @@ class classification_results():
         axs[1].set_title('False Positive')
         axs[0].set_ylabel('Frequency')
         if self.site != None:
-            plt.savefig(os.path.join(self.figureWS,"%s_%s_powerCompare_class.png"%(self.recType,self.site)),bbox_inches = 'tight')
+            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_powerCompare_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
         else:
             plt.savefig(os.path.join(self.figureWS,"%s_powerCompare_class.png"%(self.recType)),bbox_inches = 'tight')
         print ("Signal Power figure created, check your output Workspace")
@@ -1721,7 +1707,7 @@ class classification_results():
         axs[1].set_title('False Positive')
         axs[0].set_ylabel('Frequency')
         if self.site != None:
-            plt.savefig(os.path.join(self.figureWS,"%s_%s_lagDifferences_class.png"%(self.recType,self.site)),bbox_inches = 'tight')
+            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_lagDifferences_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')                
         else:
             plt.savefig(os.path.join(self.figureWS,"%s_lagDifferences_class.png"%(self.recType)),bbox_inches = 'tight')
         print ("Lag differences figure created, check your output Workspace")
@@ -1739,7 +1725,7 @@ class classification_results():
         axs[1].set_title('False Positive')
         axs[0].set_ylabel('Frequency')
         if self.site != None:
-            plt.savefig(os.path.join(self.figureWS,"%s_%s_conRecLength_class.png"%(self.recType,self.site)),bbox_inches = 'tight')
+            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_conRecLength_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')                
         else:
             plt.savefig(os.path.join(self.figureWS,"%s_conRecLength_class.png"%(self.recType)),bbox_inches = 'tight')
         print ("Consecutive Hit Length figure created, check your output Workspace")
@@ -1757,7 +1743,8 @@ class classification_results():
         axs[1].set_title('False Positive')
         axs[0].set_ylabel('Frequency')
         if self.site != None:
-           plt.savefig(os.path.join(self.figureWS,"%s_%s_noiseRatio_class.png"%(self.recType,self.site)),bbox_inches = 'tight')
+            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_noiseRatio_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
+              
         else:
            plt.savefig(os.path.join(self.figureWS,"%s_noiseRatio_class.png"%(self.recType)),bbox_inches = 'tight')
 
@@ -1799,9 +1786,10 @@ class classification_results():
         axs[1].set_title('False Positive')
         axs[0].set_ylabel('Frequency')
         if self.site != None:
-           plt.savefig(os.path.join(self.figureWS,"%s_%s_logLikeRatio_class.png"%(self.recType,self.site)),bbox_inches = 'tight')
+            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_logLikeRatio_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
+
         else:
-           plt.savefig(os.path.join(self.figureWS,"%s_logLikeRatio_class.png"%(self.recType)),bbox_inches = 'tight')
+            plt.savefig(os.path.join(self.figureWS,"%s_logLikeRatio_class.png"%(self.recType)),bbox_inches = 'tight')
 
         print ("Log Likelihood Figure Created, check output workspace")
         
@@ -1809,9 +1797,7 @@ class classification_results():
         minPostRatio = self.class_stats_data.logPostRatio_A.min()
         maxPostRatio = self.class_stats_data.logPostRatio_A.max()
         postRatioBins = np.linspace(minPostRatio,maxPostRatio,10)
-        print(minPostRatio)
-        print(maxPostRatio)
-        print(postRatioBins)
+
         
         plt.figure(figsize = (6,3)) 
         fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
@@ -1823,9 +1809,10 @@ class classification_results():
         axs[1].set_title('False Positive')
         axs[0].set_ylabel('Frequency')
         if self.site != None:
-           plt.savefig(os.path.join(self.figureWS,"%s_%s_logPostRatio_class.png"%(self.recType,self.site)),bbox_inches = 'tight')
+            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_logPostRatio_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
+                
         else:
-           plt.savefig(os.path.join(self.figureWS,"%s_logPostRatio_class.png"%(self.recType)),bbox_inches = 'tight')
+            plt.savefig(os.path.join(self.figureWS,"%s_logPostRatio_class.png"%(self.recType)),bbox_inches = 'tight')
 
         print ("Log Posterior Ratio Figure Created, check output workspace")
 
