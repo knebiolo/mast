@@ -492,9 +492,7 @@ def orionImport(fileName,dbName,recName,switch = False, scanTime = None, channel
                                 names = ['Date','Time','Site','Ant','Freq','Code','Power'],
                                 skiprows = 1,
                                 dtype = {'Date':str,'Time':str,'Site':str,'Ant':str,'Freq':str,'Code':str,'Power':str}) 
-#        print (telemDat.head())
-#        telemDat.to_csv(os.path.join(r"C:\Users\Kevin Nebiolo\Desktop\Telemetry_Test\Data",'fuck.csv'))
-#        telemDat['Power'] = telemDat.Power.astype(np.float32)
+
     telemDat['fileName'] = np.repeat(fileName,len(telemDat))
     telemDat['FreqCode'] = telemDat['Freq'].astype(str) + ' ' + telemDat['Code'].astype(str)
     telemDat['timeStamp'] = pd.to_datetime(telemDat['Date'] + ' ' + telemDat['Time'],errors = 'coerce')# create timestamp field from date and time and apply to index
@@ -1642,11 +1640,18 @@ class classification_results():
         self.class_stats_data['Power'] = self.class_stats_data.Power.astype(float)
         self.class_stats_data['lagDiff'] = self.class_stats_data.lagDiff.astype(float)
         self.class_stats_data['conRecLength_A'] = self.class_stats_data.conRecLength_A.astype(float)
-
-        #self.class_stats_data['noiseRatio'] = self.class_stats_data.noiseRatio.astype(float)
+        self.class_stats_data['noiseRatio'] = self.class_stats_data.noiseRatio.astype(float)
         #self.class_stats_data['fishCount'] = self.class_stats_data.fishCount.astype(float)
         self.class_stats_data['logPostRatio_A'] =np.log10(self.class_stats_data.postTrue_A.values/self.class_stats_data.postFalse_A.values)
         self.class_stats_data['logPostRatio_M'] =np.log10(self.class_stats_data.postTrue_M.values/self.class_stats_data.postFalse_M.values)
+
+        '''Currently these figures only return data for hypothesized alive fish - but we can have dead fish in here and 
+        their inlcusion in the histograms may be biasing the results - find the max hit ratio, consecutive record length, and likelihood ratio 
+        '''
+        self.class_stats_data['hitRatio_max'] = self.class_stats_data[['hitRatio_A','hitRatio_M']].max(axis = 1)
+        self.class_stats_data['conRecLength_max'] = self.class_stats_data[['conRecLength_A','conRecLength_M']].max(axis = 1)
+        self.class_stats_data['logLikelihoodRatio_max'] = self.class_stats_data[['logLikelihoodRatio_A','logLikelihoodRatio_M']].max(axis = 1)
+        self.class_stats_data['logPostRatio_max'] = self.class_stats_data[['logPostRatio_A','logPostRatio_M']].max(axis = 1)
 
 
         trues = self.class_stats_data[self.class_stats_data.test == 1] 
@@ -1659,8 +1664,8 @@ class classification_results():
         
         plt.figure(figsize = (6,3)) 
         fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-        axs[0].hist(trues.hitRatio_A.values, hitRatioBins)
-        axs[1].hist(falses.hitRatio_A.values, hitRatioBins)
+        axs[0].hist(trues.hitRatio_max.values, hitRatioBins)
+        axs[1].hist(falses.hitRatio_max.values, hitRatioBins)
         axs[0].set_xlabel('Hit Ratio')  
         axs[0].set_title('True')
         axs[1].set_xlabel('Hit Ratio')
@@ -1717,8 +1722,8 @@ class classification_results():
 
         plt.figure(figsize = (6,3)) 
         fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-        axs[0].hist(trues.conRecLength_A.values, conBins)
-        axs[1].hist(falses.conRecLength_A.values, conBins)
+        axs[0].hist(trues.conRecLength_max.values, conBins)
+        axs[1].hist(falses.conRecLength_max.values, conBins)
         axs[0].set_xlabel('Consecutive Hit Length')  
         axs[0].set_title('True')
         axs[1].set_xlabel('Consecutive Hit Length')
@@ -1772,14 +1777,14 @@ class classification_results():
 #        print ("Fish Present Figure Created, check output workspace")
 
         # plot the log likelihood ratio 
-        minLogRatio = self.class_stats_data.logLikelihoodRatio_A.min()//1 * 1
-        maxLogRatio = self.class_stats_data.logLikelihoodRatio_A.max()//1 * 1
+        minLogRatio = self.class_stats_data.logLikelihoodRatio_max.min()//1 * 1
+        maxLogRatio = self.class_stats_data.logLikelihoodRatio_max.max()//1 * 1
         ratioBins =np.arange(minLogRatio,maxLogRatio+1,2)
         
         plt.figure(figsize = (6,3)) 
         fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-        axs[0].hist(trues.logLikelihoodRatio_A.values, ratioBins)
-        axs[1].hist(falses.logLikelihoodRatio_A.values, ratioBins)
+        axs[0].hist(trues.logLikelihoodRatio_max.values, ratioBins)
+        axs[1].hist(falses.logLikelihoodRatio_max.values, ratioBins)
         axs[0].set_xlabel('Log Likelihood Ratio')  
         axs[0].set_title('True')
         axs[1].set_xlabel('Log Likelihood Ratio')
@@ -1794,15 +1799,15 @@ class classification_results():
         print ("Log Likelihood Figure Created, check output workspace")
         
         # plot the log of the posterior ratio 
-        minPostRatio = self.class_stats_data.logPostRatio_A.min()
-        maxPostRatio = self.class_stats_data.logPostRatio_A.max()
+        minPostRatio = self.class_stats_data.logPostRatio_max.min()
+        maxPostRatio = self.class_stats_data.logPostRatio_max.max()
         postRatioBins = np.linspace(minPostRatio,maxPostRatio,10)
 
         
         plt.figure(figsize = (6,3)) 
         fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-        axs[0].hist(trues.logPostRatio_A.values, postRatioBins)
-        axs[1].hist(falses.logPostRatio_A.values, postRatioBins)
+        axs[0].hist(trues.logPostRatio_max.values, postRatioBins)
+        axs[1].hist(falses.logPostRatio_max.values, postRatioBins)
         axs[0].set_xlabel('Log Posterior Ratio')  
         axs[0].set_title('True')
         axs[1].set_xlabel('Log Posterior Ratio')
@@ -2871,7 +2876,7 @@ class cjs_data_prep():
         cross_tab = cross_tab.applymap(lambda x:1 if x > 0 else 0)
         self.inp = cross_tab
         # Check your work
-        print (cross_tab.head(10))
+        print (cross_tab.head(100))
         cross_tab.to_csv(os.path.join(outputWS,'%s_cjs.csv'%(modelName)))
         
 class lrdr_data_prep():
