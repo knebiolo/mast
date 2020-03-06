@@ -938,7 +938,10 @@ class classify_data():
         '''
         conn = sqlite3.connect(projectDB, timeout=30.0)        
         c = conn.cursor()
-        sql = "SELECT FreqCode, Epoch, tblRaw.recID, timeStamp, Power, noiseRatio, ScanTime, Channels, recType FROM tblRaw LEFT JOIN tblReceiverParameters ON tblRaw.fileName = tblReceiverParameters.fileName WHERE FreqCode == '%s' AND tblRaw.recID == '%s';"%(i,site)
+        if reclass_iter == None:
+            sql = "SELECT FreqCode, Epoch, tblRaw.recID, timeStamp, Power, noiseRatio, ScanTime, Channels, recType FROM tblRaw LEFT JOIN tblReceiverParameters ON tblRaw.fileName = tblReceiverParameters.fileName WHERE FreqCode == '%s' AND tblRaw.recID == '%s';"%(i,site)
+        else:
+            sql = "SELECT FreqCode, Epoch, recID, timeStamp, Power, noiseRatio, ScanTime, Channels, recType FROM tblClassify_%s_%s WHERE FreqCode == '%s' AND test == '1';"%(site,reclass_iter-1,i)
         #self.histDF = pd.read_sql(sql,con = conn, parse_dates  = 'timeStamp',coerce_float  = True)
         self.histDF = pd.read_sql(sql,con = conn,coerce_float  = True)
 
@@ -993,9 +996,12 @@ def likelihood(assumption,classify_object,status = 'A'):
     if status == 'A':
         trueFields = {'conRecLength':'LconRecT_A','consDet':'LconsDetT_A','hitRatio':'LHitRatioT_A','noiseRatio':'LnoiseT','seriesHit':'LseriesHitT_A','power':'LPowerT','lagDiff':'LlagT'}
         falseFields = {'conRecLength':'LconRecF_A','consDet':'LconsDetF_A','hitRatio':'LHitRatioF_A','noiseRatio':'LnoiseF','seriesHit':'LseriesHitF_A','power':'LPowerF','lagDiff':'LlagF'}
-    else:
+    elif status == 'M':
         trueFields = {'conRecLength':'LconRecT_M','consDet':'LconsDetT_M','hitRatio':'LHitRatioT_M','noiseRatio':'LnoiseT','seriesHit':'LseriesHitT_M','power':'LPowerT','lagDiff':'LlagT'}
         falseFields = {'conRecLength':'LconRecF_M','consDet':'LconsDetF_M','hitRatio':'LHitRatioF_M','noiseRatio':'LnoiseF','seriesHit':'LseriesHitF_M','power':'LPowerF','lagDiff':'LlagF'}
+    else:   
+        trueFields = {'conRecLength':'LconRecT','consDet':'LconsDetT','hitRatio':'LHitRatioT','noiseRatio':'LnoiseT','seriesHit':'LseriesHitT','power':'LPowerT','lagDiff':'LlagT'}
+        falseFields = {'conRecLength':'LconRecF','consDet':'LconsDetF','hitRatio':'LHitRatioF','noiseRatio':'LnoiseF','seriesHit':'LseriesHitF','power':'LPowerF','lagDiff':'LlagF'}
 
 
     if assumption == True:
@@ -1509,11 +1515,14 @@ class cross_validated():
         testDat['LPowerT'] = (testDat['powerCount_T'] + 1)/testDat['LDenomCount_F']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
         testDat['LnoiseT'] = (testDat['noiseCount_T'] + 1)/testDat['LDenomCount_F']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
         
-        # Calculate the likelihood of each hypothesis being true   
-        #testDat['LikelihoodTrue'] = likelihood(True,self)
-        #testDat['LikelihoodFalse'] = likelihood(False,self)
-        testDat['LikelihoodTrue'] = testDat['LPowerT'] * testDat['LHitRatioT'] * testDat['LconRecT'] * testDat['LseriesHitT'] * testDat['LconsDetT'] * testDat['LnoiseT']
-        testDat['LikelihoodFalse'] = testDat['LPowerF'] * testDat['LHitRatioF'] * testDat['LconRecF'] * testDat['LseriesHitF'] * testDat['LconsDetF'] * testDat['LnoiseF']
+        # Calculate the likelihood of each hypothesis being true 
+        #testDat['LikelihoodTrue'] = likelihood(True,self,status = 'cross')
+        #testDat['LikelihoodFalse'] = likelihood(False,self,status = 'cross')
+        #testDat['LikelihoodTrue'] = testDat['LPowerT'] * testDat['LHitRatioT'] * testDat['LconRecT'] * testDat['LseriesHitT'] * testDat['LconsDetT'] * testDat['LnoiseT']
+        #testDat['LikelihoodFalse'] = testDat['LPowerF'] * testDat['LHitRatioF'] * testDat['LconRecF'] * testDat['LseriesHitF'] * testDat['LconsDetF'] * testDat['LnoiseF']
+
+        testDat['LikelihoodTrue'] = testDat['LHitRatioT'] * testDat['LconRecT']
+        testDat['LikelihoodFalse'] = testDat['LHitRatioF'] * testDat['LconRecF'] 
         
         # Calculate the posterior probability of each Hypothesis occuring
 #        testDat['postTrue'] = testDat['priorT'] * testDat['LikelihoodTrue']
@@ -1662,10 +1671,10 @@ class classification_results():
         # plot hit ratio histograms by detection class
         hitRatioBins =np.linspace(0,1.0,11)
         
-        plt.figure(figsize = (6,3)) 
+        plt.figure(figsize = (3,2)) 
         fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-        axs[0].hist(trues.hitRatio_max.values, hitRatioBins)
-        axs[1].hist(falses.hitRatio_max.values, hitRatioBins)
+        axs[0].hist(trues.hitRatio_max.values, hitRatioBins, density = True)
+        axs[1].hist(falses.hitRatio_max.values, hitRatioBins, density = True)
         axs[0].set_xlabel('Hit Ratio')  
         axs[0].set_title('True')
         axs[1].set_xlabel('Hit Ratio')
@@ -1684,10 +1693,10 @@ class classification_results():
         maxPower = self.class_stats_data.Power.max()//10 * 10
         powerBins =np.arange(minPower,maxPower+20,10)
 
-        plt.figure(figsize = (6,3)) 
+        plt.figure(figsize = (3,2)) 
         fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-        axs[0].hist(trues.Power.values, powerBins)
-        axs[1].hist(falses.Power.values, powerBins)
+        axs[0].hist(trues.Power.values, powerBins, density = True)
+        axs[1].hist(falses.Power.values, powerBins, density = True)
         axs[0].set_xlabel('%s Signal Power'%(self.recType))  
         axs[0].set_title('True')
         axs[1].set_xlabel('%s Signal Power'%(self.recType))
@@ -1702,10 +1711,10 @@ class classification_results():
         # Lag Back Differences - how stdy are detection lags?
         lagBins =np.arange(-100,110,20)
 
-        plt.figure(figsize = (6,3)) 
+        plt.figure(figsize = (3,2)) 
         fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-        axs[0].hist(trues.lagDiff.values, lagBins)
-        axs[1].hist(falses.lagDiff.values, lagBins)
+        axs[0].hist(trues.lagDiff.values, lagBins, density = True)
+        axs[1].hist(falses.lagDiff.values, lagBins, density = True)
         axs[0].set_xlabel('Lag Differences')  
         axs[0].set_title('True')
         axs[1].set_xlabel('Lag Differences')
@@ -1720,10 +1729,10 @@ class classification_results():
         # Consecutive Record Length ?
         conBins =np.arange(1,12,1)
 
-        plt.figure(figsize = (6,3)) 
+        plt.figure(figsize = (3,2)) 
         fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-        axs[0].hist(trues.conRecLength_max.values, conBins)
-        axs[1].hist(falses.conRecLength_max.values, conBins)
+        axs[0].hist(trues.conRecLength_max.values, conBins, density = True)
+        axs[1].hist(falses.conRecLength_max.values, conBins, density = True)
         axs[0].set_xlabel('Consecutive Hit Length')  
         axs[0].set_title('True')
         axs[1].set_xlabel('Consecutive Hit Length')
@@ -1738,10 +1747,10 @@ class classification_results():
         # Noise Ratio
         noiseBins =np.arange(0,1.1,0.1)
 
-        plt.figure(figsize = (6,3)) 
+        plt.figure(figsize = (3,2)) 
         fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-        axs[0].hist(trues.noiseRatio.values, noiseBins)
-        axs[1].hist(falses.noiseRatio.values, noiseBins)
+        axs[0].hist(trues.noiseRatio.values, noiseBins, density = True)
+        axs[1].hist(falses.noiseRatio.values, noiseBins, density = True)
         axs[0].set_xlabel('Noise Ratio')  
         axs[0].set_title('True')
         axs[1].set_xlabel('Noise Ratio')
@@ -1781,10 +1790,10 @@ class classification_results():
         maxLogRatio = self.class_stats_data.logLikelihoodRatio_max.max()//1 * 1
         ratioBins =np.arange(minLogRatio,maxLogRatio+1,2)
         
-        plt.figure(figsize = (6,3)) 
+        plt.figure(figsize = (3,2)) 
         fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-        axs[0].hist(trues.logLikelihoodRatio_max.values, ratioBins)
-        axs[1].hist(falses.logLikelihoodRatio_max.values, ratioBins)
+        axs[0].hist(trues.logLikelihoodRatio_max.values, ratioBins, density = True)
+        axs[1].hist(falses.logLikelihoodRatio_max.values, ratioBins, density = True)
         axs[0].set_xlabel('Log Likelihood Ratio')  
         axs[0].set_title('True')
         axs[1].set_xlabel('Log Likelihood Ratio')
@@ -1804,10 +1813,10 @@ class classification_results():
         postRatioBins = np.linspace(minPostRatio,maxPostRatio,10)
 
         
-        plt.figure(figsize = (6,3)) 
+        plt.figure(figsize = (3,2)) 
         fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-        axs[0].hist(trues.logPostRatio_max.values, postRatioBins)
-        axs[1].hist(falses.logPostRatio_max.values, postRatioBins)
+        axs[0].hist(trues.logPostRatio_max.values, postRatioBins, density = True)
+        axs[1].hist(falses.logPostRatio_max.values, postRatioBins, density = True)
         axs[0].set_xlabel('Log Posterior Ratio')  
         axs[0].set_title('True')
         axs[1].set_xlabel('Log Posterior Ratio')
@@ -1821,6 +1830,60 @@ class classification_results():
 
         print ("Log Posterior Ratio Figure Created, check output workspace")
 
+        # make lattice plot for pubs
+        figSize = (6,4)
+        plt.figure() 
+        fig, axs = plt.subplots(3,4,tight_layout = True,figsize = figSize)
+        # hit ratio
+        axs[0,0].hist(trues.hitRatio_max.values, hitRatioBins, density = True, color = 'k')
+        axs[0,1].hist(falses.hitRatio_max.values, hitRatioBins, density = True, color = 'k')
+        axs[0,0].set_xlabel('Hit Ratio')  
+        axs[0,0].set_title('True')
+        axs[0,1].set_xlabel('Hit Ratio')
+        axs[0,1].set_title('False Positive')
+        axs[0,0].set_title('A',loc = 'left')
+
+        # consecutive record length
+        axs[0,2].hist(trues.conRecLength_max.values, conBins, density = True, color = 'k')
+        axs[0,3].hist(falses.conRecLength_max.values, conBins, density = True, color = 'k')
+        axs[0,2].set_xlabel('Consecutive Hit Length')  
+        axs[0,2].set_title('True')
+        axs[0,3].set_xlabel('Consecutive Hit Length')
+        axs[0,3].set_title('False Positive')
+        axs[0,2].set_title('B',loc = 'left')
+
+        # power
+        axs[1,0].hist(trues.Power.values, powerBins, density = True, color = 'k')
+        axs[1,1].hist(falses.Power.values, powerBins, density = True, color = 'k')
+        axs[1,0].set_xlabel('%s Signal Power'%(self.recType))  
+        axs[1,1].set_xlabel('%s Signal Power'%(self.recType))
+        axs[1,0].set_ylabel('Probability Density')
+        axs[1,0].set_title('C',loc = 'left')
+
+        # noise ratio
+        axs[1,2].hist(trues.noiseRatio.values, noiseBins, density = True, color = 'k')
+        axs[1,3].hist(falses.noiseRatio.values, noiseBins, density = True, color = 'k')
+        axs[1,2].set_xlabel('Noise Ratio')  
+        axs[1,3].set_xlabel('Noise Ratio')
+        axs[1,2].set_title('D',loc = 'left')
+
+        # lag diff
+        axs[2,0].hist(trues.lagDiff.values, lagBins, density = True, color = 'k')
+        axs[2,1].hist(falses.lagDiff.values, lagBins, density = True, color = 'k')
+        axs[2,0].set_xlabel('Lag Differences')  
+        axs[2,1].set_xlabel('Lag Differences')
+        axs[2,0].set_title('E',loc = 'left')
+
+        # log posterior ratio
+        axs[2,2].hist(trues.logPostRatio_max.values, postRatioBins, density = True, color = 'k')
+        axs[2,3].hist(falses.logPostRatio_max.values, postRatioBins, density = True, color = 'k')
+        axs[2,2].set_xlabel('Log Posterior Ratio')  
+        axs[2,3].set_xlabel('Log Posterior Ratio')
+        axs[2,2].set_title('F',loc = 'left')
+        if self.site != None:
+           plt.savefig(os.path.join(self.figureWS,"%s_%s_lattice_class.png"%(self.recType,self.site)),bbox_inches = 'tight', dpi = 900)
+        else:
+           plt.savefig(os.path.join(self.figureWS,"%s_lattice_class.png"%(self.recType)),bbox_inches = 'tight', dpi = 900)
 
 class training_results():
     '''Python class object to hold the results of false positive classification'''
@@ -1984,6 +2047,55 @@ class training_results():
            plt.savefig(os.path.join(self.figureWS,"%s_noiseRatio_train.png"%(self.recType)),bbox_inches = 'tight')
 
         print ("Noise Ratio figure created, check your output Workspace")
+        
+        # make lattice plot for pubs
+        figSize = (3,7)
+        plt.figure() 
+        fig, axs = plt.subplots(5,2,tight_layout = True,figsize = figSize)
+        # hit ratio
+        axs[0,0].hist(trues.hitRatio.values, hitRatioBins, density = True, color = 'k')
+        axs[0,1].hist(falses.hitRatio.values, hitRatioBins, density = True, color = 'k')
+        axs[0,0].set_xlabel('Hit Ratio')  
+        axs[0,0].set_title('True')
+        axs[0,1].set_xlabel('Hit Ratio')
+        axs[0,1].set_title('False Positive')
+        axs[0,0].set_title('A',loc = 'left')
+
+        # consecutive record length
+        axs[1,0].hist(trues.conRecLength.values, conBins, density = True, color = 'k')
+        axs[1,1].hist(falses.conRecLength.values, conBins, density = True, color = 'k')
+        axs[1,0].set_xlabel('Consecutive Hit Length')  
+        axs[1,1].set_xlabel('Consecutive Hit Length')
+        axs[1,0].set_title('B',loc = 'left')
+
+        # power
+        axs[2,0].hist(trues.Power.values, powerBins, density = True, color = 'k')
+        axs[2,1].hist(falses.Power.values, powerBins, density = True, color = 'k')
+        axs[2,0].set_xlabel('%s Signal Power'%(self.recType))  
+        axs[2,1].set_xlabel('%s Signal Power'%(self.recType))
+        axs[2,0].set_ylabel('Probability Density')
+        axs[2,0].set_title('C',loc = 'left')
+
+        # noise ratio
+        axs[3,0].hist(trues.noiseRatio.values, noiseBins, density = True, color = 'k')
+        axs[3,1].hist(falses.noiseRatio.values, noiseBins, density = True, color = 'k')
+        axs[3,0].set_xlabel('Noise Ratio')  
+        axs[3,1].set_xlabel('Noise Ratio')
+        axs[3,0].set_title('D',loc = 'left')
+
+        # lag diff
+        axs[4,0].hist(trues.lagDiff.values, lagBins, density = True, color = 'k')
+        axs[4,1].hist(falses.lagDiff.values, lagBins, density = True, color = 'k')
+        axs[4,0].set_xlabel('Lag Differences')  
+        axs[4,1].set_xlabel('Lag Differences')
+        axs[4,0].set_title('E',loc = 'left')
+
+
+        if self.site != None:
+           plt.savefig(os.path.join(self.figureWS,"%s_%s_lattice_train.png"%(self.recType,self.site)),bbox_inches = 'tight', dpi = 900)
+        else:
+           plt.savefig(os.path.join(self.figureWS,"%s_lattice_train.png"%(self.recType)),bbox_inches = 'tight', dpi = 900)
+
 #
 #        # plot fish present
 #        minCount = self.train_stats_data.FishCount.min()//10 * 10
