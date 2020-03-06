@@ -704,11 +704,8 @@ def lotek_import(fileName,dbName,recName):
         
         # with our data row, extract information using pandas fwf import procedure
         if lotek400 == False:
-            print (dataRow)
+            telemDat = pd.read_fwf(os.path.join(fileName),colspecs = [(0,5),(5,14),(14,23),(23,31),(31,46),(46,54)],names = ['DayNumber','Time','ChannelID','TagID','Antenna','Power'],skiprows = dataRow)
             
-            telemDat = pd.read_fwf(os.path.join(fileName),colspecs = [(0,5),(5,14),(14,20),(20,26),(26,30),(30,36)],names = ['DayNumber','Time','ChannelID','Power','Antenna','TagID'],skiprows = dataRow)
-            print (telemDat.head())
-            fuck
             telemDat = telemDat.iloc[:-2]                                                   # remove last two rows, Lotek adds garbage at the end
             telemDat.dropna(inplace = True)
             if len(telemDat) > 0:
