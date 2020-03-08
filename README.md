@@ -158,14 +158,15 @@ The lag time between consecutive detections is a powerful predictor.  Detections
 ## Create Training Data
 The first part of the Naïve Bayes classifier develops training data, which is created from in-water beacon tag recaptures and known false positive detections (i.e. detections from tags not in master tag list).  **We can only train (and classify) a single site at a time.**  Simply copy and paste the raw data files from a single site into the “Training_Files” directory and follow the steps below to create training data.
 
- To run the site_training.py script, follow these steps.
-1.	Update line 14 with the current site ID, this must match with a single receiver (‘recID’) in the master receiver table.  
-2.	Update Line 15 with the receive type.  Your current options are either ‘lotek’ or ‘orion’.  
-3.	Update Line 16 and identify the project directory, this is the same directory you created in step 1.  
-4.	Update Line 17, which identifies the project database.  This is the same as above.  
-5.	Update Line 40 with the number of cores available for parallel processes 
-
-The site training script employs parallel processing over multiple cores.  We set the number of cores over which we will distribute tasks on line 40.  **Do not create more processes than your computer has cores.**  It is also recommended to save at least 1 core for other computer functions like email, therefore line 40 = n – 1, where n = number of cores on your machine.  
+ To train the classifier with data collected at this site, copy the following script into your favorite IDE, and follow these steps.
+1.	Update line 10 with the current site ID, this must match with a single receiver (‘recID’) in the master receiver table.  
+2.	Update Line 11 with the receive type.  Your current options are either ‘lotek’ or ‘orion’.  
+3.	Update Line 12 and identify the project directory, this is the same directory you created in step 1.  
+4.	Update Line 13, which identifies the project database.  This is the same as above.  
+5.  If the study had Orion receivers that switched between antennas, edit line 14 to indicate the time in seconds spent listening to each antenna.
+6.  If the study had Orion recievers taht switched between antennas, edit line 15 to indicate the number of antennas
+7.  Update line 16, indicate the antenna to receiver relationship in Orion headers, Lotek receivers are arbitrary
+8.  If the study had Orion recievers that switched between antennas, uncomment line 31 and comment out line 28.  Leave as is otherwise.
 
 ```
 # import modules
