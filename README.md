@@ -227,6 +227,12 @@ for i in ant_to_rec_dict:
     train_stats.train_stats() 
 ```
 
+There are multiple strategies for training data.  In some studies, practioners may sacrifice study tags and place them in strategic locations to simulate what a fish would look like.  This training data provides excellent information on what a known true positive detection looks like.  However, some studies do not have the project budget available to sacrifice study tags. In this case, the study trains on study tags and assumes all records from study tags are true in the first pass.  You will note the SQL statement in line 37 makes this disctinction.  To train on beacon tags instead, update line 37 to reflect:
+
+'''
+    sql = "SELECT tblRaw.FreqCode FROM tblRaw LEFT JOIN tblMasterTag ON tblRaw.FreqCode = tblMasterTag.FreqCode WHERE recID == '%s' AND TagType IS NOT 'Study' AND TagType IS NOT 'Test';"%(site)
+'''
+
 ## Cross-Validate Training Data
 
 **If the end user creates their own training data, it is advised to assess the accuracy of the training data prior to classification.** ABTAS uses a k-fold cross validation procedure to assess accuracy. The cross-validation procedure randomly assigns each row of data to one of n folds.  Then, the procedure iterates over each fold, classifying data belonging to the current fold, while the remaining rows serve as training data. Then, the classifications were compared against the known states of the training data and compiled in a cross validation table (Table 5).  ABTAS calculates the positive predictive value (PPV), negative predictive value (NPV), sensitivity (TPR), and specificity (SPC).
