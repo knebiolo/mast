@@ -13,6 +13,8 @@ The software is written in Python 3.7.x and uses dependencies outside of the sta
 
 The example scripts found in the Read Me will guide the end user through a coplete radio telemetry project.  However, you could import abtas into your own proprietary scripts and data management routines.  These scripts are examples only.
 
+The project team recommends the Spyder IDE available with Anaconda [Anaconda](https://www.anaconda.com/)
+
 # Project Set Up
 The simple 4-line script “project_setup.py” will create a standard file structure and project database in a directory of your choosing.  **It is recommended that the directory does not contain any spaces or special characters.**  For example, if our study was of fish migration in the Connecticut River our initial directory could appear as (if saved to your desktop):
 > C:\Users\UserName\Desktop\Connecticut_River_Study
@@ -81,9 +83,9 @@ Like the tag and receiver tables, the node table will be saved as a comma delimi
 |X           |Integer    |(required) - arbitrary X coordinate point                                 |
 |Y           |Integer    |(required) - arbitrary Y coordinate point                                 |
 
-Note: There may be more than 1 receiver associated with a node.  For example, a fishway may have two differences, but for the purposes of the study you only have to know if a fish has entered the fishway.  It is logical to group them into a single network node.  Doing so will greatly simplify movement modeling.  The receiver to node relationship is developed in the master receiver table with the node column.  IDs must match between columns for relationships to work.
+Note: There may be more than 1 receiver associated with a node.  For example, a fishway may have two entrances, but for the purposes of the study you only have to know if a fish has entered the fishway.  It is logical to group them into a single network node.  Doing so will greatly simplify movement modeling.  The receiver to node relationship is developed in the master receiver table with the node column.  IDs must match between columns for relationships to work.
 
-Once the initial data files have been created and stored in the ‘Data’ folder, we will need to import them into the project database.  We will complete this task with the “project_db_ini.py” script (see below).  You will need to follow these steps:
+Once the initial data files have been created and stored in the ‘Data’ folder, we will need to import them into the project database.  We will complete this task with the “project_db_ini.py” script (see below).  You will need to follow these steps after pasting the script into your favorite IDE:
 
 1.	Update line 4, identify the project directory (same directory you created prior)  
 2.	Update line 5, identify the project database name
