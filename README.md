@@ -13,7 +13,7 @@ The software is written in Python 3.7.x and uses dependencies outside of the sta
 
 The example scripts found in the Read Me will guide the end user through a coplete radio telemetry project.  However, you could import abtas into your own proprietary scripts and data management routines.  These scripts are examples only.
 
-The project team recommends the Spyder IDE available with Anaconda [Anaconda](https://www.anaconda.com/)
+The project team recommends the Spyder IDE available with [Anaconda](https://www.anaconda.com/)
 
 # Project Set Up
 The simple 4-line script “project_setup.py” will create a standard file structure and project database in a directory of your choosing.  **It is recommended that the directory does not contain any spaces or special characters.**  For example, if our study was of fish migration in the Connecticut River our initial directory could appear as (if saved to your desktop):
@@ -251,11 +251,11 @@ Since this algorithm is concerned with identifying and removing false positives,
 
 To run the cross-validation procedure, open ‘cross_validation.py’ and update the following lines:
 
-1.	Update the receiver type (line 13) - We can either validate **lotek** or **orion** receivers. 
-2.	Update the project directory (line 14) 
-3.	Update the name of the database (line 15) 
-4.	Update the number of folds (line 18)
-5.	Update the fields you wish to classify detections (line 20)
+1.	Update the receiver type (line 9) - We can either validate **lotek** or **orion** receivers. 
+2.	Update the project directory (line 10) 
+3.	Update the name of the database (line 11) 
+4.	Update the number of folds (line 14)
+5.	Update the fields you wish to classify detections (line 16)
 
 ```
 import time
@@ -264,30 +264,25 @@ import numpy as np
 import abtas
 import warnings
 warnings.filterwarnings('ignore')
-'''Script implements a k-fold cross validation procedure on a specific receiver 
-type.  This is meant to test the validity of the training data collected at a 
-specific receiver or receiver type.'''
-if __name__ == "__main__":
-    t0 = time.time()
-    # What receiver type are you assessing accuracy for?
-    recType = 'orion'                                                          # what is the receiver type?
-    proj_dir = r'J:\1210\005\Calcs\Studies\3_3_19\2018\Test'                             # what is the raw data directory
-    dbName = 'ultrasound_2018_test.db'                                                    # what is the name of the project database
-    figureWS = os.path.join(proj_dir,'Output','Figures')    
-    projectDB = os.path.join(proj_dir,'Data',dbName)
-    k = 10
-    # ['conRecLength','consDet','hitRatio','noiseRatio','seriesHit','power','lagDiff']
-    fields = ['conRecLength','hitRatio','power','lagBDiff']
-    # create cross validated data object
-    cross = abtas.cross_validated(k,recType,fields,projectDB,figureWS)
-    print ("Created a cross validated data object")
-    # perform the cross validation method
-    for i in np.arange(0,k,1):
-        cross.fold(i)
-    # print the summary
-    cross.summary()
-    # If the data has already been classified, run the classification stats
-    print ("process took %s to compile"%(round(time.time() - t0,3)))
+t0 = time.time()
+# What receiver type are you assessing accuracy for?
+recType = 'orion'                                                              # what is the receiver type?
+proj_dir = r'\\EGRET\Condor\Jobs\1503\212\Calcs\Scotland_Fall2019'             # what is the project directory?
+dbName = 'manuscript.db'                                                       # whad did you call the database?
+figureWS = os.path.join(proj_dir,'Output','Figures')    
+projectDB = os.path.join(proj_dir,'Data',dbName)
+k = 10
+# ['conRecLength','consDet','hitRatio','noiseRatio','seriesHit','power','lagDiff']
+fields = ['conRecLength','hitRatio']#,'power','lagBDiff','noiseRatio']
+# create cross validated data object
+cross = abtas.cross_validated(k,recType,fields,projectDB,figureWS)
+print ("Created a cross validated data object")
+# perform the cross validation method
+for i in np.arange(0,k,1):
+    cross.fold(i)
+# print the summary
+cross.summary()
+print ("process took %s to compile"%(round(time.time() - t0,3)))
 ```
 
 ## False Positive Classification
