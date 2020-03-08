@@ -168,7 +168,7 @@ The first part of the Naïve Bayes classifier develops training data, which is c
 The site training script employs parallel processing over multiple cores.  We set the number of cores over which we will distribute tasks on line 40.  **Do not create more processes than your computer has cores.**  It is also recommended to save at least 1 core for other computer functions like email, therefore line 40 = n – 1, where n = number of cores on your machine.  
 
 ```
-import multiprocessing as mp
+# import modules
 import time
 import os
 import sqlite3
@@ -176,42 +176,53 @@ import pandas as pd
 import abtas
 import warnings
 warnings.filterwarnings('ignore')
-'''train data - we can run function in serial or multiprocessing over cores in a
-computer.  this script uses multiprocessing, which is why we call the process 
-behind the main statement.'''
-if __name__ == "__main__":
-    # set script parameters
-    site = 't04'                                                               # what is the site/receiver ID?
-    recType = 'orion'                                                          # what is the receiver type?
-    proj_dir = r'J:\1210\005\Calcs\Studies\3_3_19\2018\Test'                   # what is the project directory?
-    dbName = 'ultrasound_2018_test.db'                                         # what is the name of the project database    
-    file_dir = os.path.join(proj_dir,'Data','Training_Files')
-    files = os.listdir(file_dir)
-    projectDB = os.path.join(proj_dir,'Data',dbName)
-    scratch_dir = os.path.join(proj_dir,'Output','Scratch')
-    print ("There are %s files to iterate through"%(len(files)))
-    tS = time.time()                                                           
-    abtas.telemDataImport(site,recType,file_dir, projectDB)                        
+# set script parameters
+site = 'T10'                                                                   # what is the site/receiver ID?
+recType = 'orion'                                                              # what is the receiver type?
+proj_dir = r'\\EGRET\Condor\Jobs\1503\212\Calcs\Scotland_Fall2019'             # what is the project directory?
+dbName = 'manuscript.db'                                                       # whad did you call the database?
+scanTime = 1.0
+channels = 1
+ant_to_rec_dict = {1:'T10'}                                                    # if orion receiver switching between antennas add more to dictionary
+
+# set up workspaces     
+file_dir = os.path.join(proj_dir,'Data','Training_Files')
+files = os.listdir(file_dir)
+projectDB = os.path.join(proj_dir,'Data',dbName)
+scratch_dir = os.path.join(proj_dir,'Output','Scratch')
+figure_ws = os.path.join(proj_dir,'Output','Figures')
+print ("There are %s files to iterate through"%(len(files)))
+tS = time.time()                                                             
+
+# if you are using a Lotek receiver or orion that does not employ switching use:                                                          
+abtas.telemDataImport(site,recType,file_dir,projectDB) 
+
+# if orion recievers use swtiching use:
+#abtas.telemDataImport(site,recType,file_dir,projectDB, switch = True, scanTime = scanTime, channels = channels, ant_to_rec_dict = ant_to_rec_dict) 
+
+for i in ant_to_rec_dict:
     # get the fish to iterate through using SQL 
     conn = sqlite3.connect(projectDB)
     c = conn.cursor()
-    sql = "SELECT DISTINCT tblRaw.FreqCode FROM tblRaw LEFT JOIN tblMasterTag ON tblRaw.FreqCode = tblMasterTag.FreqCode WHERE recID == '%s' AND TagType IS NOT 'Study' AND TagType IS NOT 'Test';"%(site)
-    histories = pd.read_sql_query(sql,con = conn).FreqCode.values
+    sql = "SELECT tblRaw.FreqCode FROM tblRaw LEFT JOIN tblMasterTag ON tblRaw.FreqCode = tblMasterTag.FreqCode WHERE recID == '%s' AND TagType IS NOT 'Beacon' AND TagType IS NOT 'Test';"%(site)
+    histories = pd.read_sql_query(sql,con = conn).FreqCode.unique()
     c.close()
     print ("Finished importing data and indexing database, there are %s fish to iterate through" %(len(histories)))
-    print ("Creating training objects for every fish at site %s"%(site))    
+    print ("Creating training objects for every fish at site %s"%(site))   
+    print ("This will take a while")
+    print ("Grab a coffee, call your mother.") 
     # create list of training data objects to iterate over with a Pool multiprocess
     iters = []
     for i in histories:
         iters.append(abtas.training_data(i,site,projectDB,scratch_dir))
-    print ("Start Multiprocessing")
-    print ("This will take a while")
-    print ("Grab a coffee, call your mother.")
-    pool = mp.Pool(processes = 3)                                               # the number of processes equals 1 - the number of processors you have
-    pool.map(abtas.calc_train_params_map, iters)                                     
+    print ("history objects created")
+    for i in iters:
+        abtas.calc_train_params_map(i)  
     print ("Telemetry Parameters Quantified, appending data to project database")
     abtas.trainDatAppend(scratch_dir,projectDB)    
     print ("process took %s to compile"%(round(time.time() - tS,3)))
+    train_stats = abtas.training_results(recType,projectDB,figure_ws)#,site)
+    train_stats.train_stats() 
 ```
 
 ## Cross-Validate Training Data
