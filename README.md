@@ -365,6 +365,7 @@ class_stats.classify_stats()
 In some circumstances, the end user may not have beacon tags that they can sacrifice.  In this case they can use training data from a previous project or other researcher.  The classify_2.py script is nearly identical to classify_1.py, with the exception of an extra argument in the function call on line 40.  This argument identifies a separate training database.  
 
 Classify_2.py:
+
 1.	Update the receiver ID (line 11) 
 2.	Update the receiver type (line 12) – input can either be **lotek** or **orion** 
 3.	Update input workspace (line 13) 
@@ -375,6 +376,7 @@ Classify_2.py:
 8.  If Orion switches between receivers, update with the number of antennas (line 19)
 9.  If Orion switches between receivers, indicate all antennas in the antenna to receiver dictionary (line 22)
 10.	Update whether or not to use an informed prior (line, default = True
+
 ```
 # import modules required for function dependencies
 import time
@@ -411,7 +413,6 @@ projectDB = os.path.join(proj_dir,'Data',dbName)
 # ['conRecLength','consDet','hitRatio','noiseRatio','seriesHit','power','lagDiff']
 fields = ['conRecLength','hitRatio','power','lagDiff']
 prior = True
-
 
 files = os.listdir(workFiles)
 print ("There are %s files to iterate through"%(len(files)))
@@ -450,6 +451,79 @@ for i in ant_to_rec_dict:
     class_stats = abtas.classification_results(recType,projectDB,figure_ws,site)
     class_stats.classify_stats()
 ```
+
+Classify_3 reclassifies data until there are no more false positives to remove and/or the log posterior ratio no longer improves.  The classify 3 script and workflow is below:
+
+1.	Update the receiver ID (line 12)
+2.  Enter the classification iteration number (line 13) **start at 2**
+3.	Update the receiver type (line 14) – input can either be **lotek** or **orion** 
+4.	Update input workspace (line 15) 
+5.	Update project database name (line 16) 
+6.	Update the fields used in the classification (line 27)
+7.  Update informed prior (line 30) **default True**
+
+```
+# import modules required for function dependencies
+import time
+import os
+import sqlite3
+import pandas as pd
+import abtas
+import warnings
+warnings.filterwarnings('ignore')
+tS = time.time()
+
+#set script parameters
+site = 'T02'                                                                   # what is the site/receiver ID?
+class_iter= 2                                                                  # Enter the iteration number here--start at 2
+recType = 'orion'                                                              # what is the receiver type?
+proj_dir = r'\\EGRET\Condor\Jobs\1503\212\Calcs\Scotland_Fall2019'             # what is the project directory?
+dbName = 'manuscript.db'                                                       # whad did you call the database?
+
+# directory creations
+outputWS = os.path.join(proj_dir,'Output')                                     # we are getting time out error and database locks - so let's write to disk for now 
+outputScratch = os.path.join(outputWS,'Scratch')                               # we are getting time out error and database locks - so let's write to disk for now 
+workFiles = os.path.join(proj_dir,'Data','TrainingFiles')
+projectDB = os.path.join(proj_dir,'Data',dbName)
+figure_ws = os.path.join(proj_dir,'Output','Figures')
+
+# list fields used in likelihood classification, must be from this list:
+# ['conRecLength','consDet','hitRatio','noiseRatio','seriesHit','power','lagDiff']
+fields = ['conRecLength','hitRatio','power','noiseRatio','lagDiff']
+
+# Do we want to use an informed prior?
+prior = False
+
+print ("Set Up Complete, Creating Histories")
+
+# get the fish to iterate through using SQL 
+conn = sqlite3.connect(projectDB)
+c = conn.cursor()
+sql = "SELECT FreqCode FROM tblRaw WHERE recID == '%s';"%(site)
+histories = pd.read_sql(sql,con = conn)
+tags = pd.read_sql("SELECT FreqCode FROM tblMasterTag WHERE TagType == 'Study'", con = conn)
+histories = histories.merge(right = tags, left_on = 'FreqCode', right_on = 'FreqCode').FreqCode.unique()
+c.close()
+print ("There are %s fish to iterate through at site %s" %(len(histories),site))
+print ("This will take a while")
+print ("Grab a coffee, call your mother.")
+
+# create list of training data objects and classify
+iters = []
+for i in histories:
+    iters.append(abtas.classify_data(i,site,fields,projectDB,outputScratch,informed_prior = prior,reclass_iter=class_iter))
+print ("History objects created, proceed to classification")
+for i in iters:
+    abtas.calc_class_params_map(i)
+print ("Detections classified!") 
+abtas.classDatAppend(site,outputScratch,projectDB,reclass_iter = class_iter)
+print ("process took %s to compile"%(round(time.time() - tS,3)))
+
+# get data you just classified, run some statistics and make some plots
+class_stats = abtas.classification_results(recType,projectDB,figure_ws,site,reclass_iter = class_iter)
+class_stats.classify_stats()    
+```
+
 ## Overlap Removal
 The Naïve Bayes Classifier will identify and remove false positive detections.  However, if two receivers are placed near each other, a tag may be heard on more than one at the same time.  When assessing movement, overlap is problematic because the fish cannot be in the two different places at the same time.  ABTAS employs an overlap reduction method inspired by nested Russian dolls.  The detection ranges on antennas vary greatly, but it was assumed that the regions increase in size from stripped coaxial cable up to large aerial Yagis. An algorithm inspired by nested-Russian Dolls was developed to reduce overlap and discretize positions in time and space within the telemetry network. If a fish can be placed at a receiver with a limited detection zone (stripped coaxial cables or dipole), then it can be removed from the overlapping detection zone (Yagi) if it is also recaptured there. 
 
