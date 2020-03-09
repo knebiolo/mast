@@ -9,7 +9,7 @@ Radio telemetry projects create vast quantities of data, especially those that e
 
 Starting in 2019, Kleinschmidt Associates (primary developer) will begin hosting the code on Atlassian Bitbucket.  With internal and external collaborators, version control has become an issue and the software is no longer standard among users.  Bitbucket is a web-based version control repository hosting service, which uses the Git system of version control.  It is the preferred system for developers collaborating on proprietary code, because users must be invited to contribute.  The Git distributed version control system tracks and manages changes in source code during development.  This is important when more than 1 user of the open source software adapts it to use on their project.  
 
-The software is written in Python 3.7.x and uses dependencies outside of the standard packages.  Please make sure you have the following modules installed and updated when running telemetry analysis: Numpy, Pandas, Networkx, Matplotlib, Sqlite3, and Statsmodels.  The software also uses a number of standard packages including: Multiprocessing, Time, Math, Os, Datetime, Operator, Threading and Collections.  
+The software is written in Python 3.7.x and uses dependencies outside of the standard packages.  Please make sure you have the following modules installed and updated when running telemetry analysis: Numpy, Pandas, Networkx, Matplotlib, Sqlite3, and Statsmodels.  The software also uses a number of standard packages including: Time, Math, Os, Datetime, Operator, and Collections.  
 
 The example scripts found in the Read Me will guide the end user through a coplete radio telemetry project.  However, you could import abtas into your own proprietary scripts and data management routines.  These scripts are examples only.
 
@@ -364,6 +364,92 @@ class_stats.classify_stats()
 
 In some circumstances, the end user may not have beacon tags that they can sacrifice.  In this case they can use training data from a previous project or other researcher.  The classify_2.py script is nearly identical to classify_1.py, with the exception of an extra argument in the function call on line 40.  This argument identifies a separate training database.  
 
+Classify_2.py:
+1.	Update the receiver ID (line 11) 
+2.	Update the receiver type (line 12) – input can either be **lotek** or **orion** 
+3.	Update input workspace (line 13) 
+4.	Update project database name (line 14) 
+5.  Update the training database name (line 15) - **name of database that contains the training dataset - should be in Data folder**
+6.	Update the fields used in the classification (line 34)
+7.  If Orion switches between receivers update scane time for each antenna (line 18)
+8.  If Orion switches between receivers, update with the number of antennas (line 19)
+9.  If Orion switches between receivers, indicate all antennas in the antenna to receiver dictionary (line 22)
+10.	Update whether or not to use an informed prior (line, default = True
+```
+# import modules required for function dependencies
+import time
+import os
+import sqlite3
+import pandas as pd
+import warnings
+warnings.filterwarnings('ignore')
+import abtas
+
+#set script parameters
+site = 'T07'                                                                   # what is the site/receiver ID?
+recType = 'lotek'                                                              # what is the receiver type?
+proj_dir = r'J:\1503\212\Calcs\Scotland_Fall2019'                              # what is the project directory?
+dbName = 'Scotland_Eel_2019.db'                                                # what is the name of the project database?
+t_DBName = 'ultrasound_2018 - Copy.db'                                         # what is the name of the training database?  We assume it is in the same directory
+
+# optional orion parameters if receivers used switching
+scanTime = 1.0
+channels = 1
+
+# even if you aren't using switching, fill in this dictionary with the antenna to reciever ID relationship
+ant_to_rec_dict = {'1':'T07'}
+
+# create worskspaces - you haven't changed the directory have you?                                              
+trainingDB = os.path.join(proj_dir,'Data',t_DBName)
+outputWS = os.path.join(proj_dir,'Output')                                     # we are getting time out error and database locks - so let's write to disk for now 
+outputScratch = os.path.join(outputWS,'Scratch')                               # we are getting time out error and database locks - so let's write to disk for now 
+figure_ws = os.path.join(outputWS,'Figures')
+workFiles = os.path.join(proj_dir,'Data','Training_Files')
+projectDB = os.path.join(proj_dir,'Data',dbName)
+
+# list fields used in likelihood classification, must be from this list:
+# ['conRecLength','consDet','hitRatio','noiseRatio','seriesHit','power','lagDiff']
+fields = ['conRecLength','hitRatio','power','lagDiff']
+prior = True
+
+
+files = os.listdir(workFiles)
+print ("There are %s files to iterate through"%(len(files)))
+tS = time.time()  
+
+# if orion receivers do not employ switching use:                                                          
+abtas.telemDataImport(site,recType,workFiles,projectDB) 
+
+# if orion recievers use swtiching use:
+#abtas.telemDataImport(site,recType,workFiles,projectDB, switch = True, scanTime = scanTime, channels = channels, ant_to_rec_dict = ant_to_rec_dict) 
+
+for i in ant_to_rec_dict:
+    # get the fish to iterate through using SQL
+    site = ant_to_rec_dict[i]
+    conn = sqlite3.connect(projectDB)
+    c = conn.cursor()
+    sql = "SELECT FreqCode FROM tblRaw WHERE recID == '%s';"%(site)
+    histories = pd.read_sql(sql,con = conn)
+    tags = pd.read_sql("SELECT FreqCode FROM tblMasterTag WHERE TagType == 'Study'", con = conn)
+    histories = histories.merge(right = tags, left_on = 'FreqCode', right_on = 'FreqCode').FreqCode.unique()
+    c.close()
+    print ("There are %s fish to iterate through at site %s" %(len(histories),site))
+    print ("This will take a while")
+    print ("Grab a coffee, call your mother.")    
+    # create list of training data objects to iterate over with a Pool multiprocess
+    iters = []
+    for i in histories:
+        iters.append(abtas.classify_data(i,site,fields,projectDB,outputScratch,training = trainingDB))
+    print ("Finished creating history objects")
+    for i in iters:
+        abtas.calc_class_params_map(i)     
+    print ("Detections classified!")
+    abtas.classDatAppend(site,outputScratch,projectDB)   
+    print ("process took %s to compile"%(round(time.time() - tS,3)))
+    # generate summary statistics for classification by receiver type
+    class_stats = abtas.classification_results(recType,projectDB,figure_ws,site)
+    class_stats.classify_stats()
+```
 ## Overlap Removal
 The Naïve Bayes Classifier will identify and remove false positive detections.  However, if two receivers are placed near each other, a tag may be heard on more than one at the same time.  When assessing movement, overlap is problematic because the fish cannot be in the two different places at the same time.  ABTAS employs an overlap reduction method inspired by nested Russian dolls.  The detection ranges on antennas vary greatly, but it was assumed that the regions increase in size from stripped coaxial cable up to large aerial Yagis. An algorithm inspired by nested-Russian Dolls was developed to reduce overlap and discretize positions in time and space within the telemetry network. If a fish can be placed at a receiver with a limited detection zone (stripped coaxial cables or dipole), then it can be removed from the overlapping detection zone (Yagi) if it is also recaptured there. 
 
