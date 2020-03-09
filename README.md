@@ -690,12 +690,35 @@ The script will produce an interactive 3d plot than you can rotate and examine. 
 
 ![Data Removal Steps](https://i.ibb.co/q0Nzpc7/reduction.png)
 
-Assuming satisfactory results, the researcher can now proceed to aggregation and statistical formatting phases of the radio telemetry study.
+# The Big Merge
+The final data management step prior to statistical formatting merges classified data and removes overlapping detection.  To perform this operation, run The Big Merge.
 
-#Statistical Formatting
+Follow these steps and run the following script:
+
+1. Declare the project directory (line 6).
+2. Declare the project database name
+
+Note:  the big merge has a pre-release filter that removes detections from study tags before their release date.  
+
+```
+# import modules
+import abtas
+import os
+
+# declare workspaces
+project_dir = r'J:\920\162\Calcs\Data'
+dbName = 'Holyoke_2019'          
+outputWS = os.path.join(project_dir,'Data')
+projectDB = os.path.join(project_dir,'Data',dbName)
+
+# the big merge
+abtas.the_big_merge(outputWS,projectDB, pre_release_Filter = True)
+```
+
+# Statistical Formatting
 ABTAS has functions that can format datasets appropriate for statistical assessment with Competing Risks and Mark Recapture methods.  Prior to running the formatting functions, you must merge the receiver specific recapture tables into a recaptures table consisting to valid detections only with the ABTAS function ‘the_big_merge’.  Arguments for the function are simple, just the project directory and database name are required.  The final recaptures table can be exported for use in your own analysis.  
 
-##Cormack-Jolly-Seber
+## Cormack-Jolly-Seber
 Mark-recapture survival analysis is typically used to assess passage effectiveness of fish ladders (Beeman and Perry, 2012). It has also been used to assess upstream movement of fish in river systems along the Northeastern United States (Kleinschmidt 2015, 2017, 2018, 2019).  Use of the term “survival” is standard for mark-recapture analysis, which is predominantly used to assess the actual survival of marked animals over time. However, survival in this context simply means successful passage, it does not convey mortality.  Therefore, we will use probability of arrival rather than survival to reduce confusion.  To estimate arrival parameters with radio telemetry under natural or anthropogenic conditions, one must follow individually marked animals through time (Lebreton et al., 1992). However, it is rarely possible to follow all individuals of an initial sample over time (Lebreton et al., 1992) as is evident by varying recapture rates at each telemetry receiver location. Open population mark-recapture models allow for change (emigration and mortality) during the course of a study (Armstrup, McDonald, and Manly, 2005) and can incorporate imperfect recapture histories. The Cormack-Jolly-Seber (CJS) model is based solely on recaptures of marked animals and provides estimates of arrival and capture probabilities only (Armstrup, McDonald, and Manly, 2005).  
 
 To create a dataset suitable for analysis with CJS modeling, you will first need to develop a receiver-to-recapture-occasion relationship.  CJS modeling is simple; the output is the probability of arriving at the next upstream or downstream recapture occasion.  The receiver-to-recapture-occasion relationship simply groups nodes together into logical recapture occasions like upstream-downstream or forebay-tailrace.  CJS recapture occasions can be envisioned as gates within a river system and may represent potential bottlenecks.  
@@ -703,6 +726,7 @@ To create a dataset suitable for analysis with CJS modeling, you will first need
 The input to the CJS function is a dictionary that describes a receiver to recapture occasion relationship and list of receivers used in the analysis.  Some receives may represent offshoots from the main river reach and are not used in the analysis.  Some recapture occasions may be a single receiver, while others are up of a group of receivers. 
 
 To run the CJS_data_prep.py function, follow these steps:
+
 1.	Update line 7 with your project directory
 2.	Update line 8 with your project database name
 3.	Update line 12 with a name for your model.
@@ -740,11 +764,12 @@ print ("Step 2 Completed, MARK Input file created")
 print ("Data formatting complete, proceed to MARK for live recapture modeling (CJS)")
 ```
 
-##Competing Risks Assessment
+## Competing Risks Assessment
 A multi-state model is used to understand situations where a tagged animal transitions from one state to the next (Therneau, Crowson, & Atkinson, 2016). A standard survival curve (Kaplan-Meier) can be thought of as a simple multi-state model with two states (alive and dead) and one transition between those two states (Therneau, Crowson, & Atkinson, 2016). For the purpose of radio telemetry projects, these two states can be staging and passing. Competing risks generalize the standard survival analysis of a single endpoint (as described above) into an investigation of multiple first event types (Beyersmann, Allignol, & Schumacher, 2011). Competing risks are the simplest multi-state model, where events are envisioned as transitions between states (Beyersmann, Allignol, & Schumacher, 2011). For competing risks, there is a common initial state for all models (Beyersmann, Allignol, & Schumacher, 2011). For example, with the assessment of time to move either upstream or downstream of the ultrasound array, the common initial state is within the array. When fish move upstream or downstream of the array, they enter an absorbing state. The baseline hazard is measured with the Nelson-Aalen cause specific cumulative incidence function. One can think of the hazard as the probability of experiencing an event (passage) within the next time unit conditional on still being in the initial state (Beyersmann, Allignol, & Schumacher, 2011). 
 
 ABTAS produces counting process style datasets for use in a Competing Risks assessment with the survival package in R.  The time-to-event class object has methods that can produce datasets suitable for construction of Nelson-Aalen cumulative incidence functions and with Cox Proportional-Hazards (CoxPH) regression.  The major difference between the two is that the CoxPH output expands the time series between the start of a trial and the event time is into equal interval bins so that it can be joined with time-dependent covariates in your analysis software of choice.  The default time series interval is 15 minutes.  However, the end user can pass the optional argument ‘bucket_length_min’ to line 21. If 20 is passed, the function will expand time into 20 minute segments and the end user can join each row to a covariate on the ‘FlowPeriod’ column.  
 Follow these steps to prepare your data for competing risks analysis:
+
 1.	Update line 7 with the project directory
 2.	Update line 8 with the project database name
 3.	Update line 15 with the node to state dictionary.  This dictionary groups nodes together into states for Competing Risks multi-state modeling.  
@@ -782,7 +807,7 @@ tte.summary()
 print ("Data formatting complete, proceed to R for Time to Event Modeling")
 ```
 
-#Bibliography
+# Bibliography
 
 Armstrup, S. C., McDonald, T. L., & Manly, B. F. (2010). Handbook of Capture-Recapture Analysis. Princeton University Press.
 Beeman, J. W., & Perry, R. W. (2012). Bias from False-Positive Detections and Strategies for their Removal in Studies Using Telemetry. In N. S. Adams, J. W. Beeman, & J. H. Eiler (Eds.). American Fisheries Society.
