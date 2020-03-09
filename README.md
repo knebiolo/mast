@@ -690,6 +690,8 @@ The script will produce an interactive 3d plot than you can rotate and examine. 
 
 ![Data Removal Steps](https://i.ibb.co/q0Nzpc7/reduction.png)
 
+Assuming satisfactory results, the researcher can now proceed to aggregation and statistical formatting phases of the radio telemetry study.
+
 #Statistical Formatting
 ABTAS has functions that can format datasets appropriate for statistical assessment with Competing Risks and Mark Recapture methods.  Prior to running the formatting functions, you must merge the receiver specific recapture tables into a recaptures table consisting to valid detections only with the ABTAS function ‘the_big_merge’.  Arguments for the function are simple, just the project directory and database name are required.  The final recaptures table can be exported for use in your own analysis.  
 
