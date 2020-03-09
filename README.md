@@ -812,15 +812,15 @@ print ("Data formatting complete, proceed to R for Time to Event Modeling")
 
 # Bibliography
 
-Armstrup, S. C., McDonald, T. L., & Manly, B. F. (2010). Handbook of Capture-Recapture Analysis. Princeton University Press.
-Beeman, J. W., & Perry, R. W. (2012). Bias from False-Positive Detections and Strategies for their Removal in Studies Using Telemetry. In N. S. Adams, J. W. Beeman, & J. H. Eiler (Eds.). American Fisheries Society.
-Beyersmann, J., Allignol, A., & Schumacher, M. (2011). Competing Risks and Multistate Models with R. New York, NY: Springer.
-Lebreton, J.-D., Burnham, K. P., Clobert, J., & Anderson, D. R. (1992). Modeling survival and testing biological hypotheses using marked animals: a unified approach with case studies. Ecological monographs, 62, 67-118.
-Marsland, S. (2009). Machine Learning: An Algorithmic Perspective. Boca, Raton, Florida: CRC Press, Taylor and Francis Group.
-Richert, W., & Pedro-Coelho, L. (2013). Building Machine-Learning Systems with Python. Birmingham, UK: Packt Publishing.
-Sibly, R. M., Nott, H. M., & Fletcher, D. J. (1990). Splitting Behavior into bouts. Animal Behavior.
-Stone, J. V. (2013). Bayes ́Rule: A Tutorial Introduction to Bayesian Analysis. Lexington, KY: Sebtel Press.
-Therneau, T., Crowson, C., & Atkinson, E. (2016, October). Multi-state models and competing risks. Multi-state models and competing risks. Retrieved from https://cran.r-project.org/web/packages/survival/vignettes/compete.pdf
+1.  Armstrup, S. C., McDonald, T. L., & Manly, B. F. (2010). Handbook of Capture-Recapture Analysis. Princeton University Press.
+2.  Beeman, J. W., & Perry, R. W. (2012). Bias from False-Positive Detections and Strategies for their Removal in Studies Using Telemetry. In N. S. Adams, J. W. Beeman, & J. H. Eiler (Eds.). American Fisheries Society.
+3.  Beyersmann, J., Allignol, A., & Schumacher, M. (2011). Competing Risks and Multistate Models with R. New York, NY: Springer.
+4.  Lebreton, J.-D., Burnham, K. P., Clobert, J., & Anderson, D. R. (1992). Modeling survival and testing biological hypotheses using marked animals: a unified approach with case studies. Ecological monographs, 62, 67-118.
+5.  Marsland, S. (2009). Machine Learning: An Algorithmic Perspective. Boca, Raton, Florida: CRC Press, Taylor and Francis Group.
+6.  Richert, W., & Pedro-Coelho, L. (2013). Building Machine-Learning Systems with Python. Birmingham, UK: Packt Publishing.
+7.  Sibly, R. M., Nott, H. M., & Fletcher, D. J. (1990). Splitting Behavior into bouts. Animal Behavior.
+8.  Stone, J. V. (2013). Bayes ́Rule: A Tutorial Introduction to Bayesian Analysis. Lexington, KY: Sebtel Press.
+9.  Therneau, T., Crowson, C., & Atkinson, E. (2016, October). Multi-state models and competing risks. Multi-state models and competing risks. Retrieved from https://cran.r-project.org/web/packages/survival/vignettes/compete.pdf
 
 # Licensing
 MIT License
