@@ -600,11 +600,10 @@ Each node on a telemetry network may consist of one or more receivers (Figure 2)
 The Russian Doll algorithm iterates over each detection at each node in Figure 8. Then, the algorithm iterates over each presence at each successor node and asks a simple question: Was the fish detected at the child node while it was also detected at the parent node? If the answer is yes, then the detection at the parent node overlaps the detection at the child node. Thus, the algorithm is nothing more than an iterative search over a directed graph that applies a simple Boolean logic statement. However, it is very powerful in its ability to simplify movement and place fish in discrete spatial locations at discrete points in time. 
 
 To run the Russian-Doll, open up overlap.py and follow these steps:
-1.	Update Line 13 with the project directory
-2.	Update line 14 with the database name
-3.	Update line 19 with the nodes that overlap or are overlapped
-4.	Update the successor relationships in line 20 as a list of tuples (‘parent node’, ’child node’) – these describe the edge relationship in the directed graph pictured in Figure 8 
-5.	Update line 30 with the number of parallel processes (n – 1, where n = number of CPU cores)
+1.	Update Line 11 with the project directory
+2.	Update line 12 with the database name
+3.	Update line 17 with the nodes that overlap or are overlapped
+4.	Update the successor relationships in line 19 as a list of tuples (‘parent node’, ’child node’) – these describe the edge relationship in the directed graph pictured in Figure 8 
 
 example overlap.py
 ```
@@ -615,42 +614,46 @@ import abtas
 import os
 import warnings
 warnings.filterwarnings('ignore')
-import multiprocessing as mp
 import time
-if __name__ == "__main__":
-    tS = time.time()
-    # set up script parameters
-    project_dir = r'J:\1210\005\Calcs\Studies\3_3_19\2018\Test'
-    dbName = 'ultrasound_2018_test.db'          
-    outputWS = os.path.join(project_dir,'Output','Scratch')
-    figureWS = os.path.join(project_dir,'Output','Figures')
-    projectDB = os.path.join(project_dir,'Data',dbName)
-    # which node do you care about?
-    nodes = ['S01','S02','S03','S04','S05','S06','S07','S08','S09']
-    edges = [('S01','S05'),('S01','S06'),('S01','S07'),('S01','S08'),('S01','S09'),
-             ('S02','S05'),('S02','S06'),('S02','S07'),('S02','S08'),('S02','S09'),
-             ('S03','S05'),('S03','S06'),('S03','S07'),('S03','S08'),('S03','S09'),
-             ('S04','S05'),('S04','S06'),('S04','S07'),('S04','S08'),('S04','S09'),
-             ('S09','S05'),('S09','S06'),('S09','S07'),('S09','S08'),
-             ('S05','S08'),
-             ('S06','S08'),
-             ('S07','S08')]
-    # Step 1, create an overlap object
-    print ("Start creating overlap data objects - 1 per node")
-    iters = []
-    for i in nodes:
-        iters.append(abtas.overlap_reduction(i,nodes,edges,projectDB,outputWS,figureWS))
-        print ("Completed overlap data object for node %s"%(i))
-    print ("Start Multiprocessing")
-    print ("This will take a while")
-    print ("Grab a coffee, call your mother.")    
-    pool = mp.Pool(processes = 8)                                              # the number of processes equals the number of processors you have
-    pool.map(abtas.russian_doll, iters)                                         # map the russian doll function over each training data object 
-    print ("Overlap analysis complete proceed to data management")
-    # Step 3, Manage Data   
-    abtas.manage_node_overlap_data(outputWS,projectDB)
-    print ("Overlap Removal Process complete, took %s seconds to compile"%(round(time.time() - tS,4)))
-    del iters
+tS = time.time()
+# set up script parameters
+project_dir = r'C:\Users\Alex Malvezzi\Desktop'
+dbName = 'ultrasound_2019.db'          
+outputWS = os.path.join(project_dir,'Output','Scratch')
+figureWS = os.path.join(project_dir,'Output','Figures')
+projectDB = os.path.join(project_dir,'Data',dbName)
+# which node do you care about?
+nodes = ['S01','S02','S12','S13','S14','S15','S16','S17','S18','S19','S21','S22','S23','S24']
+edges = [('S02','S01'),
+         ('S02','S01'),
+         ('S13','S14'),('S13','S15'),('S13','S12'),('S13','S16'),('S13','S17'),
+         ('S14','S15'),('S14','S16'),('S14','S17'),
+         ('S16','S13'),('S16','S15'),('S16','S22'),('S16','S18'),('S16','S19'),('S16','S17'),('S16','S14'),('S16','S23'),('S16','S24'),('S16','S21'),
+         ('S17','S18'),('S17','S19'),('S17','S21'),('S17','S13'),('S17','S24'),('S17','S14'),('S17','S22'),('S17','S23'),
+         ('S18','S16'),('S18','S17'),
+         ('S21','S16'),('S21','S17'),
+         ('S22','S16'),
+         ('S19','S18'),
+         ('S22','S21'),('S22','S16'),('S22','S17'),
+         ('S23','S16'),('S23','S17'),
+         ('S24','S16'),('S24','S17')]
+# Step 1, create an overlap object
+print ("Start creating overlap data objects - 1 per node")
+iters = []
+for i in nodes:
+    iters.append(abtas.overlap_reduction(i,nodes,edges,projectDB,outputWS,figureWS))
+    print ("Completed overlap data object for node %s"%(i))
+print ("Start Multiprocessing")
+print ("This will take a while")
+print ("Grab a coffee, call your mother.")    
+for i in iters:
+    abtas.russian_doll(i)
+
+print ("Overlap analysis complete proceed to data management")
+# Step 3, Manage Data   
+abtas.manage_node_overlap_data(outputWS,projectDB)
+print ("Overlap Removal Process complete, took %s seconds to compile"%(round(time.time() - tS,4)))
+del iters
 ```
 
 ## Fish History
