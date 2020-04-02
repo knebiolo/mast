@@ -1000,38 +1000,71 @@ def likelihood(assumption,classify_object,status = 'A'):
         trueFields = {'conRecLength':'LconRecT','consDet':'LconsDetT','hitRatio':'LHitRatioT','noiseRatio':'LnoiseT','seriesHit':'LseriesHitT','power':'LPowerT','lagDiff':'LlagT'}
         falseFields = {'conRecLength':'LconRecF','consDet':'LconsDetF','hitRatio':'LHitRatioF','noiseRatio':'LnoiseF','seriesHit':'LseriesHitF','power':'LPowerF','lagDiff':'LlagF'}
 
-
-    if assumption == True:
-        if len(fields) == 1:
-            return classify_object.histDF[trueFields[fields[0]]] 
-        elif len(fields) == 2:
-            return classify_object.histDF[trueFields[fields[0]]] * classify_object.histDF[trueFields[fields[1]]]
-        elif len(fields) == 3:
-            return classify_object.histDF[trueFields[fields[0]]] * classify_object.histDF[trueFields[fields[1]]] * classify_object.histDF[trueFields[fields[2]]]
-        elif len(fields) == 4:
-            return classify_object.histDF[trueFields[fields[0]]] * classify_object.histDF[trueFields[fields[1]]] * classify_object.histDF[trueFields[fields[2]]]  * classify_object.histDF[trueFields[fields[3]]]
-        elif len(fields) == 5:
-            return classify_object.histDF[trueFields[fields[0]]] * classify_object.histDF[trueFields[fields[1]]] * classify_object.histDF[trueFields[fields[2]]]  * classify_object.histDF[trueFields[fields[3]]]  * classify_object.histDF[trueFields[fields[4]]]
-        elif len(fields) == 6:
-            return classify_object.histDF[trueFields[fields[0]]] * classify_object.histDF[trueFields[fields[1]]] * classify_object.histDF[trueFields[fields[2]]]  * classify_object.histDF[trueFields[fields[3]]]  * classify_object.histDF[trueFields[fields[4]]]  * classify_object.histDF[trueFields[fields[5]]]
-        elif len(fields) == 7:
-            return classify_object.histDF[trueFields[fields[0]]] * classify_object.histDF[trueFields[fields[1]]] * classify_object.histDF[trueFields[fields[2]]]  * classify_object.histDF[trueFields[fields[3]]]  * classify_object.histDF[trueFields[fields[4]]]  * classify_object.histDF[trueFields[fields[5]]]  * classify_object.histDF[trueFields[fields[6]]]
-
-    elif assumption == False:
-        if len(fields) == 1:
-            return classify_object.histDF[falseFields[fields[0]]] 
-        elif len(fields) == 2:
-            return classify_object.histDF[falseFields[fields[0]]] * classify_object.histDF[falseFields[fields[1]]]
-        elif len(fields) == 3:
-            return classify_object.histDF[falseFields[fields[0]]] * classify_object.histDF[falseFields[fields[1]]] * classify_object.histDF[falseFields[fields[2]]]
-        elif len(fields) == 4:
-            return classify_object.histDF[falseFields[fields[0]]] * classify_object.histDF[falseFields[fields[1]]] * classify_object.histDF[falseFields[fields[2]]]  * classify_object.histDF[falseFields[fields[3]]]
-        elif len(fields) == 5:
-            return classify_object.histDF[falseFields[fields[0]]] * classify_object.histDF[falseFields[fields[1]]] * classify_object.histDF[falseFields[fields[2]]]  * classify_object.histDF[falseFields[fields[3]]]  * classify_object.histDF[falseFields[fields[4]]]
-        elif len(fields) == 6:
-            return classify_object.histDF[falseFields[fields[0]]] * classify_object.histDF[falseFields[fields[1]]] * classify_object.histDF[falseFields[fields[2]]]  * classify_object.histDF[falseFields[fields[3]]]  * classify_object.histDF[falseFields[fields[4]]]  * classify_object.histDF[falseFields[fields[5]]]
-        elif len(fields) == 7:
-            return classify_object.histDF[falseFields[fields[0]]] * classify_object.histDF[falseFields[fields[1]]] * classify_object.histDF[falseFields[fields[2]]]  * classify_object.histDF[falseFields[fields[3]]]  * classify_object.histDF[falseFields[fields[4]]]  * classify_object.histDF[falseFields[fields[5]]]  * classify_object.histDF[falseFields[fields[6]]]                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    
+    if status == 'cross':
+        if assumption == True:
+            if len(fields) == 1:
+                return classify_object.testDat[trueFields[fields[0]]] 
+            elif len(fields) == 2:
+                return classify_object.testDat[trueFields[fields[0]]] * classify_object.testDat[trueFields[fields[1]]]
+            elif len(fields) == 3:
+                return classify_object.testDat[trueFields[fields[0]]] * classify_object.testDat[trueFields[fields[1]]] * classify_object.testDat[trueFields[fields[2]]]
+            elif len(fields) == 4:
+                return classify_object.testDat[trueFields[fields[0]]] * classify_object.testDat[trueFields[fields[1]]] * classify_object.testDat[trueFields[fields[2]]]  * classify_object.testDat[trueFields[fields[3]]]
+            elif len(fields) == 5:
+                return classify_object.testDat[trueFields[fields[0]]] * classify_object.testDat[trueFields[fields[1]]] * classify_object.testDat[trueFields[fields[2]]]  * classify_object.testDat[trueFields[fields[3]]]  * classify_object.testDat[trueFields[fields[4]]]
+            elif len(fields) == 6:
+                return classify_object.testDat[trueFields[fields[0]]] * classify_object.testDat[trueFields[fields[1]]] * classify_object.testDat[trueFields[fields[2]]]  * classify_object.testDat[trueFields[fields[3]]]  * classify_object.testDat[trueFields[fields[4]]]  * classify_object.testDat[trueFields[fields[5]]]
+            elif len(fields) == 7:
+                return classify_object.testDat[trueFields[fields[0]]] * classify_object.testDat[trueFields[fields[1]]] * classify_object.testDat[trueFields[fields[2]]]  * classify_object.testDat[trueFields[fields[3]]]  * classify_object.testDat[trueFields[fields[4]]]  * classify_object.testDat[trueFields[fields[5]]]  * classify_object.testDat[trueFields[fields[6]]]
+    
+        elif assumption == False:
+            if len(fields) == 1:
+                return classify_object.testDat[falseFields[fields[0]]] 
+            elif len(fields) == 2:
+                return classify_object.testDat[falseFields[fields[0]]] * classify_object.testDat[falseFields[fields[1]]]
+            elif len(fields) == 3:
+                return classify_object.testDat[falseFields[fields[0]]] * classify_object.testDat[falseFields[fields[1]]] * classify_object.testDat[falseFields[fields[2]]]
+            elif len(fields) == 4:
+                return classify_object.testDat[falseFields[fields[0]]] * classify_object.testDat[falseFields[fields[1]]] * classify_object.testDat[falseFields[fields[2]]]  * classify_object.testDat[falseFields[fields[3]]]
+            elif len(fields) == 5:
+                return classify_object.testDat[falseFields[fields[0]]] * classify_object.testDat[falseFields[fields[1]]] * classify_object.testDat[falseFields[fields[2]]]  * classify_object.testDat[falseFields[fields[3]]]  * classify_object.testDat[falseFields[fields[4]]]
+            elif len(fields) == 6:
+                return classify_object.testDat[falseFields[fields[0]]] * classify_object.testDat[falseFields[fields[1]]] * classify_object.testDat[falseFields[fields[2]]]  * classify_object.testDat[falseFields[fields[3]]]  * classify_object.testDat[falseFields[fields[4]]]  * classify_object.testDat[falseFields[fields[5]]]
+            elif len(fields) == 7:
+                return classify_object.testDat[falseFields[fields[0]]] * classify_object.testDat[falseFields[fields[1]]] * classify_object.testDat[falseFields[fields[2]]]  * classify_object.testDat[falseFields[fields[3]]]  * classify_object.testDat[falseFields[fields[4]]]  * classify_object.testDat[falseFields[fields[5]]]  * classify_object.testDat[falseFields[fields[6]]]                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    
+        
+    else:
+        if assumption == True:
+            if len(fields) == 1:
+                return classify_object.histDF[trueFields[fields[0]]] 
+            elif len(fields) == 2:
+                return classify_object.histDF[trueFields[fields[0]]] * classify_object.histDF[trueFields[fields[1]]]
+            elif len(fields) == 3:
+                return classify_object.histDF[trueFields[fields[0]]] * classify_object.histDF[trueFields[fields[1]]] * classify_object.histDF[trueFields[fields[2]]]
+            elif len(fields) == 4:
+                return classify_object.histDF[trueFields[fields[0]]] * classify_object.histDF[trueFields[fields[1]]] * classify_object.histDF[trueFields[fields[2]]]  * classify_object.histDF[trueFields[fields[3]]]
+            elif len(fields) == 5:
+                return classify_object.histDF[trueFields[fields[0]]] * classify_object.histDF[trueFields[fields[1]]] * classify_object.histDF[trueFields[fields[2]]]  * classify_object.histDF[trueFields[fields[3]]]  * classify_object.histDF[trueFields[fields[4]]]
+            elif len(fields) == 6:
+                return classify_object.histDF[trueFields[fields[0]]] * classify_object.histDF[trueFields[fields[1]]] * classify_object.histDF[trueFields[fields[2]]]  * classify_object.histDF[trueFields[fields[3]]]  * classify_object.histDF[trueFields[fields[4]]]  * classify_object.histDF[trueFields[fields[5]]]
+            elif len(fields) == 7:
+                return classify_object.histDF[trueFields[fields[0]]] * classify_object.histDF[trueFields[fields[1]]] * classify_object.histDF[trueFields[fields[2]]]  * classify_object.histDF[trueFields[fields[3]]]  * classify_object.histDF[trueFields[fields[4]]]  * classify_object.histDF[trueFields[fields[5]]]  * classify_object.histDF[trueFields[fields[6]]]
+    
+        elif assumption == False:
+            if len(fields) == 1:
+                return classify_object.histDF[falseFields[fields[0]]] 
+            elif len(fields) == 2:
+                return classify_object.histDF[falseFields[fields[0]]] * classify_object.histDF[falseFields[fields[1]]]
+            elif len(fields) == 3:
+                return classify_object.histDF[falseFields[fields[0]]] * classify_object.histDF[falseFields[fields[1]]] * classify_object.histDF[falseFields[fields[2]]]
+            elif len(fields) == 4:
+                return classify_object.histDF[falseFields[fields[0]]] * classify_object.histDF[falseFields[fields[1]]] * classify_object.histDF[falseFields[fields[2]]]  * classify_object.histDF[falseFields[fields[3]]]
+            elif len(fields) == 5:
+                return classify_object.histDF[falseFields[fields[0]]] * classify_object.histDF[falseFields[fields[1]]] * classify_object.histDF[falseFields[fields[2]]]  * classify_object.histDF[falseFields[fields[3]]]  * classify_object.histDF[falseFields[fields[4]]]
+            elif len(fields) == 6:
+                return classify_object.histDF[falseFields[fields[0]]] * classify_object.histDF[falseFields[fields[1]]] * classify_object.histDF[falseFields[fields[2]]]  * classify_object.histDF[falseFields[fields[3]]]  * classify_object.histDF[falseFields[fields[4]]]  * classify_object.histDF[falseFields[fields[5]]]
+            elif len(fields) == 7:
+                return classify_object.histDF[falseFields[fields[0]]] * classify_object.histDF[falseFields[fields[1]]] * classify_object.histDF[falseFields[fields[2]]]  * classify_object.histDF[falseFields[fields[3]]]  * classify_object.histDF[falseFields[fields[4]]]  * classify_object.histDF[falseFields[fields[5]]]  * classify_object.histDF[falseFields[fields[6]]]                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    
 
 def calc_class_params_map(classify_object):
     '''
@@ -1394,6 +1427,8 @@ class cross_validated():
         self.trainDF.hitRatio = self.trainDF.hitRatio.astype(float)
         self.trainDF['powerBin'] = (self.trainDF.Power//10)*10
         self.trainDF['noiseBin'] = (self.trainDF.noiseRatio//.1)*.1
+        self.trainDF['lagDiffBin'] = (self.trainDF.lagDiff//10)*.10
+
         cols = ['priorF','LDetHistF','LPowerF','LHitRatioF','LnoiseF','LconRecF','postFalse','priorT','LDetHistT','LPowerT','LHitRatioT','LnoiseT','LconRecT','postTrue','test']
         for i in self.trainDF.columns:
             cols.append(i)
@@ -1407,131 +1442,144 @@ class cross_validated():
         self.fields = likelihood_model
         
     def fold(self,i):
-        testDat = self.trainDF[self.trainDF.fold == i]
-        trainDat = self.trainDF[self.trainDF.fold != i]                                      # create a test dataset that is the current fold
-        testDat['HT'] = np.repeat(1,len(testDat))
-        testDat['HF'] = np.repeat(0,len(testDat))    
+        self.testDat = self.trainDF[self.trainDF.fold == i]
+        self.trainDat = self.trainDF[self.trainDF.fold != i]                                      # create a test dataset that is the current fold
+        self.testDat['HT'] = np.repeat(1,len(self.testDat))
+        self.testDat['HF'] = np.repeat(0,len(self.testDat))    
         
         # Make a Count of the predictor variables and join to training data frame - For ALIVE Strings
-        testDat = testDat.reset_index()
+        self.testDat = self.testDat.reset_index()
         # Series Hit
-        seriesHitCount = trainDat.groupby(['Detection','seriesHit'])['seriesHit'].count()
+        seriesHitCount = self.trainDat.groupby(['Detection','seriesHit'])['seriesHit'].count()
         seriesHitCount = pd.Series(seriesHitCount, name = 'seriesHitCountT')
         seriesHitCount = pd.DataFrame(seriesHitCount).reset_index().rename(columns = {'Detection':'HT'})
-        testDat = pd.merge(left = testDat, right = seriesHitCount, how = u'left',left_on = ['HT','seriesHit'], right_on = ['HT','seriesHit'])
+        self.testDat = pd.merge(left = self.testDat, right = seriesHitCount, how = u'left',left_on = ['HT','seriesHit'], right_on = ['HT','seriesHit'])
         seriesHitCount = seriesHitCount.rename(columns = {'HT':'HF','seriesHitCountT':'seriesHitCountF'})
-        testDat = pd.merge(left = testDat, right = seriesHitCount, how = u'left',left_on = ['HF','seriesHit'], right_on = ['HF','seriesHit'])
+        self.testDat = pd.merge(left = self.testDat, right = seriesHitCount, how = u'left',left_on = ['HF','seriesHit'], right_on = ['HF','seriesHit'])
         #testDat.drop(['seriesHit_x','seriesHit_y'], axis = 1, inplace = True)
   
         # Consecutive Detections 
-        consDetCount = trainDat.groupby(['Detection','consDet'])['consDet'].count()
+        consDetCount = self.trainDat.groupby(['Detection','consDet'])['consDet'].count()
         consDetCount = pd.Series(consDetCount, name = 'consDetCountT')
         consDetCount = pd.DataFrame(consDetCount).reset_index().rename(columns = {'Detection':'HT'})
-        testDat = pd.merge(left = testDat, right = consDetCount, how = u'left', left_on = ['HT','consDet'], right_on = ['HT','consDet'])
+        self.testDat = pd.merge(left = self.testDat, right = consDetCount, how = u'left', left_on = ['HT','consDet'], right_on = ['HT','consDet'])
         consDetCount = consDetCount.rename(columns = {'HT':'HF','consDetCountT':'consDetCountF'})
-        testDat = pd.merge(left = testDat, right = consDetCount, how = u'left', left_on = ['HF','consDet'], right_on = ['HF','consDet'])
+        self.testDat = pd.merge(left = self.testDat, right = consDetCount, how = u'left', left_on = ['HF','consDet'], right_on = ['HF','consDet'])
         #testDat.drop(['consDet_x','consDet_y'], axis = 1, inplace = True)
         
         # Detection History  
-        detHistCount = trainDat.groupby(['Detection','detHist'])['detHist'].count()
+        detHistCount = self.trainDat.groupby(['Detection','detHist'])['detHist'].count()
         detHistCount = pd.Series(detHistCount, name = 'detHistCountT')
         detHistCount = pd.DataFrame(detHistCount).reset_index().rename(columns = {'Detection':'HT'})
-        testDat = pd.merge(how = 'left', left = testDat, right = detHistCount, left_on = ['HT','detHist'],right_on =['HT','detHist'])
+        self.testDat = pd.merge(how = 'left', left = self.testDat, right = detHistCount, left_on = ['HT','detHist'],right_on =['HT','detHist'])
         detHistCount = detHistCount.rename(columns = {'HT':'HF','detHistCountT':'detHistCountF'})
-        testDat = pd.merge(how = 'left', left = testDat, right = detHistCount, left_on = ['HF','detHist'],right_on =['HF','detHist'])
+        self.testDat = pd.merge(how = 'left', left = self.testDat, right = detHistCount, left_on = ['HF','detHist'],right_on =['HF','detHist'])
         #testDat.drop(['detHist_x','detHist_y'], axis = 1, inplace = True)
         
         # Consecutive Record Length 
-        conRecLengthCount = trainDat.groupby(['Detection','conRecLength'])['conRecLength'].count()
+        conRecLengthCount = self.trainDat.groupby(['Detection','conRecLength'])['conRecLength'].count()
         conRecLengthCount = pd.Series(conRecLengthCount, name = 'conRecLengthCountT')
         conRecLengthCount = pd.DataFrame(conRecLengthCount).reset_index().rename(columns = {'Detection':'HT'})
-        testDat = pd.merge(left = testDat, right = conRecLengthCount, how = u'left', left_on = ['HT','conRecLength'], right_on = ['HT','conRecLength'])
+        self.testDat = pd.merge(left = self.testDat, right = conRecLengthCount, how = u'left', left_on = ['HT','conRecLength'], right_on = ['HT','conRecLength'])
         conRecLengthCount = conRecLengthCount.rename(columns = {'HT':'HF','conRecLengthCountT':'conRecLengthCountF'})
-        testDat = pd.merge(left = testDat, right = conRecLengthCount, how = u'left', left_on = ['HF','conRecLength'], right_on = ['HF','conRecLength'])
+        self.testDat = pd.merge(left = self.testDat, right = conRecLengthCount, how = u'left', left_on = ['HF','conRecLength'], right_on = ['HF','conRecLength'])
         #testDat.drop(['conRecLength_x','conRecLength_y'], axis = 1, inplace = True)
         
         # Hit Ratio 
-        hitRatioCount = trainDat.groupby(['Detection','hitRatio'])['hitRatio'].count()
+        hitRatioCount = self.trainDat.groupby(['Detection','hitRatio'])['hitRatio'].count()
         hitRatioCount = pd.Series(hitRatioCount, name = 'hitRatioCountT')
         hitRatioCount = pd.DataFrame(hitRatioCount).reset_index().rename(columns = {'Detection':'HT'})
-        testDat = pd.merge(left = testDat, right = hitRatioCount, how = u'left', left_on = ['HT','hitRatio'], right_on = ['HT','hitRatio'])
+        self.testDat = pd.merge(left = self.testDat, right = hitRatioCount, how = u'left', left_on = ['HT','hitRatio'], right_on = ['HT','hitRatio'])
         hitRatioCount = hitRatioCount.rename(columns = {'HT':'HF','hitRatioCountT':'hitRatioCountF'})
-        testDat = pd.merge(left = testDat, right = hitRatioCount, how = u'left', left_on = ['HF','hitRatio'], right_on = ['HF','hitRatio'])
+        self.testDat = pd.merge(left = self.testDat, right = hitRatioCount, how = u'left', left_on = ['HF','hitRatio'], right_on = ['HF','hitRatio'])
         #testDat.drop(['hitRatio_x','hitRatio_y'], axis = 1, inplace = True)
         
         # Power
-        powerCount = trainDat.groupby(['Detection','powerBin'])['powerBin'].count()
+        powerCount = self.trainDat.groupby(['Detection','powerBin'])['powerBin'].count()
         powerCount = pd.Series(powerCount, name = 'powerCount_T')
         powerCount = pd.DataFrame(powerCount).reset_index().rename(columns = {'Detection':'HT'})
-        testDat = pd.merge(left = testDat, right = powerCount, how = u'left', left_on = ['HT','powerBin'], right_on = ['HT','powerBin'])
+        self.testDat = pd.merge(left = self.testDat, right = powerCount, how = u'left', left_on = ['HT','powerBin'], right_on = ['HT','powerBin'])
         powerCount = powerCount.rename(columns = {'HT':'HF','powerCount_T':'powerCount_F'})
-        testDat = pd.merge(left = testDat, right = powerCount, how = u'left', left_on = ['HF','powerBin'], right_on = ['HF','powerBin'])
+        self.testDat = pd.merge(left = self.testDat, right = powerCount, how = u'left', left_on = ['HF','powerBin'], right_on = ['HF','powerBin'])
         #testDat.drop(['hitRatio_x','hitRatio_y'], axis = 1, inplace = True)    
         
         # NoiseR$atio
-        noiseCount = trainDat.groupby(['Detection','noiseBin'])['noiseBin'].count()
+        noiseCount = self.trainDat.groupby(['Detection','noiseBin'])['noiseBin'].count()
         noiseCount = pd.Series(noiseCount, name = 'noiseCount_T')
         noiseCount = pd.DataFrame(noiseCount).reset_index().rename(columns = {'Detection':'HT'})
-        testDat = pd.merge(left = testDat, right = noiseCount, how = u'left', left_on = ['HT','noiseBin'], right_on = ['HT','noiseBin'])
+        self.testDat = pd.merge(left = self.testDat, right = noiseCount, how = u'left', left_on = ['HT','noiseBin'], right_on = ['HT','noiseBin'])
         noiseCount = noiseCount.rename(columns = {'HT':'HF','noiseCount_T':'noiseCount_F'})
-        testDat = pd.merge(left = testDat, right = noiseCount, how = u'left', left_on = ['HF','noiseBin'], right_on = ['HF','noiseBin'])
-        #testDat.drop(['hitRatio_x','hitRatio_y'], axis = 1, inplace = True)        
-    
-        testDat = testDat.fillna(0)                                                # Nan gives us heartburn, fill them with zeros
+        self.testDat = pd.merge(left = self.testDat, right = noiseCount, how = u'left', left_on = ['HF','noiseBin'], right_on = ['HF','noiseBin'])
+        #testDat.drop(['hitRatio_x','hitRatio_y'], axis = 1, inplace = True)
+
+        # Lag Bin
+        lagCount = self.trainDat.groupby(['Detection','lagDiffBin'])['lagDiffBin'].count()
+        lagCount = pd.Series(lagCount, name = 'lagDiffCount_T')
+        lagCount = pd.DataFrame(lagCount).reset_index().rename(columns = {'Detection':'HT'})
+        self.testDat = pd.merge(left = self.testDat, right = lagCount, how = u'left', left_on = ['HT','lagDiffBin'], right_on = ['HT','lagDiffBin'])
+        lagCount = lagCount.rename(columns = {'HT':'HF','lagDiffCount_T':'lagDiffCount_F'})
+        self.testDat = pd.merge(left = self.testDat, right = lagCount, how = u'left', left_on = ['HF','lagDiffBin'], right_on = ['HF','lagDiffBin'])
+        
+        self.testDat = self.testDat.fillna(0)                                                # Nan gives us heartburn, fill them with zeros
         # Calculate Number of True and False Positive Detections in Training Dataset
         try: 
-            priorCountT = float(len(trainDat[trainDat.Detection == 1]))
+            priorCountT = float(len(self.trainDat[self.trainDat.Detection == 1]))
         except KeyError:
             priorCountT = 1.0
         try:
-            priorCountF = float(len(trainDat[trainDat.Detection == 0]))
+            priorCountF = float(len(self.trainDat[self.trainDat.Detection == 0]))
         except KeyError:
             priorCountF = 1.0
         trueCount = priorCountT + 2.0
         falseCount = priorCountF + 2.0
-        testDat['priorCount_T'] = priorCountT
-        testDat['priorCount_F'] = priorCountF
-        testDat['LDenomCount_T'] = trueCount
-        testDat['LDenomCount_F'] = falseCount
+        self.testDat['priorCount_T'] = priorCountT
+        self.testDat['priorCount_F'] = priorCountF
+        self.testDat['LDenomCount_T'] = trueCount
+        self.testDat['LDenomCount_F'] = falseCount
     
         # calculation of the probability of a false positive given the data
-        testDat['priorF'] = round(priorCountF/float(len(trainDat)),5)                      # calculate the prior probability of a false detection from the training dataset
-        testDat['LHitRatioF'] =(testDat['hitRatioCountF'] + 1)/testDat['LDenomCount_F']      # calculate the likelihood of this row's particular detection history occuring giving that the detection is a false positive
-        testDat['LconRecF'] = (testDat['conRecLengthCountF'] + 1)/testDat['LDenomCount_F'] # calculate the likelihood of this row's particular consecutive record length given that the detection is a false positive
-        testDat['LseriesHitF'] = (testDat['seriesHitCountF'] + 1)/testDat['LDenomCount_F'] # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-        testDat['LconsDetF'] = (testDat['consDetCountF'] + 1)/testDat['LDenomCount_F']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-        testDat['LPowerF'] = (testDat['powerCount_F'] + 1)/testDat['LDenomCount_F']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-        testDat['LnoiseF'] = (testDat['noiseCount_F'] + 1)/testDat['LDenomCount_F']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+        self.testDat['priorF'] = round(priorCountF/float(len(self.trainDat)),5)                      # calculate the prior probability of a false detection from the training dataset
+        self.testDat['LHitRatioF'] =(self.testDat['hitRatioCountF'] + 1)/(self.testDat['LDenomCount_F'] + 1)      # calculate the likelihood of this row's particular detection history occuring giving that the detection is a false positive
+        self.testDat['LconRecF'] = (self.testDat['conRecLengthCountF'] + 1)/(self.testDat['LDenomCount_F'] + 1) # calculate the likelihood of this row's particular consecutive record length given that the detection is a false positive
+        self.testDat['LseriesHitF'] = (self.testDat['seriesHitCountF'] + 1)/(self.testDat['LDenomCount_F'] + 1) # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+        self.testDat['LconsDetF'] = (self.testDat['consDetCountF'] + 1)/(self.testDat['LDenomCount_F'] + 1)     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+        self.testDat['LPowerF'] = (self.testDat['powerCount_F'] + 1)/(self.testDat['LDenomCount_F'] + 1)     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+        self.testDat['LnoiseF'] = (self.testDat['noiseCount_F'] + 1)/(self.testDat['LDenomCount_F'] + 1)    # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+        self.testDat['LlagF'] = (self.testDat['lagDiffCount_F'] + 1)/(self.testDat['LDenomCount_F']    + 1)  # calculate the likelihood of this row's particular seriesHit given the detection is a false positive      
+
             
         # calculation of the probability of a true detection given the data
-        testDat['priorT'] = round(priorCountT/float(len(trainDat)),5)                      # calculate the prior probability of a true detection from the training dataset            
-        testDat['LHitRatioT'] = (testDat['hitRatioCountT'] + 1)/testDat['LDenomCount_T']     # calculate the likelihood of this row's particular detection history occuring giving that the detection is a false positive
-        testDat['LconRecT'] = (testDat['conRecLengthCountT'] + 1)/testDat['LDenomCount_T'] # calculate the likelihood of this row's particular consecutive record length given that the detection is a false positive                           # calculate the posterior probability of a false positive detection given this row's detection history, power bin and noise ratio
-        testDat['LseriesHitT'] = (testDat['seriesHitCountT'] + 1)/testDat['LDenomCount_T'] # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-        testDat['LconsDetT'] = (testDat['consDetCountT'] + 1)/testDat['LDenomCount_T']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-        testDat['LPowerT'] = (testDat['powerCount_T'] + 1)/testDat['LDenomCount_F']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-        testDat['LnoiseT'] = (testDat['noiseCount_T'] + 1)/testDat['LDenomCount_F']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+        self.testDat['priorT'] = round(priorCountT/float(len(self.trainDat)),5)                      # calculate the prior probability of a true detection from the training dataset            
+        self.testDat['LHitRatioT'] = (self.testDat['hitRatioCountT'] + 1)/(self.testDat['LDenomCount_T'] + 1) # calculate the likelihood of this row's particular detection history occuring giving that the detection is a false positive
+        self.testDat['LconRecT'] = (self.testDat['conRecLengthCountT'] + 1)/(self.testDat['LDenomCount_T'] + 1) # calculate the likelihood of this row's particular consecutive record length given that the detection is a false positive                           # calculate the posterior probability of a false positive detection given this row's detection history, power bin and noise ratio
+        self.testDat['LseriesHitT'] = (self.testDat['seriesHitCountT'] + 1)/(self.testDat['LDenomCount_T'] + 1) # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+        self.testDat['LconsDetT'] = (self.testDat['consDetCountT'] + 1)/(self.testDat['LDenomCount_T'] + 1)  # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+        self.testDat['LPowerT'] = (self.testDat['powerCount_T'] + 1)/(self.testDat['LDenomCount_T'] + 1)   # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+        self.testDat['LnoiseT'] = (self.testDat['noiseCount_T'] + 1)/(self.testDat['LDenomCount_T'] + 1)  # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+        self.testDat['LlagT'] = (self.testDat['lagDiffCount_T'] + 1)/(self.testDat['LDenomCount_T'] + 1)  # calculate the likelihood of this row's particular seriesHit given the detection is a false positive      
         
+
         # Calculate the likelihood of each hypothesis being true 
-        #testDat['LikelihoodTrue'] = likelihood(True,self,status = 'cross')
-        #testDat['LikelihoodFalse'] = likelihood(False,self,status = 'cross')
+        self.testDat['LikelihoodTrue'] = likelihood(True,self,status = 'cross')
+        self.testDat['LikelihoodFalse'] = likelihood(False,self,status = 'cross')
+        
         #testDat['LikelihoodTrue'] = testDat['LPowerT'] * testDat['LHitRatioT'] * testDat['LconRecT'] * testDat['LseriesHitT'] * testDat['LconsDetT'] * testDat['LnoiseT']
         #testDat['LikelihoodFalse'] = testDat['LPowerF'] * testDat['LHitRatioF'] * testDat['LconRecF'] * testDat['LseriesHitF'] * testDat['LconsDetF'] * testDat['LnoiseF']
 
-        testDat['LikelihoodTrue'] = testDat['LHitRatioT'] * testDat['LconRecT']
-        testDat['LikelihoodFalse'] = testDat['LHitRatioF'] * testDat['LconRecF'] 
+        #testDat['LikelihoodTrue'] = testDat['LHitRatioT'] * testDat['LconRecT']
+        #testDat['LikelihoodFalse'] = testDat['LHitRatioF'] * testDat['LconRecF'] 
         
         # Calculate the posterior probability of each Hypothesis occuring
 #        testDat['postTrue'] = testDat['priorT'] * testDat['LikelihoodTrue']
 #        testDat['postFalse'] = testDat['priorF'] * testDat['LikelihoodFalse']
-        testDat['postTrue'] = testDat['LikelihoodTrue']
-        testDat['postFalse'] = testDat['LikelihoodFalse']
+        self.testDat['postTrue'] = self.testDat['LikelihoodTrue']
+        self.testDat['postFalse'] = self.testDat['LikelihoodFalse']
 
-        testDat['T2F_ratio'] = testDat['postTrue'] / testDat['postFalse']
+        self.testDat['T2F_ratio'] = self.testDat['postTrue'] / self.testDat['postFalse']
         # classify detection as true or false based on MAP hypothesis
    
-        testDat['test'] = testDat.postTrue > testDat.postFalse        
-        self.histDF = self.histDF.append(testDat)                   
+        self.testDat['test'] = self.testDat.postTrue > self.testDat.postFalse        
+        self.histDF = self.histDF.append(self.testDat)                   
         
     def summary(self):
         metrics = pd.crosstab(self.histDF.Detection,self.histDF.test)
