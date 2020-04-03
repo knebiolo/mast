@@ -16,9 +16,9 @@ figureWS = os.path.join(proj_dir,'Output','Figures')
 projectDB = os.path.join(proj_dir,'Data',dbName)
 k = 10
 # ['conRecLength','hitRatio','noiseRatio','power','lagDiff']
-fields = ['noiseRatio']
+fields = ['conRecLength','hitRatio','noiseRatio','power','lagDiff']
 # create cross validated data object
-cross = biotas.cross_validated(k,recType,fields,projectDB,figureWS,train_on = 'Study')
+cross = biotas.cross_validated(k,recType,fields,projectDB,rec_list = ['T02','T07'], train_on = 'Study')
 print ("Created a cross validated data object")
 # perform the cross validation method
 for i in np.arange(0,k,1):

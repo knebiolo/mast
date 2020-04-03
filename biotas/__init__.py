@@ -1406,22 +1406,35 @@ class cross_validated():
     object. To implement the k-fold cross validation procedure, we simply pass 
     the number of folds and receiver type we wish to validate.  
     '''    
-    def __init__(self,folds,recType,likelihood_model,projectDB,figureWS, train_on = 'Beacon'):
+    def __init__(self,folds,recType,likelihood_model,projectDB,rec_list = None, train_on = 'Beacon'):
         self.folds = folds
         self.recType = recType
         self.projectDB = projectDB
-        self.figureWS = figureWS
+        self.rec_list = rec_list
         conn = sqlite3.connect(projectDB)
         c = conn.cursor()
         if train_on == 'Beacon':
-            sql = "SELECT * FROM tblTrain  WHERE recType == '%s';"%(recType)
+            if rec_list != None:
+                sql = "SELECT * FROM tblTrain  WHERE recID == '%s'"%(rec_list[0])
+                for i in rec_list[1:]:
+                    sql = sql + "OR recID == '%s'"%(i)
+            else:
+                sql = "SELECT * FROM tblTrain WHERE recType == '%s'"%(recType)
             self.trainDF = pd.read_sql_query(sql,con = conn,coerce_float  = True)
             c.close()
 
         else:
-            self.trainDF = pd.read_sql("select * from tblTrain WHERE recType == '%s'"%(recType),con=conn)#This will read in tblTrain and create a pandas dataframe        
-            # get receivers in study of this type
-            recs = pd.read_sql("select * from tblMasterReceiver WHERE recType == '%s'"%(recType),con=conn)['recID'].values
+            if rec_list == None:
+                sql = "select * from tblTrain WHERE recType == '%s'"%(recType)
+                # get receivers in study of this type
+                recs = pd.read_sql("select * from tblMasterReceiver WHERE recType == '%s'"%(recType),con=conn)['recID'].values
+            else:
+                sql = "SELECT * FROM tblTrain  WHERE recID == '%s'"%(rec_list[0])
+                for i in rec_list[1:]:
+                    sql = sql + "OR recID == '%s'"%(i)  
+                recs = rec_list
+            self.trainDF = pd.read_sql(sql,con=conn,coerce_float  = True)#This will read in tblTrain and create a pandas dataframe                    
+
             c.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
             tbls = c.fetchall()            
             # iterate over the receivers to find the final classification (aka the largest _n)
@@ -1505,14 +1518,14 @@ class cross_validated():
         self.testDat = pd.merge(left = self.testDat, right = consDetCount, how = u'left', left_on = ['HF','consDet'], right_on = ['HF','consDet'])
         #testDat.drop(['consDet_x','consDet_y'], axis = 1, inplace = True)
         
-        # Detection History  
-        detHistCount = self.trainDat.groupby(['Detection','detHist'])['detHist'].count()
-        detHistCount = pd.Series(detHistCount, name = 'detHistCountT')
-        detHistCount = pd.DataFrame(detHistCount).reset_index().rename(columns = {'Detection':'HT'})
-        self.testDat = pd.merge(how = 'left', left = self.testDat, right = detHistCount, left_on = ['HT','detHist'],right_on =['HT','detHist'])
-        detHistCount = detHistCount.rename(columns = {'HT':'HF','detHistCountT':'detHistCountF'})
-        self.testDat = pd.merge(how = 'left', left = self.testDat, right = detHistCount, left_on = ['HF','detHist'],right_on =['HF','detHist'])
-        #testDat.drop(['detHist_x','detHist_y'], axis = 1, inplace = True)
+#        # Detection History  
+#        detHistCount = self.trainDat.groupby(['Detection','detHist'])['detHist'].count()
+#        detHistCount = pd.Series(detHistCount, name = 'detHistCountT')
+#        detHistCount = pd.DataFrame(detHistCount).reset_index().rename(columns = {'Detection':'HT'})
+#        self.testDat = pd.merge(how = 'left', left = self.testDat, right = detHistCount, left_on = ['HT','detHist'],right_on =['HT','detHist'])
+#        detHistCount = detHistCount.rename(columns = {'HT':'HF','detHistCountT':'detHistCountF'})
+#        self.testDat = pd.merge(how = 'left', left = self.testDat, right = detHistCount, left_on = ['HF','detHist'],right_on =['HF','detHist'])
+#        #testDat.drop(['detHist_x','detHist_y'], axis = 1, inplace = True)
         
         # Consecutive Record Length 
         conRecLengthCount = self.trainDat.groupby(['Detection','conRecLength'])['conRecLength'].count()
