@@ -4,22 +4,15 @@
 # import modules required for function dependencies
 import numpy as np
 import pandas as pd
-import math
-import multiprocessing as mp
-import time
 import os
 import sqlite3
 import datetime
-import threading as td
-import collections
 import matplotlib.pyplot as plt
 import matplotlib
 import matplotlib.dates as mdates
 from mpl_toolkits.mplot3d import Axes3D
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
-import operator
-#from datetime import datetime
 import networkx as nx
 from matplotlib import rcParams
 font = {'family': 'serif','size': 6}
@@ -1281,8 +1274,8 @@ def calc_class_params_map(classify_object):
         priorCountF = float(len(trainDF[trainDF.Detection == 0]))
     except KeyError:
         priorCountF = 1.0
-    trueCount = priorCountT + 2.0
-    falseCount = priorCountF + 2.0
+    trueCount = priorCountT + 1.0
+    falseCount = priorCountF + 1.0
     classify_object.histDF['priorCount_T'] = np.repeat(priorCountT,len(classify_object.histDF))
     classify_object.histDF['priorCount_F'] = np.repeat(priorCountF,len(classify_object.histDF))
     classify_object.histDF['LDenomCount_T'] = np.repeat(trueCount,len(classify_object.histDF))
@@ -1340,10 +1333,6 @@ def calc_class_params_map(classify_object):
     
     classify_object.histDF['logLikelihoodRatio_A'] = np.log10(classify_object.histDF.LikelihoodTrue_A.values/classify_object.histDF.LikelihoodFalse_A.values)
     classify_object.histDF['logLikelihoodRatio_M'] = np.log10(classify_object.histDF.LikelihoodTrue_M.values/classify_object.histDF.LikelihoodFalse_M.values)
-
-   
-    #classify_object.histDF['LikelihoodTrue_A'] =  classify_object.histDF['LnoiseT'] * classify_object.histDF['LPowerT'] * classify_object.histDF['LHitRatioT_A'] * classify_object.histDF['LconRecT_A'] * classify_object.histDF['LseriesHitT_A'] * classify_object.histDF['LconsDetT_A']
-    #classify_object.histDF['LikelihoodFalse_A'] =  classify_object.histDF['LnoiseF'] * classify_object.histDF['LPowerF'] * classify_object.histDF['LHitRatioF_A'] * classify_object.histDF['LconRecF_A'] * classify_object.histDF['LseriesHitF_A'] * classify_object.histDF['LconsDetF_A']
      
     # Calculate the posterior probability of each Hypothesis occuring
     if classify_object.informed == True:
