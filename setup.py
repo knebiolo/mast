@@ -16,6 +16,12 @@ setup(name = 'biotas',
       author_email = 'kevin.nebiolo@kleinschmidtgroup.com',
       license = 'MIT',
       packages = ['biotas',],
-      python_requires= '>=3.6',
+      python_requires= '>=3.5',
+      install_requires=["numpy >= 1.17.4",
+                        "pandas >= 0.25.3",
+                        "matplotlib >= 3.1.1",
+                        "statsmodels >= 0.10.1",
+                        "networkx >= 2.2",
+                        "sqlite >= 2.6.0"],
       zip_safe = False
       )
