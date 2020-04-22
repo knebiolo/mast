@@ -829,10 +829,10 @@ class training_data():
         self.site = site
         self.projectDB = projectDB
         self.scratchWS = scratchWS
-        self.det = algParams.get_value(0,'det') 
-        self.duration = float(algParams.get_value(0,'duration')) 
+        self.det = algParams.at[0,'det'] 
+        self.duration = float(algParams.at[0,'duration']) 
         self.studyTags = allTags.FreqCode.values
-        self.recType = recType.get_value(0,'RecType')
+        self.recType = recType.at[0,'RecType']
         self.histDF['recType'] = np.repeat(self.recType,len(self.histDF))
         
         # for training data, we know the tag's detection class ahead of time,
@@ -844,13 +844,13 @@ class training_data():
             self.plausible = 0
         # get rate
         if len(rates.PulseRate.values) > 0:  
-            self.PulseRate = rates.get_value(0,'PulseRate')
+            self.PulseRate = rates.at[0,'PulseRate']
         else:
             self.PulseRate = 3.0
         if np.any(rates.MortRate.values == None) or len(rates.MortRate.values) == 0:
             self.MortRate = 9999.0
         else:
-            self.MortRate = rates.get_value(0,'MortRate')
+            self.MortRate = rates.at[0,'MortRate']
         
         # create a list of factors to search for series hit
         self.alive_factors = np.arange(self.PulseRate,3600,self.PulseRate)
@@ -958,15 +958,15 @@ class classify_data():
         self.site = site
         self.projectDB = projectDB
         self.scratchWS = scratchWS
-        self.det = algParams.get_value(0,'det') 
-        self.duration = float(algParams.get_value(0,'duration')) 
+        self.det = algParams.at[0,'det'] 
+        self.duration = float(algParams.at[0,'duration']) 
         self.studyTags = allTags.FreqCode.values
-        self.recType = recType.get_value(0,'RecType')
-        self.PulseRate = rates.get_value(0,'PulseRate')
+        self.recType = recType.at[0,'RecType']
+        self.PulseRate = rates.at[0,'PulseRate']
         if np.any(rates.MortRate.values == None) or len(rates.MortRate.values) == 0:
             self.MortRate = 9999.0
         else:
-            self.MortRate = rates.get_value(0,'MortRate')
+            self.MortRate = rates.at[0,'MortRate']
 
         # create a list of factors to search for series hit
         self.alive_factors = np.arange(self.PulseRate,3600,self.PulseRate)
@@ -1713,8 +1713,8 @@ class classification_results():
         det_class_count = self.class_stats_data.groupby('test')['test'].count()
         print ("")
         print ("%s detection class statistics:"%(self.recType)) 
-        print ("The probability that a detection was classified as true was %s"%((round(float(det_class_count.get_value(1,'test'))/float(det_class_count.sum()),3))))
-        print ("The probability that a detection was classified as fasle positive was %s"%((round(float(det_class_count.get_value(0,'test'))/float(det_class_count.sum()),3))))
+        print ("The probability that a detection was classified as true was %s"%((round(float(det_class_count.at[1,'test'])/float(det_class_count.sum()),3))))
+        print ("The probability that a detection was classified as fasle positive was %s"%((round(float(det_class_count.at[0,'test'])/float(det_class_count.sum()),3))))
         print ("")
         print ("----------------------------------------------------------------------------------")
         print ("")
@@ -2000,8 +2000,8 @@ class training_results():
         det_class_count = self.train_stats_data.groupby('Detection')['Detection'].count()
         print ("")
         print ("%s detection clas statistics:"%(self.recType) )
-        print ("The prior probability that a detection was true was %s"%((round(float(det_class_count.get_value(1,'Detection'))/float(det_class_count.sum()),3))))
-        print ("The prior probability that a detection was false positive was %s"%((round(float(det_class_count.get_value(0,'Detection'))/float(det_class_count.sum()),3))))
+        print ("The prior probability that a detection was true was %s"%((round(float(det_class_count.at[1,'Detection'])/float(det_class_count.sum()),3))))
+        print ("The prior probability that a detection was false positive was %s"%((round(float(det_class_count.at[0,'Detection'])/float(det_class_count.sum()),3))))
         print ("")
         print ("----------------------------------------------------------------------------------")
         print ("")

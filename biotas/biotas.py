@@ -4,22 +4,15 @@
 # import modules required for function dependencies
 import numpy as np
 import pandas as pd
-import math
-import multiprocessing as mp
-import time
 import os
 import sqlite3
 import datetime
-import threading as td
-import collections
 import matplotlib.pyplot as plt
 import matplotlib
 import matplotlib.dates as mdates
 from mpl_toolkits.mplot3d import Axes3D
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
-import operator
-#from datetime import datetime
 import networkx as nx
 from matplotlib import rcParams
 font = {'family': 'serif','size': 6}
@@ -1281,8 +1274,8 @@ def calc_class_params_map(classify_object):
         priorCountF = float(len(trainDF[trainDF.Detection == 0]))
     except KeyError:
         priorCountF = 1.0
-    trueCount = priorCountT + 2.0
-    falseCount = priorCountF + 2.0
+    trueCount = priorCountT + 1.0
+    falseCount = priorCountF + 1.0
     classify_object.histDF['priorCount_T'] = np.repeat(priorCountT,len(classify_object.histDF))
     classify_object.histDF['priorCount_F'] = np.repeat(priorCountF,len(classify_object.histDF))
     classify_object.histDF['LDenomCount_T'] = np.repeat(trueCount,len(classify_object.histDF))
@@ -1340,10 +1333,6 @@ def calc_class_params_map(classify_object):
     
     classify_object.histDF['logLikelihoodRatio_A'] = np.log10(classify_object.histDF.LikelihoodTrue_A.values/classify_object.histDF.LikelihoodFalse_A.values)
     classify_object.histDF['logLikelihoodRatio_M'] = np.log10(classify_object.histDF.LikelihoodTrue_M.values/classify_object.histDF.LikelihoodFalse_M.values)
-
-   
-    #classify_object.histDF['LikelihoodTrue_A'] =  classify_object.histDF['LnoiseT'] * classify_object.histDF['LPowerT'] * classify_object.histDF['LHitRatioT_A'] * classify_object.histDF['LconRecT_A'] * classify_object.histDF['LseriesHitT_A'] * classify_object.histDF['LconsDetT_A']
-    #classify_object.histDF['LikelihoodFalse_A'] =  classify_object.histDF['LnoiseF'] * classify_object.histDF['LPowerF'] * classify_object.histDF['LHitRatioF_A'] * classify_object.histDF['LconRecF_A'] * classify_object.histDF['LseriesHitF_A'] * classify_object.histDF['LconsDetF_A']
      
     # Calculate the posterior probability of each Hypothesis occuring
     if classify_object.informed == True:
@@ -1406,16 +1395,68 @@ class cross_validated():
     object. To implement the k-fold cross validation procedure, we simply pass 
     the number of folds and receiver type we wish to validate.  
     '''    
-    def __init__(self,folds,recType,likelihood_model,projectDB,figureWS):
+    def __init__(self,folds,recType,likelihood_model,projectDB,rec_list = None, train_on = 'Beacon'):
         self.folds = folds
         self.recType = recType
         self.projectDB = projectDB
-        self.figureWS = figureWS
+        self.rec_list = rec_list
         conn = sqlite3.connect(projectDB)
         c = conn.cursor()
-        sql = "SELECT * FROM tblTrain  WHERE recType == '%s';"%(recType)
-        self.trainDF = pd.read_sql_query(sql,con = conn, parse_dates  = 'timeStamp',coerce_float  = True)
-        c.close()
+        if train_on == 'Beacon':
+            if rec_list != None:
+                sql = "SELECT * FROM tblTrain  WHERE recID == '%s'"%(rec_list[0])
+                for i in rec_list[1:]:
+                    sql = sql + "OR recID == '%s'"%(i)
+            else:
+                sql = "SELECT * FROM tblTrain WHERE recType == '%s'"%(recType)
+            self.trainDF = pd.read_sql_query(sql,con = conn,coerce_float  = True)
+            c.close()
+
+        else:
+            if rec_list == None:
+                sql = "select * from tblTrain WHERE recType == '%s'"%(recType)
+                # get receivers in study of this type
+                recs = pd.read_sql("select * from tblMasterReceiver WHERE recType == '%s'"%(recType),con=conn)['recID'].values
+            else:
+                sql = "SELECT * FROM tblTrain  WHERE recID == '%s'"%(rec_list[0])
+                for i in rec_list[1:]:
+                    sql = sql + "OR recID == '%s'"%(i)  
+                recs = rec_list
+            self.trainDF = pd.read_sql(sql,con=conn,coerce_float  = True)#This will read in tblTrain and create a pandas dataframe                    
+
+            c.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
+            tbls = c.fetchall()            
+            # iterate over the receivers to find the final classification (aka the largest _n)
+            max_iter_dict = {} # receiver:max iter
+            curr_idx = 0
+            for i in recs:
+                max_iter = 1
+                while curr_idx < len(tbls) - 1:
+                    for j in tbls:
+                        if i in j[0]:
+                            if int(j[0][-1]) >= max_iter:
+                                max_iter = int(j[0][-1])
+                                max_iter_dict[i] = j[0]
+                        curr_idx = curr_idx + 1
+                curr_idx = 0
+            del i, j, curr_idx
+            # once we have a hash table of receiver to max classification, extract the classification dataset
+            self.classDF = pd.DataFrame()
+            for i in max_iter_dict:
+                classDat = pd.read_sql("select test, FreqCode,Power,noiseRatio, lag,lagDiff,conRecLength_A,consDet_A,detHist_A,hitRatio_A,seriesHit_A,conRecLength_M,consDet_M,detHist_M,hitRatio_M,seriesHit_M,postTrue_A,postTrue_M,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from %s"%(max_iter_dict[i]),con=conn)
+                classDat = classDat[classDat.postTrue_A >= classDat.postTrue_M]
+                classDat.drop(['conRecLength_M','consDet_M','detHist_M','hitRatio_M','seriesHit_M'], axis = 1, inplace = True)
+                classDat.rename(columns = {'conRecLength_A':'conRecLength','consDet_A':'consDet','detHist_A':'detHist','hitRatio_A':'hitRatio','seriesHit_A':'seriesHit'}, inplace = True)
+                self.classDF = self.classDF.append(classDat)
+    
+            self.trainDF = self.trainDF[self.trainDF.Detection==0]
+            self.classDF = self.classDF[self.classDF.test==1]    
+            self.classDF['Channels']=np.repeat(1,len(self.classDF))
+            self.classDF.rename(columns={"test":"Detection","RowSeconds":"Seconds","RecType":"recType"},inplace=True)#inplace tells it to replace the existing dataframe
+            self.trainDF = self.trainDF.append(self.classDF) 
+            del self.classDF
+            c.close()
+            
         self.k = folds
         self.trainDF.Detection = self.trainDF.Detection.astype(int)
         self.trainDF.FreqCode = self.trainDF.FreqCode.astype(str)
@@ -1428,7 +1469,6 @@ class cross_validated():
         self.trainDF['powerBin'] = (self.trainDF.Power//10)*10
         self.trainDF['noiseBin'] = (self.trainDF.noiseRatio//.1)*.1
         self.trainDF['lagDiffBin'] = (self.trainDF.lagDiff//10)*.10
-
         cols = ['priorF','LDetHistF','LPowerF','LHitRatioF','LnoiseF','LconRecF','postFalse','priorT','LDetHistT','LPowerT','LHitRatioT','LnoiseT','LconRecT','postTrue','test']
         for i in self.trainDF.columns:
             cols.append(i)
@@ -1467,14 +1507,14 @@ class cross_validated():
         self.testDat = pd.merge(left = self.testDat, right = consDetCount, how = u'left', left_on = ['HF','consDet'], right_on = ['HF','consDet'])
         #testDat.drop(['consDet_x','consDet_y'], axis = 1, inplace = True)
         
-        # Detection History  
-        detHistCount = self.trainDat.groupby(['Detection','detHist'])['detHist'].count()
-        detHistCount = pd.Series(detHistCount, name = 'detHistCountT')
-        detHistCount = pd.DataFrame(detHistCount).reset_index().rename(columns = {'Detection':'HT'})
-        self.testDat = pd.merge(how = 'left', left = self.testDat, right = detHistCount, left_on = ['HT','detHist'],right_on =['HT','detHist'])
-        detHistCount = detHistCount.rename(columns = {'HT':'HF','detHistCountT':'detHistCountF'})
-        self.testDat = pd.merge(how = 'left', left = self.testDat, right = detHistCount, left_on = ['HF','detHist'],right_on =['HF','detHist'])
-        #testDat.drop(['detHist_x','detHist_y'], axis = 1, inplace = True)
+#        # Detection History  
+#        detHistCount = self.trainDat.groupby(['Detection','detHist'])['detHist'].count()
+#        detHistCount = pd.Series(detHistCount, name = 'detHistCountT')
+#        detHistCount = pd.DataFrame(detHistCount).reset_index().rename(columns = {'Detection':'HT'})
+#        self.testDat = pd.merge(how = 'left', left = self.testDat, right = detHistCount, left_on = ['HT','detHist'],right_on =['HT','detHist'])
+#        detHistCount = detHistCount.rename(columns = {'HT':'HF','detHistCountT':'detHistCountF'})
+#        self.testDat = pd.merge(how = 'left', left = self.testDat, right = detHistCount, left_on = ['HF','detHist'],right_on =['HF','detHist'])
+#        #testDat.drop(['detHist_x','detHist_y'], axis = 1, inplace = True)
         
         # Consecutive Record Length 
         conRecLengthCount = self.trainDat.groupby(['Detection','conRecLength'])['conRecLength'].count()
@@ -1579,7 +1619,8 @@ class cross_validated():
         # classify detection as true or false based on MAP hypothesis
    
         self.testDat['test'] = self.testDat.postTrue > self.testDat.postFalse        
-        self.histDF = self.histDF.append(self.testDat)                   
+        self.histDF = self.histDF.append(self.testDat) 
+        del self.testDat, self.trainDat                 
         
     def summary(self):
         metrics = pd.crosstab(self.histDF.Detection,self.histDF.test)
@@ -1880,48 +1921,48 @@ class classification_results():
         plt.figure() 
         fig, axs = plt.subplots(3,4,tight_layout = True,figsize = figSize)
         # hit ratio
-        axs[0,0].hist(trues.hitRatio_max.values, hitRatioBins, density = True, color = 'k')
-        axs[0,1].hist(falses.hitRatio_max.values, hitRatioBins, density = True, color = 'k')
+        axs[0,1].hist(trues.hitRatio_max.values, hitRatioBins, density = True, color = 'k')
+        axs[0,0].hist(falses.hitRatio_max.values, hitRatioBins, density = True, color = 'k')
         axs[0,0].set_xlabel('Hit Ratio')  
-        axs[0,0].set_title('True')
+        axs[0,1].set_title('True')
         axs[0,1].set_xlabel('Hit Ratio')
-        axs[0,1].set_title('False Positive')
+        axs[0,0].set_title('False Positive')
         axs[0,0].set_title('A',loc = 'left')
 
         # consecutive record length
-        axs[0,2].hist(trues.conRecLength_max.values, conBins, density = True, color = 'k')
-        axs[0,3].hist(falses.conRecLength_max.values, conBins, density = True, color = 'k')
+        axs[0,3].hist(trues.conRecLength_max.values, conBins, density = True, color = 'k')
+        axs[0,2].hist(falses.conRecLength_max.values, conBins, density = True, color = 'k')
         axs[0,2].set_xlabel('Consecutive Hit Length')  
-        axs[0,2].set_title('True')
+        axs[0,3].set_title('True')
         axs[0,3].set_xlabel('Consecutive Hit Length')
-        axs[0,3].set_title('False Positive')
+        axs[0,2].set_title('False Positive')
         axs[0,2].set_title('B',loc = 'left')
 
         # power
-        axs[1,0].hist(trues.Power.values, powerBins, density = True, color = 'k')
-        axs[1,1].hist(falses.Power.values, powerBins, density = True, color = 'k')
+        axs[1,1].hist(trues.Power.values, powerBins, density = True, color = 'k')
+        axs[1,0].hist(falses.Power.values, powerBins, density = True, color = 'k')
         axs[1,0].set_xlabel('%s Signal Power'%(self.recType))  
         axs[1,1].set_xlabel('%s Signal Power'%(self.recType))
         axs[1,0].set_ylabel('Probability Density')
         axs[1,0].set_title('C',loc = 'left')
 
         # noise ratio
-        axs[1,2].hist(trues.noiseRatio.values, noiseBins, density = True, color = 'k')
-        axs[1,3].hist(falses.noiseRatio.values, noiseBins, density = True, color = 'k')
+        axs[1,3].hist(trues.noiseRatio.values, noiseBins, density = True, color = 'k')
+        axs[1,2].hist(falses.noiseRatio.values, noiseBins, density = True, color = 'k')
         axs[1,2].set_xlabel('Noise Ratio')  
         axs[1,3].set_xlabel('Noise Ratio')
         axs[1,2].set_title('D',loc = 'left')
 
         # lag diff
-        axs[2,0].hist(trues.lagDiff.values, lagBins, density = True, color = 'k')
-        axs[2,1].hist(falses.lagDiff.values, lagBins, density = True, color = 'k')
+        axs[2,1].hist(trues.lagDiff.values, lagBins, density = True, color = 'k')
+        axs[2,0].hist(falses.lagDiff.values, lagBins, density = True, color = 'k')
         axs[2,0].set_xlabel('Lag Differences')  
         axs[2,1].set_xlabel('Lag Differences')
         axs[2,0].set_title('E',loc = 'left')
 
         # log posterior ratio
-        axs[2,2].hist(trues.logPostRatio_max.values, postRatioBins, density = True, color = 'k')
-        axs[2,3].hist(falses.logPostRatio_max.values, postRatioBins, density = True, color = 'k')
+        axs[2,3].hist(trues.logPostRatio_max.values, postRatioBins, density = True, color = 'k')
+        axs[2,2].hist(falses.logPostRatio_max.values, postRatioBins, density = True, color = 'k')
         axs[2,2].set_xlabel('Log Posterior Ratio')  
         axs[2,3].set_xlabel('Log Posterior Ratio')
         axs[2,2].set_title('F',loc = 'left')
@@ -2098,39 +2139,39 @@ class training_results():
         plt.figure() 
         fig, axs = plt.subplots(5,2,tight_layout = True,figsize = figSize)
         # hit ratio
-        axs[0,0].hist(trues.hitRatio.values, hitRatioBins, density = True, color = 'k')
-        axs[0,1].hist(falses.hitRatio.values, hitRatioBins, density = True, color = 'k')
+        axs[0,1].hist(trues.hitRatio.values, hitRatioBins, density = True, color = 'k')
+        axs[0,0].hist(falses.hitRatio.values, hitRatioBins, density = True, color = 'k')
         axs[0,0].set_xlabel('Hit Ratio')  
-        axs[0,0].set_title('True')
+        axs[0,1].set_title('True')
         axs[0,1].set_xlabel('Hit Ratio')
-        axs[0,1].set_title('False Positive')
+        axs[0,0].set_title('False Positive')
         axs[0,0].set_title('A',loc = 'left')
 
         # consecutive record length
-        axs[1,0].hist(trues.conRecLength.values, conBins, density = True, color = 'k')
-        axs[1,1].hist(falses.conRecLength.values, conBins, density = True, color = 'k')
+        axs[1,1].hist(trues.conRecLength.values, conBins, density = True, color = 'k')
+        axs[1,0].hist(falses.conRecLength.values, conBins, density = True, color = 'k')
         axs[1,0].set_xlabel('Consecutive Hit Length')  
         axs[1,1].set_xlabel('Consecutive Hit Length')
         axs[1,0].set_title('B',loc = 'left')
 
         # power
-        axs[2,0].hist(trues.Power.values, powerBins, density = True, color = 'k')
-        axs[2,1].hist(falses.Power.values, powerBins, density = True, color = 'k')
+        axs[2,1].hist(trues.Power.values, powerBins, density = True, color = 'k')
+        axs[2,0].hist(falses.Power.values, powerBins, density = True, color = 'k')
         axs[2,0].set_xlabel('%s Signal Power'%(self.recType))  
         axs[2,1].set_xlabel('%s Signal Power'%(self.recType))
         axs[2,0].set_ylabel('Probability Density')
         axs[2,0].set_title('C',loc = 'left')
 
         # noise ratio
-        axs[3,0].hist(trues.noiseRatio.values, noiseBins, density = True, color = 'k')
-        axs[3,1].hist(falses.noiseRatio.values, noiseBins, density = True, color = 'k')
+        axs[3,1].hist(trues.noiseRatio.values, noiseBins, density = True, color = 'k')
+        axs[3,0].hist(falses.noiseRatio.values, noiseBins, density = True, color = 'k')
         axs[3,0].set_xlabel('Noise Ratio')  
         axs[3,1].set_xlabel('Noise Ratio')
         axs[3,0].set_title('D',loc = 'left')
 
         # lag diff
-        axs[4,0].hist(trues.lagDiff.values, lagBins, density = True, color = 'k')
-        axs[4,1].hist(falses.lagDiff.values, lagBins, density = True, color = 'k')
+        axs[4,1].hist(trues.lagDiff.values, lagBins, density = True, color = 'k')
+        axs[4,0].hist(falses.lagDiff.values, lagBins, density = True, color = 'k')
         axs[4,0].set_xlabel('Lag Differences')  
         axs[4,1].set_xlabel('Lag Differences')
         axs[4,0].set_title('E',loc = 'left')
