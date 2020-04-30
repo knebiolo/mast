@@ -2814,13 +2814,36 @@ class bout():
         receivers = pd.read_sql(recSQL,con = conn, coerce_float = True)                 # import data
         receivers = receivers[receivers.Node == self.node].recID.unique()                    # get the unique receivers associated with this node    
         presence = pd.DataFrame(columns = ['FreqCode','Epoch','recID'])                             # set up an empty data frame
-        for i in receivers:                                                            # for every receiver 
-            sql = "SELECT FreqCode, Epoch, recID, test FROM tblClassify_%s WHERE FreqCode == '%s'"%(i,fish) 
-            dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver
-            dat = dat[dat.test == 1]
-            dat.drop(['test'],axis = 1, inplace = True)
-            presence = presence.append(dat)
         c = conn.cursor()
+        for i in receivers:
+            c.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
+            tbls = c.fetchall()
+            tblList = []
+            for j in tbls:
+                if i in j[0]:
+                    tblList.append(j[0])
+            del j
+            # iterate over the receivers to find the final classification (aka the largest _n)
+            max_iter_dict = {} # receiver:max iter
+            curr_idx = 0
+            max_iter = 1
+            while curr_idx < len(tblList) - 1:
+                for j in tblList:
+                    if int(j[-1]) >= max_iter:
+                        max_iter = int(j[-1])
+                        max_iter_dict[i] = j
+                    curr_idx = curr_idx + 1
+            curr_idx = 0
+            del j
+            
+            # once we have a hash table of receiver to max classification, extract the classification dataset
+            for j in max_iter_dict:
+                sql = "SELECT FreqCode, Epoch, recID, test FROM %s WHERE FreqCode == '%s'"%(max_iter_dict[j],fish) 
+                dat = pd.read_sql(sql, con = conn)                                 # get data for this receiver 
+                dat = dat[(dat.test == 1)] # query
+                dat.drop(['test'],axis = 1, inplace = True)
+                presence = presence.append(dat)          
+
         c.close()
         presence.drop_duplicates(keep = 'first', inplace = True)
         # get fish data
