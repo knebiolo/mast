@@ -1980,12 +1980,50 @@ class training_results():
         conn = sqlite3.connect(projectDB)
         c = conn.cursor()
         conn = sqlite3.connect(self.projectDB)                                 # connect to the database   
+
+        
         if self.site == None:
             sql = "SELECT * FROM tblTrain WHERE recType = '%s'"%(self.recType)
         else:
             sql = "SELECT * FROM tblTrain WHERE recType = '%s' AND recID == '%s'"%(self.recType,self.site)
+        trainDF = pd.read_sql(sql,con=conn,coerce_float  = True)#This will read in tblTrain and create a pandas dataframe                    
 
-        self.train_stats_data = pd.read_sql(sql, con = conn, coerce_float = True) # get data for this receiver 
+        recs = pd.read_sql("SELECT recID from tblMasterReceiver", con = conn).recID.values
+
+        c.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
+        tbls = c.fetchall()            
+        # iterate over the receivers to find the final classification (aka the largest _n)
+        max_iter_dict = {} # receiver:max iter
+        curr_idx = 0
+        for i in recs:
+            max_iter = 1
+            while curr_idx < len(tbls) - 1:
+                for j in tbls:
+                    if i in j[0]:
+                        if int(j[0][-1]) >= max_iter:
+                            max_iter = int(j[0][-1])
+                            max_iter_dict[i] = j[0]
+                    curr_idx = curr_idx + 1
+            curr_idx = 0
+
+        del i, j, curr_idx
+        # once we have a hash table of receiver to max classification, extract the classification dataset
+        classDF = pd.DataFrame()
+        for i in max_iter_dict:
+            classDat = pd.read_sql("select test, FreqCode,Power,noiseRatio, lag,lagDiff,conRecLength_A,consDet_A,detHist_A,hitRatio_A,seriesHit_A,conRecLength_M,consDet_M,detHist_M,hitRatio_M,seriesHit_M,postTrue_A,postTrue_M,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from %s"%(max_iter_dict[i]),con=conn)
+            classDat = classDat[classDat.postTrue_A >= classDat.postTrue_M]
+            classDat.drop(['conRecLength_M','consDet_M','detHist_M','hitRatio_M','seriesHit_M'], axis = 1, inplace = True)
+            classDat.rename(columns = {'conRecLength_A':'conRecLength','consDet_A':'consDet','detHist_A':'detHist','hitRatio_A':'hitRatio','seriesHit_A':'seriesHit'}, inplace = True)
+            classDF = classDF.append(classDat)
+
+        trainDF = trainDF[trainDF.Detection==0]
+        classDF = classDF[classDF.test==1]    
+        classDF['Channels']=np.repeat(1,len(classDF))
+        classDF.rename(columns={"test":"Detection","RowSeconds":"Seconds","RecType":"recType"},inplace=True)#inplace tells it to replace the existing dataframe
+        trainDF = trainDF.append(classDF)  
+                
+
+        self.train_stats_data = trainDF
         c.close()
                     
     def train_stats(self):
@@ -2385,13 +2423,6 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
                         if unknown_state != None and rowIdx == maxIdx and state == 1 and time1 < last_epoch:
                             state = unknown_state
                         timeDelta = time1 - time0                              # calculate difference in seconds between current time and release                                             # if it's a new state
-#                        if timeDelta > 300:
-#                            presence = presence + 1                                # oh snap new observation for new state              
-#                            rowArr = [i,state,presence,time1,timeDelta,time0,firstObs]  # start a new row    
-#                            row = pd.DataFrame(np.array([rowArr]),columns = columns)           
-#                            stateTable = stateTable.append(row)                    # add the row to the state table data frame  
-#                            time0 = j[1]['Epoch']
-                        #if timeDelta > 300:
                         presence = presence + 1                                # oh snap new observation for new state              
                         rowArr = [i,state,presence,time1,timeDelta,time0,firstObs]  # start a new row    
                         row = pd.DataFrame(np.array([rowArr]),columns = columns)           
@@ -2609,20 +2640,40 @@ class fish_history():
         # read and import recaptures
         data = pd.DataFrame(columns = ['FreqCode','Epoch','timeStamp','recID','test'])
         for i in receivers:
+            c.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
+            tbls = c.fetchall()
+            tblList = []
+            for j in tbls:
+                if i in j[0]:
+                    tblList.append(j[0])
+            del j
+            print (tblList)
+            # iterate over the receivers to find the final classification (aka the largest _n)
+            max_iter_dict = {} # receiver:max iter
+            curr_idx = 0
+            max_iter = 1
+            while curr_idx <= len(tblList) - 1:
+                for j in tblList:
+                    if int(j[-1]) >= max_iter:
+                        max_iter = int(j[-1])
+                        max_iter_dict[i] = j
+                    curr_idx = curr_idx + 1
+            curr_idx = 0
+            print (max_iter_dict)
             if filtered == False and overlapping == False:
-                sql = "SELECT FreqCode, Epoch, timeStamp, recID, test FROM tblClassify_%s"%(i)
+                sql = "SELECT FreqCode, Epoch, timeStamp, recID, test FROM tblClassify_%s_1"%(i)
                 dat = pd.read_sql(sql,con = conn)
                 data = data.append(dat)
                 print ("Data from reciever %s imported"%(i))
                 del sql
             elif filtered == True and overlapping == False:
-                sql = "SELECT FreqCode, Epoch,  timeStamp, recID, test FROM tblClassify_%s WHERE test = 1"%(i)
+                sql = "SELECT FreqCode, Epoch,  timeStamp, recID, test FROM %s WHERE test = 1"%(max_iter_dict[i])
                 dat = pd.read_sql(sql,con = conn, coerce_float = True)
                 data = data.append(dat)
                 print ("Data from reciever %s imported"%(i))
                 del sql
             else:
-                sql = "SELECT tblClassify_%s.FreqCode, tblClassify_%s.Epoch,  tblClassify_%s.timeStamp, tblClassify_%s.recID, overlapping, test FROM tblClassify_%s LEFT JOIN tblOverlap ON tblClassify_%s.FreqCode = tblOverlap.FreqCode AND tblClassify_%s.Epoch = tblOverlap.Epoch AND tblClassify_%s.recID = tblOverlap.recID WHERE test = 1"%(i,i,i,i,i,i,i,i)
+                sql = "SELECT %s.FreqCode, %s.Epoch,  %s.timeStamp, %s.recID, overlapping, test FROM %s LEFT JOIN tblOverlap ON %s.FreqCode = tblOverlap.FreqCode AND %s.Epoch = tblOverlap.Epoch AND %s.recID = tblOverlap.recID WHERE test = 1"%(max_iter_dict[i],max_iter_dict[i],max_iter_dict[i],max_iter_dict[i],max_iter_dict[i],max_iter_dict[i],max_iter_dict[i],max_iter_dict[i])
                 dat = pd.read_sql(sql,con = conn, coerce_float = True)
                 dat['overlapping'].fillna(0,inplace = True)
                 dat = dat[dat.overlapping == 0]
@@ -2696,26 +2747,20 @@ class bout():
             max_iter_dict = {} # receiver:max iter
             curr_idx = 0
             max_iter = 1
-            while curr_idx < len(tblList) - 1:
+            while curr_idx <= len(tblList) - 1:
                 for j in tblList:
                     if int(j[-1]) >= max_iter:
                         max_iter = int(j[-1])
                         max_iter_dict[i] = j
                     curr_idx = curr_idx + 1
             curr_idx = 0
-            del j
-            print (max_iter_dict)
-            
+                       
             # once we have a hash table of receiver to max classification, extract the classification dataset
-            self.classDF = pd.DataFrame()
             for j in max_iter_dict:
                 sql = "SELECT FreqCode, Epoch, recID, test FROM %s"%(max_iter_dict[j]) 
                 dat = pd.read_sql(sql, con = conn)                                 # get data for this receiver 
-                print ("Got data for receiver %s"%(j))
-                #dat = dat[(dat.test == 1) & (dat.hitRatio > 0.3)] # query
                 dat = dat[(dat.test == 1)] # query
                 dat.drop(['test'],axis = 1, inplace = True)
-                print ("Restricted data")
                 data = data.append(dat)  
 
         c.close()
@@ -2827,7 +2872,7 @@ class bout():
             max_iter_dict = {} # receiver:max iter
             curr_idx = 0
             max_iter = 1
-            while curr_idx < len(tblList) - 1:
+            while curr_idx <= len(tblList) - 1:
                 for j in tblList:
                     if int(j[-1]) >= max_iter:
                         max_iter = int(j[-1])
@@ -2924,23 +2969,47 @@ class overlap_reduction():
             receivers = pd.read_sql(recSQL,con = conn, coerce_float = True)    # import data
             node_recs = receivers[receivers.Node == i].recID.unique()          # get the unique receivers associated with this node                
             pres_data = pd.DataFrame(columns = ['FreqCode','Epoch','recID','presence_number'])        # set up an empty data frame
-            recap_data = pd.DataFrame(columns = ['FreqCode','Epoch','recID'])
-            for j in node_recs:                                                # for every receiver 
-                #print "Start selecting classified and presence data that matches the current receiver (%s)"%(j)  
-                presence_sql = "SELECT * FROM tblPresence WHERE recID = '%s'"%(j)
-                presenceDat = pd.read_sql(presence_sql, con = conn)
-                recap_sql = "SELECT FreqCode, Epoch, recID, test from tblClassify_%s"%(j)
-                recapDat = pd.read_sql(recap_sql, con = conn)
-                #recapDat = recapDat[(recapDat.test == 1) & (recapDat.hitRatio > 0.3)]
-                recapDat = recapDat[(recapDat.test == 1)]
+            recap_data = pd.DataFrame(columns = ['FreqCode','Epoch','recID']) 
+            for j in node_recs:
+                c.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
+                tbls = c.fetchall()
+                tblList = []
+                for k in tbls:
+                    if j in k[0]:
+                        tblList.append(k[0])
+                del k
+                # iterate over the receivers to find the final classification (aka the largest _n)
+                max_iter_dict = {} # receiver:max iter
+                curr_idx = 0
+                max_iter = 1
+                while curr_idx <= len(tblList) - 1:
+                    for k in tblList:
+                        if int(k[-1]) >= max_iter:
+                            max_iter = int(k[-1])
+                            max_iter_dict[j] = k
+                        curr_idx = curr_idx + 1
+                curr_idx = 0
+                #print (tblList)
+                #print (max_iter_dict)           
+                # once we have a hash table of receiver to max classification, extract the classification dataset
+                for k in max_iter_dict:
 
-                recapDat.drop(labels = ['test'], axis = 1, inplace = True)
-                # now that we have data, we need to summarize it, use group by to get min ans max epoch by freq code, recID and presence_number
-                pres_data = pres_data.append(presenceDat)
-                recap_data = recap_data.append(recapDat)
-                del presence_sql, recap_sql
+                    #print "Start selecting classified and presence data that matches the current receiver (%s)"%(j)  
+                    presence_sql = "SELECT * FROM tblPresence WHERE recID = '%s'"%(j)
+                    presenceDat = pd.read_sql(presence_sql, con = conn)
+                    recap_sql = "SELECT FreqCode, Epoch, recID, test from %s"%(max_iter_dict[j])
+                    recapDat = pd.read_sql(recap_sql, con = conn)
+                    recapDat = recapDat[(recapDat.test == 1)]
+    
+                    recapDat.drop(labels = ['test'], axis = 1, inplace = True)
+                    # now that we have data, we need to summarize it, use group by to get min ans max epoch by freq code, recID and presence_number
+                    pres_data = pres_data.append(presenceDat)
+                    recap_data = recap_data.append(recapDat)
+                    del presence_sql, recap_sql
 
-            dat = pres_data.groupby(['FreqCode','presence_number'])['Epoch'].agg({'min_Epoch':np.min,'max_Epoch':np.max}).reset_index(drop = False)
+            dat = pres_data.groupby(['FreqCode','presence_number'])['Epoch'].agg(['min','max'])
+            dat.reset_index(inplace = True, drop = False)
+            dat.rename(columns = {'min':'min_Epoch','max':'max_Epoch'},inplace = True)
             self.node_pres_dict[i] = dat
             self.node_recap_dict[i] = recap_data
             del pres_data, recap_data, dat, recSQL, receivers, node_recs
@@ -2992,8 +3061,8 @@ def russian_doll(overlap):
                             print ("Fish %s epoch %s overlap check at child %s"%(i,k,j))
                             if np.logical_and(min_epochs <= k, max_epochs >k).any(): # if the current epoch is within a presence at a child receiver
                                 print ("Overlap Found, at %s fish %s was recaptured at both %s and %s"%(k,i,overlap.curr_node,j))
-                                fishDat.set_value(k,'overlapping',1)
-                                fishDat.set_value(k,'successor',j)
+                                fishDat.at[k,'overlapping'] = 1
+                                fishDat.at[k,'successor'] = j
         fishDat.reset_index(inplace = True, drop = True)
         fishDat.to_csv(os.path.join(overlap.outputWS,'%s_at_%s_soverlap.csv'%(i,overlap.curr_node)), index = False)
                 
@@ -3020,27 +3089,59 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
     receivers = pd.read_sql(recSQL,con = conn)                                 # import data
     receivers = receivers.recID.unique()                                       # get the unique receivers associated with this node    
     recapdata = pd.DataFrame(columns = ['FreqCode','Epoch','recID','timeStamp'])                # set up an empty data frame
+    c = conn.cursor()
     
     for i in receivers:                                                            # for every receiver 
         print ("Start selecting and merging data for receiver %s"%(i))
-        sql = '''SELECT tblClassify_%s.FreqCode, tblClassify_%s.Epoch, tblClassify_%s.recID, timeStamp,presence_number, overlapping, hitRatio_A, hitRatio_M, detHist_A, detHist_M, lag, lagDiff, test, RelDate 
-        FROM tblClassify_%s 
-        LEFT JOIN tblMasterTag ON tblClassify_%s.FreqCode = tblMasterTag.FreqCode 
-        LEFT JOIN tblOverlap ON tblClassify_%s.FreqCode = tblOverlap.FreqCode AND tblClassify_%s.Epoch = tblOverlap.Epoch AND tblClassify_%s.recID = tblOverlap.recID 
-        LEFT JOIN tblPresence ON tblClassify_%s.FreqCode = tblPresence.FreqCode AND tblClassify_%s.Epoch = tblPresence.Epoch AND tblClassify_%s.recID = tblPresence.recID'''%(i,i,i,i,i,i,i,i,i,i,i)       
-        dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
-        dat['overlapping'].fillna(0,inplace = True)
-        dat = dat[dat.overlapping == 0]
-        dat = dat[dat.test == 1]
-        dat['RelDate'] = pd.to_datetime(dat.RelDate)
-        dat['timeStamp'] = pd.to_datetime(dat.timeStamp)
-        if hitRatio_Filter == True:
-            dat = dat[(dat.hitRatio_A > 0.10)]# | (dat.hitRatio_M > 0.10)]
-        if pre_release_Filter == True:
-            dat = dat[(dat.timeStamp >= dat.RelDate)]
-        recapdata = recapdata.append(dat)
-        del dat
-    c = conn.cursor()
+        c.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
+        tbls = c.fetchall()
+        tblList = []
+        for j in tbls:
+            if i in j[0]:
+                tblList.append(j[0])
+        del j
+        # iterate over the receivers to find the final classification (aka the largest _n)
+        max_iter_dict = {} # receiver:max iter
+        curr_idx = 0
+        max_iter = 1
+        while curr_idx <= len(tblList) - 1:
+            for j in tblList:
+                if int(j[-1]) >= max_iter:
+                    max_iter = int(j[-1])
+                    max_iter_dict[i] = j
+                curr_idx = curr_idx + 1
+        curr_idx = 0
+        del j
+        
+        # once we have a hash table of receiver to max classification, extract the classification dataset
+        for j in max_iter_dict:
+            cursor = conn.execute('select * from %s'%(max_iter_dict[j]))
+            names = [description[0] for description in cursor.description]
+            if 'hitRatio_A' in names:            
+                sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp,presence_number, overlapping, hitRatio_A, hitRatio_M, detHist_A, detHist_M, lag, lagDiff, test, RelDate 
+                FROM %s 
+                LEFT JOIN tblMasterTag ON %s.FreqCode = tblMasterTag.FreqCode 
+                LEFT JOIN tblOverlap ON %s.FreqCode = tblOverlap.FreqCode AND %s.Epoch = tblOverlap.Epoch AND %s.recID = tblOverlap.recID 
+                LEFT JOIN tblPresence ON %s.FreqCode = tblPresence.FreqCode AND %s.Epoch = tblPresence.Epoch AND %s.recID = tblPresence.recID'''%(max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j])       
+            else:
+                sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp,presence_number, overlapping,test, RelDate 
+                FROM %s 
+                LEFT JOIN tblMasterTag ON %s.FreqCode = tblMasterTag.FreqCode 
+                LEFT JOIN tblOverlap ON %s.FreqCode = tblOverlap.FreqCode AND %s.Epoch = tblOverlap.Epoch AND %s.recID = tblOverlap.recID 
+                LEFT JOIN tblPresence ON %s.FreqCode = tblPresence.FreqCode AND %s.Epoch = tblPresence.Epoch AND %s.recID = tblPresence.recID'''%(max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j])       
+                
+            dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
+            dat['overlapping'].fillna(0,inplace = True)
+            dat = dat[dat.overlapping == 0]
+            dat = dat[dat.test == 1]
+            dat['RelDate'] = pd.to_datetime(dat.RelDate)
+            dat['timeStamp'] = pd.to_datetime(dat.timeStamp)
+            if hitRatio_Filter == True:
+                dat = dat[(dat.hitRatio_A > 0.10)]# | (dat.hitRatio_M > 0.10)]
+            if pre_release_Filter == True:
+                dat = dat[(dat.timeStamp >= dat.RelDate)]
+            recapdata = recapdata.append(dat)
+            del dat
     recapdata.drop_duplicates(keep = 'first', inplace = True)
     recapdata.to_sql('tblRecaptures',con = conn,index = False)
     c.close()
