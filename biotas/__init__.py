@@ -1443,7 +1443,7 @@ class cross_validated():
             self.classDF = pd.DataFrame()
             for i in max_iter_dict:
                 classDat = pd.read_sql("select test, FreqCode,Power,noiseRatio, lag,lagDiff,conRecLength_A,consDet_A,detHist_A,hitRatio_A,seriesHit_A,conRecLength_M,consDet_M,detHist_M,hitRatio_M,seriesHit_M,postTrue_A,postTrue_M,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from %s"%(max_iter_dict[i]),con=conn)
-                classDat = classDat[classDat.postTrue_A >= classDat.postTrue_M]
+                #classDat = classDat[classDat.postTrue_A >= classDat.postTrue_M]
                 classDat.drop(['conRecLength_M','consDet_M','detHist_M','hitRatio_M','seriesHit_M'], axis = 1, inplace = True)
                 classDat.rename(columns = {'conRecLength_A':'conRecLength','consDet_A':'consDet','detHist_A':'detHist','hitRatio_A':'hitRatio','seriesHit_A':'seriesHit'}, inplace = True)
                 self.classDF = self.classDF.append(classDat)
@@ -1602,17 +1602,11 @@ class cross_validated():
         self.testDat['LikelihoodTrue'] = likelihood(True,self,status = 'cross')
         self.testDat['LikelihoodFalse'] = likelihood(False,self,status = 'cross')
         
-        #testDat['LikelihoodTrue'] = testDat['LPowerT'] * testDat['LHitRatioT'] * testDat['LconRecT'] * testDat['LseriesHitT'] * testDat['LconsDetT'] * testDat['LnoiseT']
-        #testDat['LikelihoodFalse'] = testDat['LPowerF'] * testDat['LHitRatioF'] * testDat['LconRecF'] * testDat['LseriesHitF'] * testDat['LconsDetF'] * testDat['LnoiseF']
-
-        #testDat['LikelihoodTrue'] = testDat['LHitRatioT'] * testDat['LconRecT']
-        #testDat['LikelihoodFalse'] = testDat['LHitRatioF'] * testDat['LconRecF'] 
         
         # Calculate the posterior probability of each Hypothesis occuring
-#        testDat['postTrue'] = testDat['priorT'] * testDat['LikelihoodTrue']
-#        testDat['postFalse'] = testDat['priorF'] * testDat['LikelihoodFalse']
-        self.testDat['postTrue'] = self.testDat['LikelihoodTrue']
-        self.testDat['postFalse'] = self.testDat['LikelihoodFalse']
+        self.testDat['postTrue'] = self.testDat['priorT'] * self.testDat['LikelihoodTrue']
+        self.testDat['postFalse'] = self.testDat['priorF'] * self.testDat['LikelihoodFalse']
+
 
         self.testDat['T2F_ratio'] = self.testDat['postTrue'] / self.testDat['postFalse']
         # classify detection as true or false based on MAP hypothesis
@@ -1625,6 +1619,8 @@ class cross_validated():
         metrics = pd.crosstab(self.histDF.Detection,self.histDF.test)
         rowSum = metrics.sum(axis = 1)
         colSum = metrics.sum(axis = 0)
+        self.corr_matrix = self.histDF[['conRecLength','consDet','hitRatio','noiseRatio','seriesHit','Power','lagDiff']].apply(pd.to_numeric).corr().round(4)
+        
         print ("k-Fold cross validation report for reciever type %s"%(self.recType))
         print ("----------------------------------------------------------------")
         print ("There are %s records in the training dataset "%(len(self.trainDF)))
@@ -1664,7 +1660,22 @@ class cross_validated():
         print ("specificity = TN / (TN + FP)")
         print ("Probability of a record being classified false,")
         print ("given that the record is in fact false")
-        print ("----------------------------------------------------------------")
+        print ("________________________________________________________________")
+        print ("The correlation matrix for all predictors variabes:             ")
+        print (self.corr_matrix)
+        # visualize the correlation matrix, closer to 1, the stronger the effect
+        # if we are worried about multicollinearity, I would stear away from 
+        # variable combinations where coefficient ~ 1
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        cax = ax.matshow(self.corr_matrix, vmin = -1, vmax = 1)
+        fig.colorbar(cax)
+        ticks = np.arange(0,7,1)
+        ax.set_xticks(ticks)
+        ax.set_yticks(ticks)
+        ax.set_xticklabels(['conRecLength','consDet','hitRatio','noiseRatio','seriesHit','Power','lagDiff'])
+        ax.set_yticklabels(['conRecLength','consDet','hitRatio','noiseRatio','seriesHit','Power','lagDiff'])
+        plt.show()
 
 class classification_results():
     '''Python class object to hold the results of false positive classification'''
@@ -1677,6 +1688,7 @@ class classification_results():
         conn = sqlite3.connect(self.projectDB)                                              # connect to the database
         #self.class_stats_data = pd.DataFrame(columns = ['FreqCode','Epoch','recID','Power','hitRatio','postTrue','postFalse','test','lagDiff','conRecLength','noiseRatio','fishCount', 'logLikelihoodRatio'])                # set up an empty data frame
         self.class_stats_data = pd.DataFrame(columns = ['FreqCode','Epoch','recID','Power','hitRatio_A','hitRatio_M','postTrue_A','postTrue_M','postFalse_A','postFalse_M','test','lagDiff','conRecLength_A', 'conRecLength_M','logLikelihoodRatio'])                # set up an empty data frame
+        self.initial_data = pd.DataFrame(columns = ['FreqCode','Epoch','recID','Power','hitRatio_A','hitRatio_M','postTrue_A','postTrue_M','postFalse_A','postFalse_M','test','lagDiff','conRecLength_A', 'conRecLength_M','logLikelihoodRatio'])
         self.reclass_iter = reclass_iter
         self.site = site
         if site == None:
@@ -1690,6 +1702,13 @@ class classification_results():
                 dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
                 self.class_stats_data = self.class_stats_data.append(dat)
                 del dat 
+                sql = "SELECT * FROM tblClassify_%s_%s "%(i, reclass_iter)
+                dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
+                self.class_stats_data = self.class_stats_data.append(dat)
+                del dat                 
+                
+                
+                
         else:
             print ("Start selecting and merging data for receiver %s"%(site))
 
@@ -1729,6 +1748,15 @@ class classification_results():
         print ("      |______________|______________|")    
         print ("")
         print ("----------------------------------------------------------------------------------")
+        self.class_stats_data = cons_det_filter(self.class_stats_data)
+        print ("The consecutive detection filter described by Beeman & Perry (2012) would retain %s detections"%(self.class_stats_data.cons_det_filter.sum()))
+        print ("A standard of three records in a row will only retain %s records"%len(self.class_stats_data[(self.class_stats_data.conRecLength_A >= 3) |(self.class_stats_data.conRecLength_M >= 3)]))
+        print ("A standard of four records in a row will only retain %s records"%len(self.class_stats_data[(self.class_stats_data.conRecLength_A >= 4) |(self.class_stats_data.conRecLength_M >= 4)]))
+        print ("A \standard of five records in a row will only retain %s records"%len(self.class_stats_data[(self.class_stats_data.conRecLength_A >= 5) |(self.class_stats_data.conRecLength_M >= 5)]))
+        print ("A standard of six records in a row will only retain %s records"%len(self.class_stats_data[(self.class_stats_data.conRecLength_A >= 6) |(self.class_stats_data.conRecLength_M >= 6)]))
+
+        print ("The algorithm retained a total of %s detections"%(self.class_stats_data.test.sum()))
+        print ("----------------------------------------------------------------------------------")
         print ("Compiling Figures")
         # get data by detection class for side by side histograms
         self.class_stats_data['Power'] = self.class_stats_data.Power.astype(float)
@@ -1747,7 +1775,7 @@ class classification_results():
         self.class_stats_data['logLikelihoodRatio_max'] = self.class_stats_data[['logLikelihoodRatio_A','logLikelihoodRatio_M']].max(axis = 1)
         self.class_stats_data['logPostRatio_max'] = self.class_stats_data[['logPostRatio_A','logPostRatio_M']].max(axis = 1)
 
-
+        self.class_stats_data = cons_det_filter(self.class_stats_data)
         trues = self.class_stats_data[self.class_stats_data.test == 1] 
         falses = self.class_stats_data[self.class_stats_data.test == 0] 
         self.trues = trues
@@ -2005,13 +2033,13 @@ class training_results():
                             max_iter_dict[i] = j[0]
                     curr_idx = curr_idx + 1
             curr_idx = 0
-
+        print (max_iter_dict)
         del i, j, curr_idx
         # once we have a hash table of receiver to max classification, extract the classification dataset
         classDF = pd.DataFrame()
         for i in max_iter_dict:
             classDat = pd.read_sql("select test, FreqCode,Power,noiseRatio, lag,lagDiff,conRecLength_A,consDet_A,detHist_A,hitRatio_A,seriesHit_A,conRecLength_M,consDet_M,detHist_M,hitRatio_M,seriesHit_M,postTrue_A,postTrue_M,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from %s"%(max_iter_dict[i]),con=conn)
-            classDat = classDat[classDat.postTrue_A >= classDat.postTrue_M]
+            #classDat = classDat[classDat.postTrue_A >= classDat.postTrue_M]
             classDat.drop(['conRecLength_M','consDet_M','detHist_M','hitRatio_M','seriesHit_M'], axis = 1, inplace = True)
             classDat.rename(columns = {'conRecLength_A':'conRecLength','consDet_A':'consDet','detHist_A':'detHist','hitRatio_A':'hitRatio','seriesHit_A':'seriesHit'}, inplace = True)
             classDF = classDF.append(classDat)
@@ -3076,7 +3104,7 @@ def manage_node_overlap_data(inputWS, projectDB):
         os.remove(os.path.join(inputWS,f))
     c.close()
     
-def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filter = False, rec_list = None):
+def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filter = False, rec_list = None, con_rec_filter = None):
     '''function takes classified data, merges across sites and then joins presence 
     and overlapping data into one big file for model building.'''
     conn = sqlite3.connect(projectDB)                                              # connect to the database
@@ -3111,14 +3139,14 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
                     max_iter_dict[i] = j
                 curr_idx = curr_idx + 1
         curr_idx = 0
-        del j
+        
         
         # once we have a hash table of receiver to max classification, extract the classification dataset
         for j in max_iter_dict:
             cursor = conn.execute('select * from %s'%(max_iter_dict[j]))
             names = [description[0] for description in cursor.description]
             if 'hitRatio_A' in names:            
-                sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp,presence_number, overlapping, hitRatio_A, hitRatio_M, detHist_A, detHist_M, lag, lagDiff, test, RelDate 
+                sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp,presence_number, overlapping, hitRatio_A, hitRatio_M, detHist_A, detHist_M, conRecLength_A, conRecLength_M, lag, lagDiff, test, RelDate 
                 FROM %s 
                 LEFT JOIN tblMasterTag ON %s.FreqCode = tblMasterTag.FreqCode 
                 LEFT JOIN tblOverlap ON %s.FreqCode = tblOverlap.FreqCode AND %s.Epoch = tblOverlap.Epoch AND %s.recID = tblOverlap.recID 
@@ -3138,6 +3166,8 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
             dat['timeStamp'] = pd.to_datetime(dat.timeStamp)
             if hitRatio_Filter == True:
                 dat = dat[(dat.hitRatio_A > 0.10)]# | (dat.hitRatio_M > 0.10)]
+            if con_rec_filter != None:
+                dat = dat[(dat.conRecLength_A >= con_rec_filter) | (dat.conRecLength_M >= con_rec_filter)]
             if pre_release_Filter == True:
                 dat = dat[(dat.timeStamp >= dat.RelDate)]
             recapdata = recapdata.append(dat)
@@ -3295,7 +3325,6 @@ class lrdr_data_prep():
         c.close()
         print ("Finished sql")
 
-        
         # Identify first recapture times
         self.startTimes = self.live_recap_data[self.live_recap_data.RecapOccasion == "R00"].groupby(['FreqCode'])['Epoch'].min().to_frame()
         self.startTimes.reset_index(drop = False, inplace = True)
@@ -3348,11 +3377,7 @@ class lrdr_data_prep():
             # extract only good data below the time limit
             self.live_recap_data = self.live_recap_data[self.live_recap_data.duration <= live_recap_time_limit]
             self.dead_recover_data = self.dead_recover_data[self.dead_recover_data.duration <= dead_recap_time_limit]
-           
-
-            
-            
-        
+    
     def input_file(self,modelName, outputWS):
         # create cross tabulated data frame of live recapture data
         #Step 1: Create cross tabulated data frame with FreqCode as row index and recap occasion as column.  Identify the min epoch'''
@@ -3465,7 +3490,15 @@ class receiver_stats():
         fishDat = self.rec_dat[self.rec_dat.FreqCode == fish]
         self.presences = fishDat.groupby(['FreqCode'])['presence_number'].max()
         
-    
+def cons_det_filter(classify_data):
+    '''Function that applies a filter based on consecutive detections.  Replicates
+    Beeman and Perry 2012'''
+    # determine if consecutive detections consDet is true
+    classify_data.loc[(classify_data['consDet_A'] == 1) | (classify_data['consDet_M'] == 1), 'cons_det_filter'] = 1
+    classify_data.loc[(classify_data['consDet_A'] != 1) & (classify_data['consDet_M'] != 1), 'cons_det_filter'] = 0
+
+    return classify_data
+        
         
           
 
