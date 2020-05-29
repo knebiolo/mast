@@ -15,6 +15,8 @@ import statsmodels.api as sm
 import statsmodels.formula.api as smf
 import networkx as nx
 from matplotlib import rcParams
+from scipy import interpolate
+
 font = {'family': 'serif','size': 6}
 rcParams['font.size'] = 6
 rcParams['font.family'] = 'serif'
@@ -315,7 +317,7 @@ def fishCount (row,datObject,data):
     return np.sum(np.isin(fishies,tags))
 
 
-def noiseRatio (row,duration,data,study_tags):
+def noiseRatio (duration,data,study_tags):
     
     ''' function calculates the ratio of miscoded, pure noise detections, to matching frequency/code 
     detections within the duration specified.
@@ -326,16 +328,31 @@ def noiseRatio (row,duration,data,study_tags):
     data = current data file
     study_tags = list or list like object of study tags
     '''
-    rowSeconds = (row['Epoch'])
-    ll = rowSeconds - (duration * 60.0)
-    ul = rowSeconds + (duration * 60.0) 
-    # extract data
-    trunc = data[(data.Epoch >= ll) & (data.Epoch <  ul)]               # truncate the dataset, we only care about these records
-    # calculate noise ratio 
-    total = float(len(trunc))                                                   # how many records are there in this dataset?
-    fishies = trunc.FreqCode.unique()
-    miscode = np.float(np.sum(np.isin(fishies,study_tags,invert = True)))
-    return round((miscode/total),4)                                       # the noise ratio is the number of miscoded tags divided by the total number of records in the truncated dataset, which happens to be on a specified interval
+    # identify miscodes
+    data['miscode'] = np.isin(data.FreqCode.values, study_tags, invert = True)
+   
+    # bin everything into nearest 5 min time bin and count miscodes and total number of detections
+    duration_s = str(int(duration * 60)) + 's'
+    miscode = data.groupby(pd.Grouper(key = 'timeStamp', freq = duration_s)).miscode.sum().to_frame()
+    total = data.groupby(pd.Grouper(key = 'timeStamp', freq = duration_s)).FreqCode.count().to_frame()
+    
+    # rename
+    total.rename(columns = {'FreqCode':'total'}, inplace = True)
+
+    # merge dataframes, calculate noise ratio
+    noise = total.merge(miscode, left_on = 'timeStamp', right_on ='timeStamp')
+    noise.reset_index(inplace = True)
+    noise.fillna(value = 0, inplace = True)
+    noise['noiseRatio'] = noise.miscode / noise.total
+    noise.dropna(inplace = True)
+    noise['Epoch'] = (noise['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()
+    # create function for noise ratio at time
+    if len(noise) >= 2:
+        noise_ratio_fun = interpolate.interp1d(noise.Epoch.values,noise.noiseRatio.values,kind = 'linear',bounds_error = False, fill_value ='extrapolate')   
+        # interpolate noise ratio as a function of time for every row in data
+        data['noiseRatio'] = noise_ratio_fun(data.Epoch.values)
+    data.drop(columns = ['miscode'], inplace = True)
+    return data                                       
     
 def MAP (row):
     if row['postTrue'] > row['postFalse']:
@@ -459,8 +476,9 @@ def orionImport(fileName,dbName,recName,switch = False, scanTime = None, channel
     '''
     conn = sqlite3.connect(dbName, timeout=30.0)
     c = conn.cursor()    
-    study_tags = pd.read_sql('SELECT FreqCode FROM tblMasterTag WHERE TagType == "Study" OR TagType == "Beacon"',con = conn).FreqCode.values
-    
+    #study_tags = pd.read_sql('SELECT FreqCode FROM tblMasterTag WHERE TagType = "Study"' ,con = conn).FreqCode.values
+    study_tags = pd.read_sql('SELECT FreqCode FROM tblMasterTag',con = conn)
+    study_tags.dropna(inplace = True)
     recType = 'orion'
     if switch == False:
         scanTime = 1
@@ -486,38 +504,43 @@ def orionImport(fileName,dbName,recName,switch = False, scanTime = None, channel
                                 skiprows = 1,
                                 dtype = {'Date':str,'Time':str,'Site':str,'Ant':str,'Freq':str,'Code':str,'Power':str}) 
 
-    telemDat['fileName'] = np.repeat(fileName,len(telemDat))
-    telemDat['FreqCode'] = telemDat['Freq'].astype(str) + ' ' + telemDat['Code'].astype(str)
-    telemDat['timeStamp'] = pd.to_datetime(telemDat['Date'] + ' ' + telemDat['Time'],errors = 'coerce')# create timestamp field from date and time and apply to index
-    telemDat = telemDat[telemDat.timeStamp.notnull()]
-    telemDat['Epoch'] = (telemDat['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()        
-    telemDat.drop (['Date','Time','Freq','Code','Site'],axis = 1, inplace = True)
-    telemDat['noiseRatio'] = telemDat.apply(noiseRatio, axis = 1, args = (5.0,telemDat,study_tags))            
-    if switch == False:
-        telemDat.drop(['Ant'], axis = 1, inplace = True)
-        telemDat['recID'] = np.repeat(recName,len(telemDat))
-        tuples = zip(telemDat.FreqCode.values,telemDat.recID.values,telemDat.Epoch.values)
-        index = pd.MultiIndex.from_tuples(tuples, names=['FreqCode', 'recID','Epoch'])
-        telemDat.set_index(index,inplace = True,drop = False)
-        telemDat.to_sql('tblRaw',con = conn,index = False, if_exists = 'append')
-        recParamLine = [(recName,recType,scanTime,channels,fileName)]
-        conn.executemany('INSERT INTO tblReceiverParameters VALUES (?,?,?,?,?)',recParamLine)
-        conn.commit() 
-        c.close()  
-    else:
-        for i in ant_to_rec_dict:
-            site = ant_to_rec_dict[i]
-            telemDat_sub = telemDat[telemDat.Ant == str(i)]
-            telemDat_sub['recID'] = np.repeat(site,len(telemDat_sub))
-            tuples = zip(telemDat_sub.FreqCode.values,telemDat_sub.recID.values,telemDat_sub.Epoch.values)
-            index = pd.MultiIndex.from_tuples(tuples, names=['FreqCode', 'recID','Epoch'])
-            telemDat_sub.set_index(index,inplace = True,drop = False)
-            telemDat_sub.drop(['Ant'], axis = 1, inplace = True)
-            telemDat_sub.to_sql('tblRaw',con = conn,index = False, if_exists = 'append')
-            recParamLine = [(site,recType,scanTime,channels,fileName)]
-            conn.executemany('INSERT INTO tblReceiverParameters VALUES (?,?,?,?,?)',recParamLine)
-            conn.commit() 
-            c.close()             
+    if len(telemDat) > 0:
+        telemDat['fileName'] = np.repeat(fileName,len(telemDat))
+        telemDat['FreqCode'] = telemDat['Freq'].astype(str) + ' ' + telemDat['Code'].astype(str)
+        telemDat['timeStamp'] = pd.to_datetime(telemDat['Date'] + ' ' + telemDat['Time'],errors = 'coerce')# create timestamp field from date and time and apply to index
+        telemDat = telemDat[telemDat.timeStamp.notnull()]
+        if len(telemDat) == 0:
+            print ("Invalid timestamps in raw data, cannot import")
+        else:
+            telemDat['Epoch'] = (telemDat['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()        
+            telemDat.drop (['Date','Time','Freq','Code','Site'],axis = 1, inplace = True)
+            telemDat = noiseRatio(5.0,telemDat,study_tags)
+            #telemDat['noiseRatio'] = telemDat.apply(noiseRatio, axis = 1, args = (5.0,telemDat,study_tags))            
+            if switch == False:
+                telemDat.drop(['Ant'], axis = 1, inplace = True)
+                telemDat['recID'] = np.repeat(recName,len(telemDat))
+                tuples = zip(telemDat.FreqCode.values,telemDat.recID.values,telemDat.Epoch.values)
+                index = pd.MultiIndex.from_tuples(tuples, names=['FreqCode', 'recID','Epoch'])
+                telemDat.set_index(index,inplace = True,drop = False)
+                telemDat.to_sql('tblRaw',con = conn,index = False, if_exists = 'append')
+                recParamLine = [(recName,recType,scanTime,channels,fileName)]
+                conn.executemany('INSERT INTO tblReceiverParameters VALUES (?,?,?,?,?)',recParamLine)
+                conn.commit() 
+                c.close()  
+            else:
+                for i in ant_to_rec_dict:
+                    site = ant_to_rec_dict[i]
+                    telemDat_sub = telemDat[telemDat.Ant == str(i)]
+                    telemDat_sub['recID'] = np.repeat(site,len(telemDat_sub))
+                    tuples = zip(telemDat_sub.FreqCode.values,telemDat_sub.recID.values,telemDat_sub.Epoch.values)
+                    index = pd.MultiIndex.from_tuples(tuples, names=['FreqCode', 'recID','Epoch'])
+                    telemDat_sub.set_index(index,inplace = True,drop = False)
+                    telemDat_sub.drop(['Ant'], axis = 1, inplace = True)
+                    telemDat_sub.to_sql('tblRaw',con = conn,index = False, if_exists = 'append')
+                    recParamLine = [(site,recType,scanTime,channels,fileName)]
+                    conn.executemany('INSERT INTO tblReceiverParameters VALUES (?,?,?,?,?)',recParamLine)
+                    conn.commit() 
+                    c.close()             
   
                         
 def lotek_import(fileName,dbName,recName):
@@ -618,7 +641,7 @@ def lotek_import(fileName,dbName,recName):
             telemDat['FreqCode'] = telemDat['Frequency'].astype(str) + ' ' + telemDat['TagID'].astype(int).astype(str)
             telemDat['timeStamp'] = pd.to_datetime(telemDat['Date'] + ' ' + telemDat['Time'])# create timestamp field from date and time and apply to index
             telemDat['Epoch'] = (telemDat['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()
-            telemDat['noiseRatio'] = telemDat.apply(noiseRatio, axis = 1, args = (5.0,telemDat,study_tags))            
+            telemDat = noiseRatio(5.0,telemDat,study_tags)
             telemDat.drop (['Date','Time','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
             telemDat['fileName'] = np.repeat(fileName,len(telemDat))
             telemDat['recID'] = np.repeat(recName,len(telemDat))
@@ -770,7 +793,7 @@ def lotek_import(fileName,dbName,recName):
                 telemDat.set_index(index,inplace = True,drop = False)
                 telemDat.to_sql('tblRaw',con = conn,index = False, if_exists = 'append')
 
-       
+    del telemDat   
     # add receiver parameters to database    
     recParamLine = [(recName,recType,scanTime,channels,fileName)]
     conn.executemany('INSERT INTO tblReceiverParameters VALUES (?,?,?,?,?)',recParamLine)
@@ -781,6 +804,7 @@ def telemDataImport(site,recType,file_directory,projectDB,switch = False, scanTi
     tFiles = os.listdir(file_directory)
     for f in tFiles:
         f_dir = os.path.join(file_directory,f)
+        print ("Start importing file %s"%(f))
         if recType == 'lotek':
             lotek_import(f_dir,projectDB,site)
         elif recType == 'orion':
@@ -818,7 +842,7 @@ class training_data():
         # do some data management when importing training dataframe
         self.histDF['recID1'] = np.repeat(site,len(self.histDF))
         self.histDF['timeStamp'] = pd.to_datetime(self.histDF['timeStamp'])
-        self.histDF[['Power','Epoch','noiseRatio',]] = self.histDF[['Power','Epoch','noiseRatio']].apply(pd.to_numeric)                  # sometimes we import from SQLite and our number fields are objects, fuck that noise, let's make sure we are good
+        #self.histDF[['Power','Epoch','noiseRatio',]] = self.histDF[['Power','Epoch','noiseRatio']].apply(pd.to_numeric)                  # sometimes we import from SQLite and our number fields are objects, fuck that noise, let's make sure we are good
         self.histDF['RowSeconds'] = self.histDF['Epoch']
         self.histDF.sort_values(by = 'Epoch', inplace = True)
         self.histDF.set_index('Epoch', drop = False, inplace = True)
@@ -1347,9 +1371,7 @@ def calc_class_params_map(classify_object):
             
         # apply the MAP hypothesis
         #classify_object.histDF['test'] = classify_object.histDF.apply(MAP,axis =1) 
-        classify_object.histDF.loc[(classify_object.histDF.postTrue_A >= classify_object.histDF.postFalse_A) & (classify_object.histDF.postTrue_M >= classify_object.histDF.postFalse_M),'test'] = True
-        classify_object.histDF.loc[(classify_object.histDF.postTrue_A >= classify_object.histDF.postFalse_A) & (classify_object.histDF.postTrue_M < classify_object.histDF.postFalse_M),'test'] = True
-        classify_object.histDF.loc[(classify_object.histDF.postTrue_A < classify_object.histDF.postFalse_A) & (classify_object.histDF.postTrue_M >= classify_object.histDF.postFalse_M),'test'] = True
+        classify_object.histDF.loc[(classify_object.histDF.postTrue_A >= classify_object.histDF.postFalse_A) | (classify_object.histDF.postTrue_M >= classify_object.histDF.postFalse_M),'test'] = True
         classify_object.histDF.loc[(classify_object.histDF.postTrue_A < classify_object.histDF.postFalse_A) & (classify_object.histDF.postTrue_M < classify_object.histDF.postFalse_M),'test'] = False
     
         classify_object.histDF.to_csv(os.path.join(classify_object.scratchWS,"%s.csv"%(classify_object.i)))
@@ -1443,7 +1465,7 @@ class cross_validated():
             self.classDF = pd.DataFrame()
             for i in max_iter_dict:
                 classDat = pd.read_sql("select test, FreqCode,Power,noiseRatio, lag,lagDiff,conRecLength_A,consDet_A,detHist_A,hitRatio_A,seriesHit_A,conRecLength_M,consDet_M,detHist_M,hitRatio_M,seriesHit_M,postTrue_A,postTrue_M,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from %s"%(max_iter_dict[i]),con=conn)
-                classDat = classDat[classDat.postTrue_A >= classDat.postTrue_M]
+                #classDat = classDat[classDat.postTrue_A >= classDat.postTrue_M]
                 classDat.drop(['conRecLength_M','consDet_M','detHist_M','hitRatio_M','seriesHit_M'], axis = 1, inplace = True)
                 classDat.rename(columns = {'conRecLength_A':'conRecLength','consDet_A':'consDet','detHist_A':'detHist','hitRatio_A':'hitRatio','seriesHit_A':'seriesHit'}, inplace = True)
                 self.classDF = self.classDF.append(classDat)
@@ -1729,6 +1751,15 @@ class classification_results():
         print ("      |______________|______________|")    
         print ("")
         print ("----------------------------------------------------------------------------------")
+        self.class_stats_data = cons_det_filter(self.class_stats_data)
+        print ("The consecutive detection filter described by Beeman & Perry (2012) would retain %s detections"%(self.class_stats_data.cons_det_filter.sum()))
+        print ("A standard of three records in a row will only retain %s records"%len(self.class_stats_data[(self.class_stats_data.conRecLength_A >= 3) |(self.class_stats_data.conRecLength_M >= 3)]))
+        print ("A standard of four records in a row will only retain %s records"%len(self.class_stats_data[(self.class_stats_data.conRecLength_A >= 4) |(self.class_stats_data.conRecLength_M >= 4)]))
+        print ("A standard of five records in a row will only retain %s records"%len(self.class_stats_data[(self.class_stats_data.conRecLength_A >= 5) |(self.class_stats_data.conRecLength_M >= 5)]))
+        print ("A standard of six records in a row will only retain %s records"%len(self.class_stats_data[(self.class_stats_data.conRecLength_A >= 6) |(self.class_stats_data.conRecLength_M >= 6)]))
+
+        print ("The algorithm retained a total of %s detections"%(self.class_stats_data.test.sum()))
+        print ("----------------------------------------------------------------------------------")
         print ("Compiling Figures")
         # get data by detection class for side by side histograms
         self.class_stats_data['Power'] = self.class_stats_data.Power.astype(float)
@@ -1747,7 +1778,7 @@ class classification_results():
         self.class_stats_data['logLikelihoodRatio_max'] = self.class_stats_data[['logLikelihoodRatio_A','logLikelihoodRatio_M']].max(axis = 1)
         self.class_stats_data['logPostRatio_max'] = self.class_stats_data[['logPostRatio_A','logPostRatio_M']].max(axis = 1)
 
-
+        self.class_stats_data = cons_det_filter(self.class_stats_data)
         trues = self.class_stats_data[self.class_stats_data.test == 1] 
         falses = self.class_stats_data[self.class_stats_data.test == 0] 
         self.trues = trues
@@ -2005,13 +2036,13 @@ class training_results():
                             max_iter_dict[i] = j[0]
                     curr_idx = curr_idx + 1
             curr_idx = 0
-
+        print (max_iter_dict)
         del i, j, curr_idx
         # once we have a hash table of receiver to max classification, extract the classification dataset
         classDF = pd.DataFrame()
         for i in max_iter_dict:
             classDat = pd.read_sql("select test, FreqCode,Power,noiseRatio, lag,lagDiff,conRecLength_A,consDet_A,detHist_A,hitRatio_A,seriesHit_A,conRecLength_M,consDet_M,detHist_M,hitRatio_M,seriesHit_M,postTrue_A,postTrue_M,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from %s"%(max_iter_dict[i]),con=conn)
-            classDat = classDat[classDat.postTrue_A >= classDat.postTrue_M]
+            #classDat = classDat[classDat.postTrue_A >= classDat.postTrue_M]
             classDat.drop(['conRecLength_M','consDet_M','detHist_M','hitRatio_M','seriesHit_M'], axis = 1, inplace = True)
             classDat.rename(columns = {'conRecLength_A':'conRecLength','consDet_A':'consDet','detHist_A':'detHist','hitRatio_A':'hitRatio','seriesHit_A':'seriesHit'}, inplace = True)
             classDF = classDF.append(classDat)
@@ -3076,7 +3107,7 @@ def manage_node_overlap_data(inputWS, projectDB):
         os.remove(os.path.join(inputWS,f))
     c.close()
     
-def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filter = False, rec_list = None):
+def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filter = False, rec_list = None, con_rec_filter = None):
     '''function takes classified data, merges across sites and then joins presence 
     and overlapping data into one big file for model building.'''
     conn = sqlite3.connect(projectDB)                                              # connect to the database
@@ -3111,14 +3142,14 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
                     max_iter_dict[i] = j
                 curr_idx = curr_idx + 1
         curr_idx = 0
-        del j
+        
         
         # once we have a hash table of receiver to max classification, extract the classification dataset
         for j in max_iter_dict:
             cursor = conn.execute('select * from %s'%(max_iter_dict[j]))
             names = [description[0] for description in cursor.description]
             if 'hitRatio_A' in names:            
-                sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp,presence_number, overlapping, hitRatio_A, hitRatio_M, detHist_A, detHist_M, lag, lagDiff, test, RelDate 
+                sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp,presence_number, overlapping, hitRatio_A, hitRatio_M, detHist_A, detHist_M, conRecLength_A, conRecLength_M, lag, lagDiff, test, RelDate 
                 FROM %s 
                 LEFT JOIN tblMasterTag ON %s.FreqCode = tblMasterTag.FreqCode 
                 LEFT JOIN tblOverlap ON %s.FreqCode = tblOverlap.FreqCode AND %s.Epoch = tblOverlap.Epoch AND %s.recID = tblOverlap.recID 
@@ -3138,6 +3169,8 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
             dat['timeStamp'] = pd.to_datetime(dat.timeStamp)
             if hitRatio_Filter == True:
                 dat = dat[(dat.hitRatio_A > 0.10)]# | (dat.hitRatio_M > 0.10)]
+            if con_rec_filter != None:
+                dat = dat[(dat.conRecLength_A >= con_rec_filter) | (dat.conRecLength_M >= con_rec_filter)]
             if pre_release_Filter == True:
                 dat = dat[(dat.timeStamp >= dat.RelDate)]
             recapdata = recapdata.append(dat)
@@ -3295,7 +3328,6 @@ class lrdr_data_prep():
         c.close()
         print ("Finished sql")
 
-        
         # Identify first recapture times
         self.startTimes = self.live_recap_data[self.live_recap_data.RecapOccasion == "R00"].groupby(['FreqCode'])['Epoch'].min().to_frame()
         self.startTimes.reset_index(drop = False, inplace = True)
@@ -3348,11 +3380,7 @@ class lrdr_data_prep():
             # extract only good data below the time limit
             self.live_recap_data = self.live_recap_data[self.live_recap_data.duration <= live_recap_time_limit]
             self.dead_recover_data = self.dead_recover_data[self.dead_recover_data.duration <= dead_recap_time_limit]
-           
-
-            
-            
-        
+    
     def input_file(self,modelName, outputWS):
         # create cross tabulated data frame of live recapture data
         #Step 1: Create cross tabulated data frame with FreqCode as row index and recap occasion as column.  Identify the min epoch'''
@@ -3465,7 +3493,15 @@ class receiver_stats():
         fishDat = self.rec_dat[self.rec_dat.FreqCode == fish]
         self.presences = fishDat.groupby(['FreqCode'])['presence_number'].max()
         
-    
+def cons_det_filter(classify_data):
+    '''Function that applies a filter based on consecutive detections.  Replicates
+    Beeman and Perry 2012'''
+    # determine if consecutive detections consDet is true
+    classify_data.loc[(classify_data['consDet_A'] == 1) | (classify_data['consDet_M'] == 1), 'cons_det_filter'] = 1
+    classify_data.loc[(classify_data['consDet_A'] != 1) & (classify_data['consDet_M'] != 1), 'cons_det_filter'] = 0
+
+    return classify_data
+        
         
           
 

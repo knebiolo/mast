@@ -15,8 +15,8 @@ dbName = 'manuscript.db'                                                       #
 figureWS = os.path.join(proj_dir,'Output','Figures')    
 projectDB = os.path.join(proj_dir,'Data',dbName)
 k = 10
-# ['conRecLength','hitRatio','noiseRatio','power','lagDiff']
-fields = ['lagDiff']
+# ['conRecLength','consDet','hitRatio','noiseRatio','seriesHit','power','lagDiff']
+fields = ['hitRatio','noiseRatio','power','lagDiff']
 # create cross validated data object
 cross = biotas.cross_validated(k,recType,fields,projectDB, train_on = 'Study')
 print ("Created a cross validated data object")

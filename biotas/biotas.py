@@ -2005,7 +2005,7 @@ class training_results():
                             max_iter_dict[i] = j[0]
                     curr_idx = curr_idx + 1
             curr_idx = 0
-
+        print (max_iter_dict)
         del i, j, curr_idx
         # once we have a hash table of receiver to max classification, extract the classification dataset
         classDF = pd.DataFrame()
