@@ -476,9 +476,8 @@ def orionImport(fileName,dbName,recName,switch = False, scanTime = None, channel
     '''
     conn = sqlite3.connect(dbName, timeout=30.0)
     c = conn.cursor()    
-    #study_tags = pd.read_sql('SELECT FreqCode FROM tblMasterTag WHERE TagType = "Study"' ,con = conn).FreqCode.values
-    study_tags = pd.read_sql('SELECT FreqCode FROM tblMasterTag',con = conn)
-    study_tags.dropna(inplace = True)
+    study_tags = pd.read_sql('SELECT FreqCode FROM tblMasterTag WHERE TagType == "Study" OR TagType == "Beacon"',con = conn).FreqCode.values
+    
     recType = 'orion'
     if switch == False:
         scanTime = 1
@@ -628,6 +627,7 @@ def lotek_import(fileName,dbName,recName):
         # with our data row, extract information using pandas fwf import procedure
         telemDat = pd.read_fwf(fileName,colspecs = [(0,8),(8,18),(18,28),(28,36),(36,51),(51,59)],names = ['Date','Time','ChannelID','TagID','Antenna','Power'],skiprows = dataRow)
         telemDat = telemDat.iloc[:-2]                                                   # remove last two rows, Lotek adds garbage at the end
+
         telemDat['fileName'] = np.repeat(fileName,len(telemDat))
         def id_to_freq(row,channelDict):
             if row[2] in channelDict:
@@ -718,7 +718,6 @@ def lotek_import(fileName,dbName,recName):
         # with our data row, extract information using pandas fwf import procedure
         if lotek400 == False:
             telemDat = pd.read_fwf(os.path.join(fileName),colspecs = [(0,5),(5,14),(14,23),(23,31),(31,46),(46,54)],names = ['DayNumber','Time','ChannelID','TagID','Antenna','Power'],skiprows = dataRow)
-            
             telemDat = telemDat.iloc[:-2]                                                   # remove last two rows, Lotek adds garbage at the end
             telemDat.dropna(inplace = True)
             if len(telemDat) > 0:
@@ -744,6 +743,7 @@ def lotek_import(fileName,dbName,recName):
 
         else:
             telemDat = pd.read_fwf(os.path.join(fileName),colspecs = [(0,6),(6,14),(14,22),(22,27),(27,35),(35,41),(41,48),(48,56),(56,67),(67,80)],names = ['DayNumber_Start','StartTime','ChannelID','TagID','Antenna','Power','Data','Events','DayNumber_End','EndTime'],skiprows = dataRow)
+
             telemDat.dropna(inplace = True)
 #            if len(telemDat) > 0:
 #                telemDat['Frequency'] = telemDat.apply(id_to_freq, axis = 1, args = (channelDict,)) 
@@ -793,7 +793,7 @@ def lotek_import(fileName,dbName,recName):
                 telemDat.set_index(index,inplace = True,drop = False)
                 telemDat.to_sql('tblRaw',con = conn,index = False, if_exists = 'append')
 
-    del telemDat   
+       
     # add receiver parameters to database    
     recParamLine = [(recName,recType,scanTime,channels,fileName)]
     conn.executemany('INSERT INTO tblReceiverParameters VALUES (?,?,?,?,?)',recParamLine)
@@ -804,7 +804,6 @@ def telemDataImport(site,recType,file_directory,projectDB,switch = False, scanTi
     tFiles = os.listdir(file_directory)
     for f in tFiles:
         f_dir = os.path.join(file_directory,f)
-        print ("Start importing file %s"%(f))
         if recType == 'lotek':
             lotek_import(f_dir,projectDB,site)
         elif recType == 'orion':
@@ -842,7 +841,7 @@ class training_data():
         # do some data management when importing training dataframe
         self.histDF['recID1'] = np.repeat(site,len(self.histDF))
         self.histDF['timeStamp'] = pd.to_datetime(self.histDF['timeStamp'])
-        #self.histDF[['Power','Epoch','noiseRatio',]] = self.histDF[['Power','Epoch','noiseRatio']].apply(pd.to_numeric)                  # sometimes we import from SQLite and our number fields are objects, fuck that noise, let's make sure we are good
+        self.histDF[['Power','Epoch','noiseRatio',]] = self.histDF[['Power','Epoch','noiseRatio']].apply(pd.to_numeric)                  # sometimes we import from SQLite and our number fields are objects, fuck that noise, let's make sure we are good
         self.histDF['RowSeconds'] = self.histDF['Epoch']
         self.histDF.sort_values(by = 'Epoch', inplace = True)
         self.histDF.set_index('Epoch', drop = False, inplace = True)
@@ -1624,17 +1623,11 @@ class cross_validated():
         self.testDat['LikelihoodTrue'] = likelihood(True,self,status = 'cross')
         self.testDat['LikelihoodFalse'] = likelihood(False,self,status = 'cross')
         
-        #testDat['LikelihoodTrue'] = testDat['LPowerT'] * testDat['LHitRatioT'] * testDat['LconRecT'] * testDat['LseriesHitT'] * testDat['LconsDetT'] * testDat['LnoiseT']
-        #testDat['LikelihoodFalse'] = testDat['LPowerF'] * testDat['LHitRatioF'] * testDat['LconRecF'] * testDat['LseriesHitF'] * testDat['LconsDetF'] * testDat['LnoiseF']
-
-        #testDat['LikelihoodTrue'] = testDat['LHitRatioT'] * testDat['LconRecT']
-        #testDat['LikelihoodFalse'] = testDat['LHitRatioF'] * testDat['LconRecF'] 
         
         # Calculate the posterior probability of each Hypothesis occuring
-#        testDat['postTrue'] = testDat['priorT'] * testDat['LikelihoodTrue']
-#        testDat['postFalse'] = testDat['priorF'] * testDat['LikelihoodFalse']
-        self.testDat['postTrue'] = self.testDat['LikelihoodTrue']
-        self.testDat['postFalse'] = self.testDat['LikelihoodFalse']
+        self.testDat['postTrue'] = self.testDat['priorT'] * self.testDat['LikelihoodTrue']
+        self.testDat['postFalse'] = self.testDat['priorF'] * self.testDat['LikelihoodFalse']
+
 
         self.testDat['T2F_ratio'] = self.testDat['postTrue'] / self.testDat['postFalse']
         # classify detection as true or false based on MAP hypothesis
@@ -1647,6 +1640,8 @@ class cross_validated():
         metrics = pd.crosstab(self.histDF.Detection,self.histDF.test)
         rowSum = metrics.sum(axis = 1)
         colSum = metrics.sum(axis = 0)
+        self.corr_matrix = self.histDF[['conRecLength','consDet','hitRatio','noiseRatio','seriesHit','Power','lagDiff']].apply(pd.to_numeric).corr().round(4)
+        
         print ("k-Fold cross validation report for reciever type %s"%(self.recType))
         print ("----------------------------------------------------------------")
         print ("There are %s records in the training dataset "%(len(self.trainDF)))
@@ -1686,7 +1681,22 @@ class cross_validated():
         print ("specificity = TN / (TN + FP)")
         print ("Probability of a record being classified false,")
         print ("given that the record is in fact false")
-        print ("----------------------------------------------------------------")
+        print ("________________________________________________________________")
+        print ("The correlation matrix for all predictors variabes:             ")
+        print (self.corr_matrix)
+        # visualize the correlation matrix, closer to 1, the stronger the effect
+        # if we are worried about multicollinearity, I would stear away from 
+        # variable combinations where coefficient ~ 1
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        cax = ax.matshow(self.corr_matrix, vmin = -1, vmax = 1)
+        fig.colorbar(cax)
+        ticks = np.arange(0,7,1)
+        ax.set_xticks(ticks)
+        ax.set_yticks(ticks)
+        ax.set_xticklabels(['conRecLength','consDet','hitRatio','noiseRatio','seriesHit','Power','lagDiff'])
+        ax.set_yticklabels(['conRecLength','consDet','hitRatio','noiseRatio','seriesHit','Power','lagDiff'])
+        plt.show()
 
 class classification_results():
     '''Python class object to hold the results of false positive classification'''
@@ -1698,9 +1708,11 @@ class classification_results():
         c = conn.cursor()
         conn = sqlite3.connect(self.projectDB)                                              # connect to the database
         #self.class_stats_data = pd.DataFrame(columns = ['FreqCode','Epoch','recID','Power','hitRatio','postTrue','postFalse','test','lagDiff','conRecLength','noiseRatio','fishCount', 'logLikelihoodRatio'])                # set up an empty data frame
-        self.class_stats_data = pd.DataFrame(columns = ['FreqCode','Epoch','recID','Power','hitRatio_A','hitRatio_M','postTrue_A','postTrue_M','postFalse_A','postFalse_M','test','lagDiff','conRecLength_A', 'conRecLength_M','logLikelihoodRatio'])                # set up an empty data frame
+        self.class_stats_data = pd.DataFrame(columns = ['FreqCode','Epoch','recID','Power','noiseRatio','hitRatio_A','hitRatio_M','postTrue_A','postTrue_M','postFalse_A','postFalse_M','test','lagDiff','consDet_A', 'consDet_M','conRecLength_A', 'conRecLength_M','logLikelihoodRatio_A', 'logLikelihoodRatio_M'])                # set up an empty data frame
+        self.initial_data = pd.DataFrame(columns = ['FreqCode','Epoch','recID','Power','noiseRatio','hitRatio_A','hitRatio_M','postTrue_A','postTrue_M','postFalse_A','postFalse_M','test','lagDiff','consDet_A', 'consDet_M','conRecLength_A', 'conRecLength_M','logLikelihoodRatio_A', 'logLikelihoodRatio_M'])
         self.reclass_iter = reclass_iter
         self.site = site
+
         if site == None:
             recSQL = "SELECT * FROM tblMasterReceiver WHERE RecType = '%s'"%(self.recType) # SQL code to import data from this node
             receivers = pd.read_sql(recSQL,con = conn)                         # import data
@@ -1708,10 +1720,15 @@ class classification_results():
             for i in receivers:                                                # for every receiver 
                 print ("Start selecting and merging data for receiver %s"%(i))
                 #sql = "SELECT FreqCode, Epoch, recID, Power, hitRatio, postTrue, postFalse, test, lagDiff, conRecLength, noiseRatio, fishCount, logLikelihoodRatio FROM tblClassify_%s "%(i)
-                sql = "SELECT * FROM tblClassify_%s_%s "%(i, reclass_iter)
+                sql = "SELECT FreqCode,Epoch,recID,Power,noiseRatio,hitRatio_A,hitRatio_M,postTrue_A,postTrue_M,postFalse_A,postFalse_M,test,lagDiff,consDet_A, consDet_M, conRecLength_A, conRecLength_M,logLikelihoodRatio_A, logLikelihoodRatio_M FROM tblClassify_%s_%s "%(i, reclass_iter)
                 dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
                 self.class_stats_data = self.class_stats_data.append(dat)
                 del dat 
+                sql = "SELECT FreqCode,Epoch,recID,Power,noiseRatio,hitRatio_A,hitRatio_M,postTrue_A,postTrue_M,postFalse_A,postFalse_M,test,lagDiff,consDet_A, consDet_M,conRecLength_A, conRecLength_M,logLikelihoodRatio_A, logLikelihoodRatio_M FROM tblClassify_%s_%s "%(i, 1)
+                dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
+                self.initial_data = self.initial_data.append(dat)
+                del dat                 
+                
         else:
             print ("Start selecting and merging data for receiver %s"%(site))
 
@@ -1719,6 +1736,11 @@ class classification_results():
             dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
             self.class_stats_data = self.class_stats_data.append(dat)
             del dat 
+
+            sql = "SELECT * FROM tblClassify_%s_%s "%(i, 1)
+            dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
+            self.initial_data = self.initial_data.append(dat)
+            del dat                
         c.close()
                     
     def classify_stats(self):
@@ -1751,16 +1773,48 @@ class classification_results():
         print ("      |______________|______________|")    
         print ("")
         print ("----------------------------------------------------------------------------------")
-        self.class_stats_data = cons_det_filter(self.class_stats_data)
-        print ("The consecutive detection filter described by Beeman & Perry (2012) would retain %s detections"%(self.class_stats_data.cons_det_filter.sum()))
-        print ("A standard of three records in a row will only retain %s records"%len(self.class_stats_data[(self.class_stats_data.conRecLength_A >= 3) |(self.class_stats_data.conRecLength_M >= 3)]))
-        print ("A standard of four records in a row will only retain %s records"%len(self.class_stats_data[(self.class_stats_data.conRecLength_A >= 4) |(self.class_stats_data.conRecLength_M >= 4)]))
-        print ("A standard of five records in a row will only retain %s records"%len(self.class_stats_data[(self.class_stats_data.conRecLength_A >= 5) |(self.class_stats_data.conRecLength_M >= 5)]))
-        print ("A standard of six records in a row will only retain %s records"%len(self.class_stats_data[(self.class_stats_data.conRecLength_A >= 6) |(self.class_stats_data.conRecLength_M >= 6)]))
-
-        print ("The algorithm retained a total of %s detections"%(self.class_stats_data.test.sum()))
+#        self.class_stats_data = cons_det_filter(self.class_stats_data)
+#
+#        print ("The consecutive detection filter described by Beeman & Perry (2012) would retain %s detections"%(self.class_stats_data.cons_det_filter.sum()))
+#        print ("A standard of three records in a row will only retain %s records"%len(self.class_stats_data[(self.class_stats_data.conRecLength_A >= 3) |(self.class_stats_data.conRecLength_M >= 3)]))
+#        print ("A standard of four records in a row will only retain %s records"%len(self.class_stats_data[(self.class_stats_data.conRecLength_A >= 4) |(self.class_stats_data.conRecLength_M >= 4)]))
+#        print ("A standard of five records in a row will only retain %s records"%len(self.class_stats_data[(self.class_stats_data.conRecLength_A >= 5) |(self.class_stats_data.conRecLength_M >= 5)]))
+#        print ("A standard of six records in a row will only retain %s records"%len(self.class_stats_data[(self.class_stats_data.conRecLength_A >= 6) |(self.class_stats_data.conRecLength_M >= 6)]))
+#
+#        print ("The algorithm retained a total of %s detections"%(self.class_stats_data.test.sum()))
         print ("----------------------------------------------------------------------------------")
-        print ("Compiling Figures")
+        print ("Assess concordance with consecutive detection requirement (Beeman and Perry)")
+        
+        # calculate Cohen's Kappa (concordance)
+        # step 1, join the final trues to the initial classification dataset
+        # get true detections
+        trues = self.class_stats_data[self.class_stats_data.test == 1][['FreqCode','Epoch','test']]
+        trues.rename(columns = {'test':'final_test'},inplace = True)
+        print (len(trues))
+        # join true detections to initial data
+        self.initial_data = self.initial_data.merge(trues,how = 'left',left_on = ['FreqCode','Epoch'], right_on = ['FreqCode','Epoch'])
+        self.initial_data = cons_det_filter(self.initial_data)
+        self.initial_data.final_test.fillna(0,inplace = True)
+        self.initial_data.drop_duplicates(keep = 'first', inplace = True)
+        
+        n11 = len(self.initial_data[(self.initial_data.final_test == 1) & (self.initial_data.cons_det_filter == 1)])
+        print ("The algorithm and Beeman and Perry classified the same %s recoreds as true "%(n11))
+        n10 = len(self.initial_data[(self.initial_data.final_test == 1) & (self.initial_data.cons_det_filter == 0)])
+        print ("The algorithm classified %s records as true while Beeman and Perry classified them as false"%(n10))
+        n01 = len(self.initial_data[(self.initial_data.final_test == 0) & (self.initial_data.cons_det_filter == 1)])
+        print ("The algorithm classified %s records as false while Beeman and Perry classified them as true"%(n01))       
+        n00 = len(self.initial_data[(self.initial_data.final_test == 0) & (self.initial_data.cons_det_filter == 0)])
+        print ("The algorithm and Beeman and Perry classified the same %s records as false positive"%(n00))      
+        I_o = (n11 + n00)/(n11 + n10 + n01 + n00)
+        print ("The observed propotion of agreement was %s"%(I_o))
+        I_e = ((n11 + n01)*(n11 + n10) + (n10 + n00)*(n01 + n00))/(n11 + n10 + n01 + n00)**2
+        print ("The expected agreement due to chance alone was %s"%(I_e))
+
+        self.kappa = (I_o - I_e)/(1.- I_e)
+        
+        print ("Cohen's Kappa: %s"%(self.kappa))
+        print ("----------------------------------------------------------------------------------")
+        print ("Compiling Figures")        
         # get data by detection class for side by side histograms
         self.class_stats_data['Power'] = self.class_stats_data.Power.astype(float)
         self.class_stats_data['lagDiff'] = self.class_stats_data.lagDiff.astype(float)
@@ -1778,7 +1832,6 @@ class classification_results():
         self.class_stats_data['logLikelihoodRatio_max'] = self.class_stats_data[['logLikelihoodRatio_A','logLikelihoodRatio_M']].max(axis = 1)
         self.class_stats_data['logPostRatio_max'] = self.class_stats_data[['logPostRatio_A','logPostRatio_M']].max(axis = 1)
 
-        self.class_stats_data = cons_det_filter(self.class_stats_data)
         trues = self.class_stats_data[self.class_stats_data.test == 1] 
         falses = self.class_stats_data[self.class_stats_data.test == 0] 
         self.trues = trues
