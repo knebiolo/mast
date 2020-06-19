@@ -2,7 +2,7 @@ import os
 import biotas
 import pandas as pd
 proj_dir = r'E:\Manuscript\CT_River_2015'                   
-dbName = 'ctr_2015.db'
+dbName = 'ctr_2015_v2.db'
 data_dir = os.path.join(proj_dir,'Data')                                       
 db_dir = os.path.join(proj_dir,'Data',dbName)                                  
 det = 5                                                                        # number of detections we will look forwards and backwards for in detection history

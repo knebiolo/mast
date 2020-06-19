@@ -116,8 +116,8 @@ def detHist (data,rate,det, status = 'A', training = False):
     if channels > 1:
         for i in np.arange(det * -1 , det + 1, 1):
             data['epoch_shift_%s'%(np.int(i))] = data.Epoch.shift(-1 * np.int(i))
-            data['ll'] = data['Epoch'] + ((data['ScanTime'] * data['Channels'] * i) - 1) 
-            data['ul'] = data['Epoch'] + ((data['ScanTime'] * data['Channels'] * i) + 1)
+            data['ll_%s'%(np.int(i))] = data['Epoch'] + ((data['ScanTime'] * data['Channels'] * i) - 1) 
+            data['ul_%s'%(np.int(i))] = data['Epoch'] + ((data['ScanTime'] * data['Channels'] * i) + 1)
             
             '''if the scan time is 2 seconds and there are two channels and the Epoch is 100...
             We would listen to this receiver at:
@@ -131,28 +131,22 @@ def detHist (data,rate,det, status = 'A', training = False):
             line up with scan windows - need to get over it and trust the sparseness - eek
             '''
             
-            if det == 0:
-                data['det_0'] = '1'
-            else:
-                data.loc[(data['epoch_shift_%s'%(np.int(i))] >= data.ll) & (data['epoch_shift_%s'%(np.int(i))] <= data.ul),'det_%s'%(np.int(i))] = '1'
-                data.loc[(data['epoch_shift_%s'%(np.int(i))] < data.ll) | (data['epoch_shift_%s'%(np.int(i))] > data.ul),'det_%s'%(np.int(i))] = '0'
-                data['det_%s'%(np.int(i))].fillna(value = '0', inplace = True)
-            
             #print (data[['Epoch','ll','epoch_shift_%s'%(np.int(i)),'ul','det_%s'%(np.int(i))]].head(20))
     else:
         for i in np.arange(det * -1 , det + 1, 1):
             data['epoch_shift_%s'%(np.int(i))] = data.Epoch.shift(-1 * np.int(i))
-            data['ll'] = data['Epoch'] + (rate * i - 1)   # number of detection period time steps backward buffered by -1 pulse rate seconds that we will be checking for possible detections in series
-            data['ul'] = data['Epoch'] + (rate * i + 1)     # number of detection period time steps backward buffered by +1 pulse rate that we will be checking for possible detections in series                                                            
-            if det == 0:
-                data['det_0'] = '1'
-            else:
-                data.loc[(data['epoch_shift_%s'%(np.int(i))] >= data.ll) & (data['epoch_shift_%s'%(np.int(i))] <= data.ul),'det_%s'%(np.int(i))] = '1'
-                data.loc[(data['epoch_shift_%s'%(np.int(i))] < data.ll) | (data['epoch_shift_%s'%(np.int(i))] > data.ul),'det_%s'%(np.int(i))] = '0'
-                data['det_%s'%(np.int(i))].fillna(value = '0', inplace = True)
-            
+            data['ll_%s'%(np.int(i))] = data['Epoch'] + (rate * i - 1)   # number of detection period time steps backward buffered by -1 pulse rate seconds that we will be checking for possible detections in series
+            data['ul_%s'%(np.int(i))] = data['Epoch'] + (rate * i + 1)     # number of detection period time steps backward buffered by +1 pulse rate that we will be checking for possible detections in series                                                            
             #print (data[['Epoch','ll','epoch_shift_%s'%(np.int(i)),'ul','det_%s'%(np.int(i))]].head(20))
-    data.drop(labels = ['ll','ul'], axis = 1, inplace = True)       
+    for i in np.arange(det * -1 , det + 1, 1):
+        if det == 0:
+            data['det_0'] = '1'
+        else:
+            for j in np.arange(det * -1 , det + 1, 1):            
+                data.loc[(data['epoch_shift_%s'%(np.int(j))] >= data['ll_%s'%(np.int(i))]) & (data['epoch_shift_%s'%(np.int(j))] <= data['ul_%s'%(np.int(i))]),'det_%s'%(np.int(i))] = '1'
+                
+        data['det_%s'%(np.int(i))].fillna(value = '0', inplace = True)
+    
 
     # determine if consecutive detections consDet is true
     data.loc[(data['det_-1'] == '1') | (data['det_1'] == '1'), 'consDet_%s'%(status)] = 1
@@ -179,7 +173,10 @@ def detHist (data,rate,det, status = 'A', training = False):
             data.loc[(data['det_%s'%(np.int(i))] == '1','points')] = 1
             data['score'] = data.score + data.points
         data.drop(labels = ['det_%s'%(np.int(i)),'epoch_shift_%s'%(np.int(i))], axis = 1, inplace = True) 
+        data.drop(labels = ['ll_%s'%(np.int(i)),'ul_%s'%(np.int(i))], axis = 1, inplace = True)       
+
     data.drop(labels = ['score','points'], axis = 1, inplace = True)
+
     if training == True:
         data.rename(columns = {'detHist_A':'detHist','consDet_A':'consDet','hitRatio_A':'hitRatio','conRecLength_A':'conRecLength'},inplace = True)
     return data
@@ -204,102 +201,6 @@ def consDet (row, status, datObject):
         consDet = 0
     return consDet
        
- 
-def hitRatio(row,status):
-    '''The hit ratio function quantifies the hit ratio, or the number of positive 
-    detections within series divided by the total number of records within a 
-    detection history string.  
-    
-    The intent is to see if true detections have a higher ratio than false 
-    positives, meaning that there are more hits in series.  Therefore, a false 
-    positive detection history string should appear sparse.
-    
-    101010101 = 5/9
-    111110000 = 5/9
-    '''
-    if status == "A":
-        detHist = row['detHist']
-    elif status == "T":
-        detHist = row['detHist']
-    else:
-        detHist = row['detHist']
-    counter = 0
-    arr = np.zeros(len(detHist))
-    for i in range(0,len(detHist),1):
-        det = int(detHist[i])
-        arr[counter] = det
-        counter = counter + 1
-    hitRatio = float(np.sum(arr))/float(len(arr))
-    return hitRatio
-   
-def conRecLength(row,status):
-    ''' This function quantifies the length of consecutive detection in series.
-    The only input required is the detection history string.
-    
-    101010101 = 1
-    111110000 = 5
-    '''
-    if status == "A":
-        detHist = row['detHist']
-    elif status == "T":
-        detHist = row['detHist']
-    else:
-        detHist = row['detHist']
-    maxCount = 0
-    count = 0
-    for i in range(0,len(detHist),1):
-        det = int(detHist[i])
-        if det == 1:
-            count = count + 1
-        else:
-            if count > maxCount:
-                maxCount = count
-            count = 0
-        if count > maxCount:
-            maxCount = count
-    del i
-    return maxCount
-
-def miss_to_hit(row,status):
-    ''' This function quantifies the length of consecutive detection in series.
-    The only input required is the detection history string.
-    
-    101010101 = 1/1 = 1
-    111110000 = 6/5 = 1.2
-    '''
-    if status == "A":
-        detHist = row['detHist']
-    elif status == "T":
-        detHist = row['detHist']
-    else:
-        detHist = row['detHist']
-    maxHitCount = 0
-    maxMissCount = 0
-    hitCount = 0
-    missCount = 0
-    for i in range(0,len(detHist),1):
-        det = int(detHist[i])
-        if det == 1:
-            hitCount = hitCount + 1
-        else:
-            if hitCount > maxHitCount:
-                maxHitCount = hitCount
-            hitCount = 0
-        if hitCount > maxHitCount:
-            maxHitCount = hitCount
-    del i
-    for i in range(0,len(detHist),1):
-        det = int(detHist[i])
-        if det == 0:
-            missCount = missCount + 1
-        else:
-            if missCount > maxMissCount:
-                maxMissCount = missCount
-            missCount = 0
-        if missCount > maxMissCount:
-            maxMissCount = missCount
-    del i
-    return round(float(maxMissCount)/float(maxHitCount), 2)
          
 def fishCount (row,datObject,data):
     ''' function calculates the number of fish present during the duration time.
@@ -422,11 +323,11 @@ def createTrainDB(project_dir, dbName):
     c.execute('''DROP TABLE IF EXISTS tblTrain''')
 
     c.execute('''CREATE TABLE tblTrain(Channels INTEGER, Detection INTEGER, FreqCode TEXT, Power REAL, lag INTEGER, lagDiff REAL, FishCount INTEGER, conRecLength INTEGER, miss_to_hit REAL, consDet INTEGER, detHist TEXT, hitRatio REAL, noiseRatio REAL, seriesHit INTEGER, timeStamp TIMESTAMP, Epoch INTEGER, Seconds INTEGER, fileName TEXT, recID TEXT, recType TEXT, ScanTime REAL)''') # create full radio table - table includes all records, final version will be designed for specific receiver types
-    c.execute('''CREATE TABLE tblRaw(timeStamp TIMESTAMP, Epoch INTEGER, FreqCode TEXT, Power REAL,noiseRatio, fileName TEXT, recID TEXT)''')
-    c.execute('''CREATE INDEX idx_fileNameRaw ON tblRaw (fileName)''')
+    c.execute('''CREATE TABLE tblRaw(timeStamp TIMESTAMP, Epoch INTEGER, FreqCode TEXT, Power REAL,noiseRatio, fileName TEXT, recID TEXT, ScanTime REAL, Channels REAL, RecType TEXT)''')
+    #c.execute('''CREATE INDEX idx_fileNameRaw ON tblRaw (fileName)''')
     c.execute('''CREATE INDEX idx_RecID_Raw ON tblRaw (recID)''')
     c.execute('''CREATE INDEX idx_FreqCode On tblRaw (FreqCode)''')
-    c.execute('''CREATE INDEX idx_fileNameTrain ON tblTrain (fileName)''')
+    #c.execute('''CREATE INDEX idx_fileNameTrain ON tblTrain (fileName)''')
     c.execute('''CREATE INDEX idx_RecType ON tblTrain (recType)''')
 
     conn.commit()   
@@ -476,8 +377,9 @@ def orionImport(fileName,dbName,recName,switch = False, scanTime = None, channel
     '''
     conn = sqlite3.connect(dbName, timeout=30.0)
     c = conn.cursor()    
-    study_tags = pd.read_sql('SELECT FreqCode FROM tblMasterTag WHERE TagType == "Study" OR TagType == "Beacon"',con = conn).FreqCode.values
-    
+    study_tags = pd.read_sql('SELECT FreqCode, TagType FROM tblMasterTag',con = conn)
+    study_tags = study_tags[study_tags.TagType == 'Study'].FreqCode.values
+
     recType = 'orion'
     if switch == False:
         scanTime = 1
@@ -504,9 +406,12 @@ def orionImport(fileName,dbName,recName,switch = False, scanTime = None, channel
                                 dtype = {'Date':str,'Time':str,'Site':str,'Ant':str,'Freq':str,'Code':str,'Power':str}) 
 
     if len(telemDat) > 0:
-        telemDat['fileName'] = np.repeat(fileName,len(telemDat))
+        #telemDat['fileName'] = np.repeat(fileName,len(telemDat))
         telemDat['FreqCode'] = telemDat['Freq'].astype(str) + ' ' + telemDat['Code'].astype(str)
         telemDat['timeStamp'] = pd.to_datetime(telemDat['Date'] + ' ' + telemDat['Time'],errors = 'coerce')# create timestamp field from date and time and apply to index
+        telemDat['ScanTime'] = np.repeat(scanTime,len(telemDat))
+        telemDat['Channels'] = np.repeat(channels,len(telemDat))
+        telemDat['RecType'] = np.repeat('orion',len(telemDat))
         telemDat = telemDat[telemDat.timeStamp.notnull()]
         if len(telemDat) == 0:
             print ("Invalid timestamps in raw data, cannot import")
@@ -514,7 +419,6 @@ def orionImport(fileName,dbName,recName,switch = False, scanTime = None, channel
             telemDat['Epoch'] = (telemDat['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()        
             telemDat.drop (['Date','Time','Freq','Code','Site'],axis = 1, inplace = True)
             telemDat = noiseRatio(5.0,telemDat,study_tags)
-            #telemDat['noiseRatio'] = telemDat.apply(noiseRatio, axis = 1, args = (5.0,telemDat,study_tags))            
             if switch == False:
                 telemDat.drop(['Ant'], axis = 1, inplace = True)
                 telemDat['recID'] = np.repeat(recName,len(telemDat))
@@ -522,8 +426,8 @@ def orionImport(fileName,dbName,recName,switch = False, scanTime = None, channel
                 index = pd.MultiIndex.from_tuples(tuples, names=['FreqCode', 'recID','Epoch'])
                 telemDat.set_index(index,inplace = True,drop = False)
                 telemDat.to_sql('tblRaw',con = conn,index = False, if_exists = 'append')
-                recParamLine = [(recName,recType,scanTime,channels,fileName)]
-                conn.executemany('INSERT INTO tblReceiverParameters VALUES (?,?,?,?,?)',recParamLine)
+#                recParamLine = [(recName,recType,scanTime,channels,fileName)]
+#                conn.executemany('INSERT INTO tblReceiverParameters VALUES (?,?,?,?,?)',recParamLine)
                 conn.commit() 
                 c.close()  
             else:
@@ -536,8 +440,8 @@ def orionImport(fileName,dbName,recName,switch = False, scanTime = None, channel
                     telemDat_sub.set_index(index,inplace = True,drop = False)
                     telemDat_sub.drop(['Ant'], axis = 1, inplace = True)
                     telemDat_sub.to_sql('tblRaw',con = conn,index = False, if_exists = 'append')
-                    recParamLine = [(site,recType,scanTime,channels,fileName)]
-                    conn.executemany('INSERT INTO tblReceiverParameters VALUES (?,?,?,?,?)',recParamLine)
+#                    recParamLine = [(site,recType,scanTime,channels,fileName)]
+#                    conn.executemany('INSERT INTO tblReceiverParameters VALUES (?,?,?,?,?)',recParamLine)
                     conn.commit() 
                     c.close()             
   
@@ -622,13 +526,13 @@ def lotek_import(fileName,dbName,recName):
     
         conn = sqlite3.connect(dbName, timeout=30.0)
         c = conn.cursor()   
-        study_tags = pd.read_sql('SELECT FreqCode FROM tblMasterTag WHERE TagType == "Study" OR TagType == "Beacon"',con = conn).FreqCode.values
-
+        study_tags = pd.read_sql('SELECT FreqCode, TagType FROM tblMasterTag',con = conn)
+        study_tags = study_tags[study_tags.TagType == 'Study'].FreqCode.values
         # with our data row, extract information using pandas fwf import procedure
         telemDat = pd.read_fwf(fileName,colspecs = [(0,8),(8,18),(18,28),(28,36),(36,51),(51,59)],names = ['Date','Time','ChannelID','TagID','Antenna','Power'],skiprows = dataRow)
         telemDat = telemDat.iloc[:-2]                                                   # remove last two rows, Lotek adds garbage at the end
 
-        telemDat['fileName'] = np.repeat(fileName,len(telemDat))
+        #telemDat['fileName'] = np.repeat(fileName,len(telemDat))
         def id_to_freq(row,channelDict):
             if row[2] in channelDict:
                 return channelDict[row[2]]
@@ -643,7 +547,9 @@ def lotek_import(fileName,dbName,recName):
             telemDat['Epoch'] = (telemDat['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()
             telemDat = noiseRatio(5.0,telemDat,study_tags)
             telemDat.drop (['Date','Time','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
-            telemDat['fileName'] = np.repeat(fileName,len(telemDat))
+            telemDat['ScanTime'] = np.repeat(scanTime,len(telemDat))
+            telemDat['Channels'] = np.repeat(channels,len(telemDat))
+            telemDat['RecType'] = np.repeat(recType,len(telemDat))
             telemDat['recID'] = np.repeat(recName,len(telemDat))
             telemDat.to_sql('tblRaw',con = conn,index = False, if_exists = 'append')
     else:
@@ -732,10 +638,12 @@ def lotek_import(fileName,dbName,recName):
                 telemDat.drop(['day0','DayNumber'],axis = 1, inplace = True)       
                 telemDat['Epoch'] = (telemDat['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()    
                 telemDat.drop (['Date','Time','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
-                telemDat['fileName'] = np.repeat(fileName,len(telemDat))
+                #telemDat['fileName'] = np.repeat(fileName,len(telemDat))
                 telemDat['recID'] = np.repeat(recName,len(telemDat))
-                telemDat['noiseRatio'] = telemDat.apply(noiseRatio, axis = 1, args = (5.0,telemDat,study_tags))            
-
+                telemDat['noiseRatio'] = noiseRatio(5.0,telemDat,study_tags)            
+                telemDat['ScanTime'] = np.repeat(scanTime,len(telemDat))
+                telemDat['Channels'] = np.repeat(channels,len(telemDat))
+                telemDat['RecType'] = np.repeat(recType,len(telemDat))
                 tuples = zip(telemDat.FreqCode.values,telemDat.recID.values,telemDat.Epoch.values)
                 index = pd.MultiIndex.from_tuples(tuples, names=['FreqCode', 'recID','Epoch'])
                 telemDat.set_index(index,inplace = True,drop = False)
@@ -785,8 +693,11 @@ def lotek_import(fileName,dbName,recName):
                 telemDat['events_per_duration'] = telemDat.Events / telemDat.duration
                 telemDat['Epoch'] = (telemDat['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()  
                 telemDat.drop (['Date_Start','Date_End','time_end','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
-                telemDat['fileName'] = np.repeat(fileName,len(telemDat))
+                #telemDat['fileName'] = np.repeat(fileName,len(telemDat))
                 telemDat['recID'] = np.repeat(recName,len(telemDat))
+                telemDat['ScanTime'] = np.repeat(scanTime,len(telemDat))
+                telemDat['Channels'] = np.repeat(channels,len(telemDat))
+                telemDat['RecType'] = np.repeat(recType,len(telemDat))
                 telemDat.drop(['StartTime','Data','Events','EndTime','duration','events_per_duration'], axis = 1, inplace = True)
                 tuples = zip(telemDat.FreqCode.values,telemDat.recID.values,telemDat.Epoch.values)
                 index = pd.MultiIndex.from_tuples(tuples, names=['FreqCode', 'recID','Epoch'])
@@ -795,8 +706,8 @@ def lotek_import(fileName,dbName,recName):
 
        
     # add receiver parameters to database    
-    recParamLine = [(recName,recType,scanTime,channels,fileName)]
-    conn.executemany('INSERT INTO tblReceiverParameters VALUES (?,?,?,?,?)',recParamLine)
+#    recParamLine = [(recName,recType,scanTime,channels,fileName)]
+#    conn.executemany('INSERT INTO tblReceiverParameters VALUES (?,?,?,?,?)',recParamLine)
     conn.commit() 
     c.close()
 
@@ -810,6 +721,7 @@ def telemDataImport(site,recType,file_directory,projectDB,switch = False, scanTi
             orionImport(f_dir,projectDB,site,switch, scanTime, channels, ant_to_rec_dict)
         else:
             print ("There currently is not an import routine created for this receiver type.  Please try again")
+        print ("File %s imported"%(f))
     print ("Raw Telemetry Data Import Completed")
 
 class training_data():
@@ -826,7 +738,7 @@ class training_data():
         '''
         conn = sqlite3.connect(projectDB, timeout=30.0)        
         c = conn.cursor()
-        sql = "SELECT FreqCode, Epoch, tblRaw.recID, timeStamp, Power, noiseRatio, ScanTime, Channels FROM tblRaw LEFT JOIN tblReceiverParameters ON tblRaw.fileName = tblReceiverParameters.fileName WHERE FreqCode == '%s' AND tblRaw.recID == '%s';"%(i,site)
+        sql = "SELECT FreqCode, Epoch, recID, timeStamp, Power, noiseRatio, ScanTime, Channels, RecType FROM tblRaw WHERE FreqCode == '%s' AND tblRaw.recID == '%s';"%(i,site)
         self.histDF = pd.read_sql(sql,con = conn, parse_dates  = 'timeStamp',coerce_float  = True)
         sql = 'SELECT PulseRate,MortRate FROM tblMasterTag WHERE FreqCode == "%s"'%(i)
         rates = pd.read_sql(sql,con = conn)
@@ -835,8 +747,8 @@ class training_data():
         allTags = pd.read_sql(sql,con = conn)
         sql = 'SELECT * FROM tblAlgParams'
         algParams = pd.read_sql(sql,con = conn)
-        sql = 'SELECT * FROM tblReceiverParameters WHERE RecID == "%s"'%(site)
-        recType = pd.read_sql(sql,con = conn).RecType.values
+        #sql = 'SELECT * FROM tblReceiverParameters WHERE RecID == "%s"'%(site)
+        recType = self.histDF.RecType.unique()
         c.close()
         # do some data management when importing training dataframe
         self.histDF['recID1'] = np.repeat(site,len(self.histDF))
@@ -854,8 +766,8 @@ class training_data():
         self.det = algParams.at[0,'det'] 
         self.duration = float(algParams.at[0,'duration']) 
         self.studyTags = allTags.FreqCode.values
-        self.recType = recType[0]
-        self.histDF['recType'] = np.repeat(self.recType,len(self.histDF))
+        self.recType = self.histDF.RecType.unique()
+        #self.histDF['recType'] = np.repeat(self.recType,len(self.histDF))
         
         # for training data, we know the tag's detection class ahead of time,
         # if the tag is in the study tag list, it is a known detection class, if 
@@ -944,18 +856,20 @@ class classify_data():
     The class is written in such a manner to take advantage of Python's multiprocessing
     capabilities.     
     '''
-    def __init__(self,i,site,classifyFields,projectDB,scratchWS,informed_prior = True,training = None, reclass_iter = None):
+    def __init__(self,i,site,classifyFields,projectDB,scratchWS,training_data,informed_prior = True,training = None, reclass_iter = None):
         '''when class is initialized, we will extract information for this animal (i)
         at reciever (site) from the project database (projectDB).  
         '''
         conn = sqlite3.connect(projectDB, timeout=30.0)        
         c = conn.cursor()
         if reclass_iter == None:
-            sql = "SELECT FreqCode, Epoch, tblRaw.recID, timeStamp, Power, noiseRatio, ScanTime, Channels, recType FROM tblRaw LEFT JOIN tblReceiverParameters ON tblRaw.fileName = tblReceiverParameters.fileName WHERE FreqCode == '%s' AND tblRaw.recID == '%s';"%(i,site)
+            sql = "SELECT FreqCode, Epoch, recID, timeStamp, Power, noiseRatio, ScanTime, Channels, RecType FROM tblRaw WHERE FreqCode == '%s' AND recID == '%s';"%(i,site)
+            self.histDF = pd.read_sql(sql,con = conn,coerce_float  = True)
+
+            
         else:
-            sql = "SELECT FreqCode, Epoch, recID, timeStamp, Power, noiseRatio, ScanTime, Channels, recType FROM tblClassify_%s_%s WHERE FreqCode == '%s' AND test == '1';"%(site,reclass_iter-1,i)
-        #self.histDF = pd.read_sql(sql,con = conn, parse_dates  = 'timeStamp',coerce_float  = True)
-        self.histDF = pd.read_sql(sql,con = conn,coerce_float  = True)
+            sql = "SELECT FreqCode, Epoch, recID, timeStamp, Power, noiseRatio, ScanTime, Channels, RecType FROM tblClassify_%s_%s WHERE FreqCode == '%s' AND test == '1';"%(site,reclass_iter-1,i)
+            self.histDF = pd.read_sql(sql,con = conn,coerce_float  = True)
 
         sql = 'SELECT PulseRate,MortRate FROM tblMasterTag WHERE FreqCode == "%s"'%(i)
         rates = pd.read_sql(sql,con = conn)
@@ -963,8 +877,8 @@ class classify_data():
         allTags = pd.read_sql(sql,con = conn)
         sql = 'SELECT * FROM tblAlgParams'
         algParams = pd.read_sql(sql,con = conn)
-        sql = 'SELECT RecType FROM tblReceiverParameters WHERE RecID == "%s"'%(site)
-        recType = pd.read_sql(sql,con = conn)
+        sql = 'SELECT RecType FROM tblMasterReceiver WHERE recID == "%s"'%(site)
+        recType = pd.read_sql(sql,con = conn).RecType.values[0]
         c.close()
         # do some data management when importing training dataframe
         self.histDF['recID1'] = np.repeat(site,len(self.histDF))
@@ -974,6 +888,7 @@ class classify_data():
         self.histDF.sort_values(by = 'Epoch', inplace = True)
         self.histDF.set_index('Epoch', drop = False, inplace = True)
         self.histDF = self.histDF.drop_duplicates(subset = 'timeStamp')
+        self.trainDF = training_data
         # set some object variables
         self.fields = classifyFields
         self.i = i
@@ -983,7 +898,7 @@ class classify_data():
         self.det = algParams.at[0,'det'] 
         self.duration = float(algParams.at[0,'duration']) 
         self.studyTags = allTags.FreqCode.values
-        self.recType = recType.at[0,'RecType']
+        self.recType = recType
         self.PulseRate = rates.at[0,'PulseRate']
         if np.any(rates.MortRate.values == None) or len(rates.MortRate.values) == 0:
             self.MortRate = 9999.0
@@ -1081,6 +996,47 @@ def likelihood(assumption,classify_object,status = 'A'):
             elif len(fields) == 7:
                 return classify_object.histDF[falseFields[fields[0]]] * classify_object.histDF[falseFields[fields[1]]] * classify_object.histDF[falseFields[fields[2]]]  * classify_object.histDF[falseFields[fields[3]]]  * classify_object.histDF[falseFields[fields[4]]]  * classify_object.histDF[falseFields[fields[5]]]  * classify_object.histDF[falseFields[fields[6]]]                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    
 
+def create_training_data(site,projectDB,reclass_iter = None):
+    '''Function creates training dataset for current round of classification -
+    if we only do this once, this time suck goes away'''
+
+    #get training data
+    '''
+    Reclassification code contributed by T Castro-Santos
+    '''
+    conn = sqlite3.connect(projectDB)#, timeout=30.0)
+    sql = 'SELECT RecType FROM tblMasterReceiver WHERE recID == "%s"'%(site)
+    recType = pd.read_sql(sql,con = conn).RecType.values[0]    
+
+    c = conn.cursor()
+    if reclass_iter == None:
+        sql = "SELECT * FROM tblTrain"# WHERE RecType == '%s'"%(classify_object.recType)
+        trainDF = pd.read_sql(sql,con = conn)
+        trainDF = trainDF[trainDF.RecType == recType]
+    else:
+        trainDF = pd.read_sql("select * from tblTrain",con=conn)#This will read in tblTrain and create a pandas dataframe        
+        trainDF = trainDF[trainDF.RecType == recType]
+
+#            classDF = pd.read_sql("select test, FreqCode,Power,lag,lagDiff,fishCount,conRecLength,consDet,detHist,hitRatio,noiseRatio,seriesHit,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from tblClassify_%s_%s"%(site,classify_object.reclass_iter-1),con=conn)
+        classDF = pd.read_sql("select test, FreqCode,Power,noiseRatio, lag,lagDiff,conRecLength_A,consDet_A,detHist_A,hitRatio_A,seriesHit_A,conRecLength_M,consDet_M,detHist_M,hitRatio_M,seriesHit_M,postTrue_A,postTrue_M,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from tblClassify_%s_%s"%(site,reclass_iter-1),con=conn)
+        classDF = classDF[classDF.postTrue_A >= classDF.postTrue_M]
+        classDF.drop(['conRecLength_M','consDet_M','detHist_M','hitRatio_M','seriesHit_M'], axis = 1, inplace = True)
+        classDF.rename(columns = {'conRecLength_A':'conRecLength','consDet_A':'consDet','detHist_A':'detHist','hitRatio_A':'hitRatio','seriesHit_A':'seriesHit'}, inplace = True)
+
+        trainDF = trainDF[trainDF.Detection==0]
+        classDF = classDF[classDF.test==1]    
+        classDF['Channels']=np.repeat(1,len(classDF))
+#       classDF.rename(columns={"test":"Detection","fishCount":"FishCount","RowSeconds":"Seconds","RecType":"recType"},inplace=True)#inplace tells it to replace the existing dataframe
+        classDF.rename(columns={"test":"Detection","RowSeconds":"Seconds","RecType":"recType"},inplace=True)#inplace tells it to replace the existing dataframe
+        #Next we append the classdf to the traindf
+        trainDF = trainDF.append(classDF)  
+        #trainDF.to_sql('tblTrain_%s'%(classify_object.reclass_iter),index=False,con=conn)#we might want to allow for further iterations
+    print ("Training dataset created")
+    c.close()
+    return trainDF
+    
+
+
 def calc_class_params_map(classify_object):
     '''
     
@@ -1092,6 +1048,7 @@ def calc_class_params_map(classify_object):
     projectDB = classify_object.projectDB
     scratchWS = classify_object.scratchWS
     det = classify_object.det
+    trainDF = classify_object.trainDF
     if len(classify_object.histDF) > 0:
         # get data
     #    conn = sqlite3.connect(projectDB, timeout=30.0)
@@ -1113,34 +1070,7 @@ def calc_class_params_map(classify_object):
         classify_object.histDF['powerBin'] = (classify_object.histDF.Power//10)*10
         classify_object.histDF['noiseBin'] = (classify_object.histDF.noiseRatio//.1)*.1
         classify_object.histDF['lagDiffBin'] = (classify_object.histDF.lagDiff//10)*.10
-        
-        #get training data
-        '''
-        Reclassification code contributed by T Castro-Santos
-        '''
-        conn = sqlite3.connect(classify_object.trainingDB, timeout=30.0)
-        c = conn.cursor()
-        if classify_object.reclass_iter == None:
-            sql = "SELECT * FROM tblTrain WHERE recType == '%s'"%(classify_object.recType)
-            trainDF = pd.read_sql(sql,con = conn, coerce_float = True)
-        else:
-            trainDF = pd.read_sql("select * from tblTrain WHERE recType == '%s'"%(classify_object.recType),con=conn, coerce_float = True)#This will read in tblTrain and create a pandas dataframe        
-    #            classDF = pd.read_sql("select test, FreqCode,Power,lag,lagDiff,fishCount,conRecLength,consDet,detHist,hitRatio,noiseRatio,seriesHit,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from tblClassify_%s_%s"%(site,classify_object.reclass_iter-1),con=conn)
-            classDF = pd.read_sql("select test, FreqCode,Power,noiseRatio, lag,lagDiff,conRecLength_A,consDet_A,detHist_A,hitRatio_A,seriesHit_A,conRecLength_M,consDet_M,detHist_M,hitRatio_M,seriesHit_M,postTrue_A,postTrue_M,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from tblClassify_%s_%s"%(site,classify_object.reclass_iter-1),con=conn)
-            classDF = classDF[classDF.postTrue_A >= classDF.postTrue_M]
-            classDF.drop(['conRecLength_M','consDet_M','detHist_M','hitRatio_M','seriesHit_M'], axis = 1, inplace = True)
-            classDF.rename(columns = {'conRecLength_A':'conRecLength','consDet_A':'consDet','detHist_A':'detHist','hitRatio_A':'hitRatio','seriesHit_A':'seriesHit'}, inplace = True)
-    
-            trainDF = trainDF[trainDF.Detection==0]
-            classDF = classDF[classDF.test==1]    
-            classDF['Channels']=np.repeat(1,len(classDF))
-    #       classDF.rename(columns={"test":"Detection","fishCount":"FishCount","RowSeconds":"Seconds","RecType":"recType"},inplace=True)#inplace tells it to replace the existing dataframe
-            classDF.rename(columns={"test":"Detection","RowSeconds":"Seconds","RecType":"recType"},inplace=True)#inplace tells it to replace the existing dataframe
-            #Next we append the classdf to the traindf
-            trainDF = trainDF.append(classDF)  
-            #trainDF.to_sql('tblTrain_%s'%(classify_object.reclass_iter),index=False,con=conn)#we might want to allow for further iterations
-    
-        c.close()
+        print ("Detection histories")
              
         # Update Data Types - they've got to match or the merge doesn't work!!!!
         trainDF.Detection = trainDF.Detection.astype(int)
@@ -1285,7 +1215,7 @@ def calc_class_params_map(classify_object):
         lagCount = lagCount.rename(columns = {'HT':'HF','lagDiffCount_T':'lagDiffCount_F'})
         classify_object.histDF = pd.merge(left = classify_object.histDF, right = lagCount, how = u'left', left_on = ['HF','lagDiffBin'], right_on = ['HF','lagDiffBin'])
     
-        
+        print ("Counts")        
         classify_object.histDF.fillna(0.0000001,inplace = True)
         # Calculate Number of True and False Positive Detections in Training Dataset
         try: 
@@ -1335,7 +1265,7 @@ def calc_class_params_map(classify_object):
         classify_object.histDF['LnoiseF'] = (classify_object.histDF['noiseCount_F'] + 1)/classify_object.histDF['LDenomCount_F']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive      
         classify_object.histDF['LlagF'] = (classify_object.histDF['lagDiffCount_F'] + 1)/classify_object.histDF['LDenomCount_F']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive      
     
-            
+          
         # calculation of the probability of a true detection given the data
         classify_object.histDF['priorT'] = round(priorCountT/float(len(trainDF)),5)                    # calculate the prior probability of a true detection from the training dataset            
         classify_object.histDF['LconRecT_M'] = (classify_object.histDF['conRecLengthMCountT'] + 1)/classify_object.histDF['LDenomCount_T']# calculate the likelihood of this row's particular consecutive record length given that the detection is a false positive                           # calculate the posterior probability of a false positive detection given this row's detection history, power bin and noise ratio
@@ -1355,7 +1285,7 @@ def calc_class_params_map(classify_object):
         
         classify_object.histDF['logLikelihoodRatio_A'] = np.log10(classify_object.histDF.LikelihoodTrue_A.values/classify_object.histDF.LikelihoodFalse_A.values)
         classify_object.histDF['logLikelihoodRatio_M'] = np.log10(classify_object.histDF.LikelihoodTrue_M.values/classify_object.histDF.LikelihoodFalse_M.values)
-         
+        print ("Likelihoods")           
         # Calculate the posterior probability of each Hypothesis occuring
         if classify_object.informed == True:
             classify_object.histDF['postTrue_A'] = classify_object.histDF['priorT'] * classify_object.histDF['LikelihoodTrue_A']
@@ -1372,7 +1302,7 @@ def calc_class_params_map(classify_object):
         #classify_object.histDF['test'] = classify_object.histDF.apply(MAP,axis =1) 
         classify_object.histDF.loc[(classify_object.histDF.postTrue_A >= classify_object.histDF.postFalse_A) | (classify_object.histDF.postTrue_M >= classify_object.histDF.postFalse_M),'test'] = True
         classify_object.histDF.loc[(classify_object.histDF.postTrue_A < classify_object.histDF.postFalse_A) & (classify_object.histDF.postTrue_M < classify_object.histDF.postFalse_M),'test'] = False
-    
+        print ("Classification")
         classify_object.histDF.to_csv(os.path.join(classify_object.scratchWS,"%s.csv"%(classify_object.i)))
         del trainDF
 
@@ -1732,12 +1662,12 @@ class classification_results():
         else:
             print ("Start selecting and merging data for receiver %s"%(site))
 
-            sql = "SELECT * FROM tblClassify_%s_%s"%(site, reclass_iter)
+            sql = "SELECT FreqCode,Epoch,recID,Power,noiseRatio,hitRatio_A,hitRatio_M,postTrue_A,postTrue_M,postFalse_A,postFalse_M,test,lagDiff,consDet_A, consDet_M,conRecLength_A, conRecLength_M,logLikelihoodRatio_A, logLikelihoodRatio_M FROM tblClassify_%s_%s"%(site, reclass_iter)
             dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
             self.class_stats_data = self.class_stats_data.append(dat)
             del dat 
 
-            sql = "SELECT * FROM tblClassify_%s_%s "%(i, 1)
+            sql = "SELECT FreqCode,Epoch,recID,Power,noiseRatio,hitRatio_A,hitRatio_M,postTrue_A,postTrue_M,postFalse_A,postFalse_M,test,lagDiff,consDet_A, consDet_M,conRecLength_A, conRecLength_M,logLikelihoodRatio_A, logLikelihoodRatio_M FROM tblClassify_%s_%s "%(site, 1)
             dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
             self.initial_data = self.initial_data.append(dat)
             del dat                
@@ -2072,40 +2002,40 @@ class training_results():
             sql = "SELECT * FROM tblTrain WHERE recType = '%s' AND recID == '%s'"%(self.recType,self.site)
         trainDF = pd.read_sql(sql,con=conn,coerce_float  = True)#This will read in tblTrain and create a pandas dataframe                    
 
-        recs = pd.read_sql("SELECT recID from tblMasterReceiver", con = conn).recID.values
-
-        c.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
-        tbls = c.fetchall()            
-        # iterate over the receivers to find the final classification (aka the largest _n)
-        max_iter_dict = {} # receiver:max iter
-        curr_idx = 0
-        for i in recs:
-            max_iter = 1
-            while curr_idx < len(tbls) - 1:
-                for j in tbls:
-                    if i in j[0]:
-                        if int(j[0][-1]) >= max_iter:
-                            max_iter = int(j[0][-1])
-                            max_iter_dict[i] = j[0]
-                    curr_idx = curr_idx + 1
-            curr_idx = 0
-        print (max_iter_dict)
-        del i, j, curr_idx
-        # once we have a hash table of receiver to max classification, extract the classification dataset
-        classDF = pd.DataFrame()
-        for i in max_iter_dict:
-            classDat = pd.read_sql("select test, FreqCode,Power,noiseRatio, lag,lagDiff,conRecLength_A,consDet_A,detHist_A,hitRatio_A,seriesHit_A,conRecLength_M,consDet_M,detHist_M,hitRatio_M,seriesHit_M,postTrue_A,postTrue_M,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from %s"%(max_iter_dict[i]),con=conn)
-            #classDat = classDat[classDat.postTrue_A >= classDat.postTrue_M]
-            classDat.drop(['conRecLength_M','consDet_M','detHist_M','hitRatio_M','seriesHit_M'], axis = 1, inplace = True)
-            classDat.rename(columns = {'conRecLength_A':'conRecLength','consDet_A':'consDet','detHist_A':'detHist','hitRatio_A':'hitRatio','seriesHit_A':'seriesHit'}, inplace = True)
-            classDF = classDF.append(classDat)
-
-        trainDF = trainDF[trainDF.Detection==0]
-        classDF = classDF[classDF.test==1]    
-        classDF['Channels']=np.repeat(1,len(classDF))
-        classDF.rename(columns={"test":"Detection","RowSeconds":"Seconds","RecType":"recType"},inplace=True)#inplace tells it to replace the existing dataframe
-        trainDF = trainDF.append(classDF)  
-                
+#        recs = pd.read_sql("SELECT recID from tblMasterReceiver", con = conn).recID.values
+#
+#        c.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
+#        tbls = c.fetchall()            
+#        # iterate over the receivers to find the final classification (aka the largest _n)
+#        max_iter_dict = {} # receiver:max iter
+#        curr_idx = 0
+#        for i in recs:
+#            max_iter = 1
+#            while curr_idx < len(tbls) - 1:
+#                for j in tbls:
+#                    if i in j[0]:
+#                        if int(j[0][-1]) >= max_iter:
+#                            max_iter = int(j[0][-1])
+#                            max_iter_dict[i] = j[0]
+#                    curr_idx = curr_idx + 1
+#            curr_idx = 0
+#        print (max_iter_dict)
+#        del i, j, curr_idx
+#        # once we have a hash table of receiver to max classification, extract the classification dataset
+#        classDF = pd.DataFrame()
+#        for i in max_iter_dict:
+#            classDat = pd.read_sql("select test, FreqCode,Power,noiseRatio, lag,lagDiff,conRecLength_A,consDet_A,detHist_A,hitRatio_A,seriesHit_A,conRecLength_M,consDet_M,detHist_M,hitRatio_M,seriesHit_M,postTrue_A,postTrue_M,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from %s"%(max_iter_dict[i]),con=conn)
+#            #classDat = classDat[classDat.postTrue_A >= classDat.postTrue_M]
+#            classDat.drop(['conRecLength_M','consDet_M','detHist_M','hitRatio_M','seriesHit_M'], axis = 1, inplace = True)
+#            classDat.rename(columns = {'conRecLength_A':'conRecLength','consDet_A':'consDet','detHist_A':'detHist','hitRatio_A':'hitRatio','seriesHit_A':'seriesHit'}, inplace = True)
+#            classDF = classDF.append(classDat)
+#
+#        trainDF = trainDF[trainDF.Detection==0]
+#        classDF = classDF[classDF.test==1]    
+#        classDF['Channels']=np.repeat(1,len(classDF))
+#        classDF.rename(columns={"test":"Detection","RowSeconds":"Seconds","RecType":"recType"},inplace=True)#inplace tells it to replace the existing dataframe
+#        trainDF = trainDF.append(classDF)  
+#                
 
         self.train_stats_data = trainDF
         c.close()
