@@ -8,11 +8,11 @@ import warnings
 warnings.filterwarnings('ignore')
 # set script parameters
 
-site = 'T13'                                                                   # what is the site/receiver ID?
+site = 'T18'                                                                   # what is the site/receiver ID?
 recType = 'orion'                                                              # what is the receiver type?
 proj_dir = r'E:\Manuscript\CT_River_2015'                                      # what is the project directory?
 dbName = 'ctr_2015_v2.db'                                                         # what did you call the database?
-ant_to_rec_dict = {1:'T13'}                                                    # if orion receiver switching between antennas add more to dictionary
+ant_to_rec_dict = {1:'T18'}                                                    # if orion receiver switching between antennas add more to dictionary
 
 # set up workspaces     Fl
 file_dir = os.path.join(proj_dir,'Data','Training_Files')

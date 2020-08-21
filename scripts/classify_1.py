@@ -12,7 +12,7 @@ tS = time.time()
 site = 'T22'                                                                   # what is the site/receiver ID?
 recType = 'orion'                                                              # what is the receiver type?
 proj_dir = r'E:\Manuscript\CT_River_2015'                                      # what is the project directory?
-dbName = 'ctr_2015.db'                                                         # whad did you call the database?
+dbName = 'ctr_2015_v2.db'                                                         # whad did you call the database?
 
 # directory creations
 outputWS = os.path.join(proj_dir,'Output') 
@@ -46,7 +46,6 @@ train = biotas.create_training_data(site,projectDB)
 # create a training object and classify each specimen
 for i in histories:
     class_dat = biotas.classify_data(i,site,fields,projectDB,scratch_ws,train,informed_prior = prior)
-    print ("Classification dataset created")
     biotas.calc_class_params_map(class_dat)   
     print ("Fish %s classified"%(i))
 print ("Detections classified!")

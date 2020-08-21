@@ -1012,10 +1012,10 @@ def create_training_data(site,projectDB,reclass_iter = None):
     if reclass_iter == None:
         sql = "SELECT * FROM tblTrain"# WHERE RecType == '%s'"%(classify_object.recType)
         trainDF = pd.read_sql(sql,con = conn)
-        trainDF = trainDF[trainDF.RecType == recType]
+        trainDF = trainDF[trainDF.recType == recType]
     else:
         trainDF = pd.read_sql("select * from tblTrain",con=conn)#This will read in tblTrain and create a pandas dataframe        
-        trainDF = trainDF[trainDF.RecType == recType]
+        trainDF = trainDF[trainDF.recType == recType]
 
 #            classDF = pd.read_sql("select test, FreqCode,Power,lag,lagDiff,fishCount,conRecLength,consDet,detHist,hitRatio,noiseRatio,seriesHit,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from tblClassify_%s_%s"%(site,classify_object.reclass_iter-1),con=conn)
         classDF = pd.read_sql("select test, FreqCode,Power,noiseRatio, lag,lagDiff,conRecLength_A,consDet_A,detHist_A,hitRatio_A,seriesHit_A,conRecLength_M,consDet_M,detHist_M,hitRatio_M,seriesHit_M,postTrue_A,postTrue_M,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from tblClassify_%s_%s"%(site,reclass_iter-1),con=conn)
@@ -1070,7 +1070,6 @@ def calc_class_params_map(classify_object):
         classify_object.histDF['powerBin'] = (classify_object.histDF.Power//10)*10
         classify_object.histDF['noiseBin'] = (classify_object.histDF.noiseRatio//.1)*.1
         classify_object.histDF['lagDiffBin'] = (classify_object.histDF.lagDiff//10)*.10
-        print ("Detection histories")
              
         # Update Data Types - they've got to match or the merge doesn't work!!!!
         trainDF.Detection = trainDF.Detection.astype(int)
@@ -1215,7 +1214,6 @@ def calc_class_params_map(classify_object):
         lagCount = lagCount.rename(columns = {'HT':'HF','lagDiffCount_T':'lagDiffCount_F'})
         classify_object.histDF = pd.merge(left = classify_object.histDF, right = lagCount, how = u'left', left_on = ['HF','lagDiffBin'], right_on = ['HF','lagDiffBin'])
     
-        print ("Counts")        
         classify_object.histDF.fillna(0.0000001,inplace = True)
         # Calculate Number of True and False Positive Detections in Training Dataset
         try: 
@@ -1285,7 +1283,6 @@ def calc_class_params_map(classify_object):
         
         classify_object.histDF['logLikelihoodRatio_A'] = np.log10(classify_object.histDF.LikelihoodTrue_A.values/classify_object.histDF.LikelihoodFalse_A.values)
         classify_object.histDF['logLikelihoodRatio_M'] = np.log10(classify_object.histDF.LikelihoodTrue_M.values/classify_object.histDF.LikelihoodFalse_M.values)
-        print ("Likelihoods")           
         # Calculate the posterior probability of each Hypothesis occuring
         if classify_object.informed == True:
             classify_object.histDF['postTrue_A'] = classify_object.histDF['priorT'] * classify_object.histDF['LikelihoodTrue_A']
@@ -1302,7 +1299,6 @@ def calc_class_params_map(classify_object):
         #classify_object.histDF['test'] = classify_object.histDF.apply(MAP,axis =1) 
         classify_object.histDF.loc[(classify_object.histDF.postTrue_A >= classify_object.histDF.postFalse_A) | (classify_object.histDF.postTrue_M >= classify_object.histDF.postFalse_M),'test'] = True
         classify_object.histDF.loc[(classify_object.histDF.postTrue_A < classify_object.histDF.postFalse_A) & (classify_object.histDF.postTrue_M < classify_object.histDF.postFalse_M),'test'] = False
-        print ("Classification")
         classify_object.histDF.to_csv(os.path.join(classify_object.scratchWS,"%s.csv"%(classify_object.i)))
         del trainDF
 
@@ -1630,7 +1626,7 @@ class cross_validated():
 
 class classification_results():
     '''Python class object to hold the results of false positive classification'''
-    def __init__(self,recType,projectDB,figureWS,site = None, reclass_iter = 1):
+    def __init__(self,recType,projectDB,figureWS,rec_list = None, site = None, reclass_iter = 1):
         self.recType = recType
         self.projectDB = projectDB
         self.figureWS = figureWS
@@ -1641,36 +1637,38 @@ class classification_results():
         self.class_stats_data = pd.DataFrame(columns = ['FreqCode','Epoch','recID','Power','noiseRatio','hitRatio_A','hitRatio_M','postTrue_A','postTrue_M','postFalse_A','postFalse_M','test','lagDiff','consDet_A', 'consDet_M','conRecLength_A', 'conRecLength_M','logLikelihoodRatio_A', 'logLikelihoodRatio_M'])                # set up an empty data frame
         self.initial_data = pd.DataFrame(columns = ['FreqCode','Epoch','recID','Power','noiseRatio','hitRatio_A','hitRatio_M','postTrue_A','postTrue_M','postFalse_A','postFalse_M','test','lagDiff','consDet_A', 'consDet_M','conRecLength_A', 'conRecLength_M','logLikelihoodRatio_A', 'logLikelihoodRatio_M'])
         self.reclass_iter = reclass_iter
+        self.rec_list = rec_list
         self.site = site
-
-        if site == None:
+        if rec_list == None:
             recSQL = "SELECT * FROM tblMasterReceiver WHERE RecType = '%s'"%(self.recType) # SQL code to import data from this node
             receivers = pd.read_sql(recSQL,con = conn)                         # import data
             receivers = receivers.recID.unique()                               # get the unique receivers associated with this node    
             for i in receivers:                                                # for every receiver 
                 print ("Start selecting and merging data for receiver %s"%(i))
-                #sql = "SELECT FreqCode, Epoch, recID, Power, hitRatio, postTrue, postFalse, test, lagDiff, conRecLength, noiseRatio, fishCount, logLikelihoodRatio FROM tblClassify_%s "%(i)
+
                 sql = "SELECT FreqCode,Epoch,recID,Power,noiseRatio,hitRatio_A,hitRatio_M,postTrue_A,postTrue_M,postFalse_A,postFalse_M,test,lagDiff,consDet_A, consDet_M, conRecLength_A, conRecLength_M,logLikelihoodRatio_A, logLikelihoodRatio_M FROM tblClassify_%s_%s "%(i, reclass_iter)
                 dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
                 self.class_stats_data = self.class_stats_data.append(dat)
                 del dat 
+
                 sql = "SELECT FreqCode,Epoch,recID,Power,noiseRatio,hitRatio_A,hitRatio_M,postTrue_A,postTrue_M,postFalse_A,postFalse_M,test,lagDiff,consDet_A, consDet_M,conRecLength_A, conRecLength_M,logLikelihoodRatio_A, logLikelihoodRatio_M FROM tblClassify_%s_%s "%(i, 1)
                 dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
                 self.initial_data = self.initial_data.append(dat)
                 del dat                 
                 
         else:
-            print ("Start selecting and merging data for receiver %s"%(site))
-
-            sql = "SELECT FreqCode,Epoch,recID,Power,noiseRatio,hitRatio_A,hitRatio_M,postTrue_A,postTrue_M,postFalse_A,postFalse_M,test,lagDiff,consDet_A, consDet_M,conRecLength_A, conRecLength_M,logLikelihoodRatio_A, logLikelihoodRatio_M FROM tblClassify_%s_%s"%(site, reclass_iter)
-            dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
-            self.class_stats_data = self.class_stats_data.append(dat)
-            del dat 
-
-            sql = "SELECT FreqCode,Epoch,recID,Power,noiseRatio,hitRatio_A,hitRatio_M,postTrue_A,postTrue_M,postFalse_A,postFalse_M,test,lagDiff,consDet_A, consDet_M,conRecLength_A, conRecLength_M,logLikelihoodRatio_A, logLikelihoodRatio_M FROM tblClassify_%s_%s "%(site, 1)
-            dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
-            self.initial_data = self.initial_data.append(dat)
-            del dat                
+            for i in rec_list:
+                print ("Start selecting and merging data for receiver %s"%(i))
+    
+                sql = "SELECT FreqCode,Epoch,recID,Power,noiseRatio,hitRatio_A,hitRatio_M,postTrue_A,postTrue_M,postFalse_A,postFalse_M,test,lagDiff,consDet_A, consDet_M,conRecLength_A, conRecLength_M,logLikelihoodRatio_A, logLikelihoodRatio_M FROM tblClassify_%s_%s"%(i, reclass_iter)
+                dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
+                self.class_stats_data = self.class_stats_data.append(dat)
+                del dat 
+    
+                sql = "SELECT FreqCode,Epoch,recID,Power,noiseRatio,hitRatio_A,hitRatio_M,postTrue_A,postTrue_M,postFalse_A,postFalse_M,test,lagDiff,consDet_A, consDet_M,conRecLength_A, conRecLength_M,logLikelihoodRatio_A, logLikelihoodRatio_M FROM tblClassify_%s_%s "%(i, 1)
+                dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
+                self.initial_data = self.initial_data.append(dat)
+                del dat                
         c.close()
                     
     def classify_stats(self):
@@ -1678,10 +1676,10 @@ class classification_results():
         fish, site, classification status and other metrics, as well as generates a number of graphics
         for use in reporting.'''
         print ("")
-        if self.site == None:
-            print ("Classification summary statistics report")
+        if self.rec_list != None:
+            print ("Classification summary statistics report for sites %s"%(self.rec_list))
         else:
-            print ("Classification summary statistics report for site %s"%(self.site))
+            print ("Classification summary statistics report")
         print ("----------------------------------------------------------------------------------")
         det_class_count = self.class_stats_data.groupby('test')['test'].count().to_frame()
         print ("")
@@ -1770,98 +1768,98 @@ class classification_results():
         # plot hit ratio histograms by detection class
         hitRatioBins =np.linspace(0,1.0,11)
         
-        plt.figure(figsize = (3,2)) 
-        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-        axs[0].hist(trues.hitRatio_max.values, hitRatioBins, density = True)
-        axs[1].hist(falses.hitRatio_max.values, hitRatioBins, density = True)
-        axs[0].set_xlabel('Hit Ratio')  
-        axs[0].set_title('True')
-        axs[1].set_xlabel('Hit Ratio')
-        axs[1].set_title('False Positive')
-        axs[0].set_ylabel('Probability Density')
-        if self.site != None:
-            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_hitRatioCompare_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
-            
-        else:
-            plt.savefig(os.path.join(self.figureWS,"%s_hitRatioCompare_class.png"%(self.recType)),bbox_inches = 'tight')
-
-        print ("Hit Ratio figure created, check your output workspace")
+#        plt.figure(figsize = (3,2)) 
+#        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
+#        axs[0].hist(trues.hitRatio_max.values, hitRatioBins, density = True)
+#        axs[1].hist(falses.hitRatio_max.values, hitRatioBins, density = True)
+#        axs[0].set_xlabel('Hit Ratio')  
+#        axs[0].set_title('True')
+#        axs[1].set_xlabel('Hit Ratio')
+#        axs[1].set_title('False Positive')
+#        axs[0].set_ylabel('Probability Density')
+#        if self.site != None:
+#            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_hitRatioCompare_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
+#            
+#        else:
+#            plt.savefig(os.path.join(self.figureWS,"%s_hitRatioCompare_class.png"%(self.recType)),bbox_inches = 'tight')
+#
+#        print ("Hit Ratio figure created, check your output workspace")
         
         # plot signal power histograms by detection class
         minPower = self.class_stats_data.Power.min()//10 * 10
         maxPower = self.class_stats_data.Power.max()//10 * 10
         powerBins =np.arange(minPower,maxPower+20,10)
 
-        plt.figure(figsize = (3,2)) 
-        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-        axs[0].hist(trues.Power.values, powerBins, density = True)
-        axs[1].hist(falses.Power.values, powerBins, density = True)
-        axs[0].set_xlabel('%s Signal Power'%(self.recType))  
-        axs[0].set_title('True')
-        axs[1].set_xlabel('%s Signal Power'%(self.recType))
-        axs[1].set_title('False Positive')
-        axs[0].set_ylabel('Frequency')
-        if self.site != None:
-            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_powerCompare_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
-        else:
-            plt.savefig(os.path.join(self.figureWS,"%s_powerCompare_class.png"%(self.recType)),bbox_inches = 'tight')
-        print ("Signal Power figure created, check your output Workspace")
+#        plt.figure(figsize = (3,2)) 
+#        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
+#        axs[0].hist(trues.Power.values, powerBins, density = True)
+#        axs[1].hist(falses.Power.values, powerBins, density = True)
+#        axs[0].set_xlabel('%s Signal Power'%(self.recType))  
+#        axs[0].set_title('True')
+#        axs[1].set_xlabel('%s Signal Power'%(self.recType))
+#        axs[1].set_title('False Positive')
+#        axs[0].set_ylabel('Frequency')
+#        if self.site != None:
+#            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_powerCompare_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
+#        else:
+#            plt.savefig(os.path.join(self.figureWS,"%s_powerCompare_class.png"%(self.recType)),bbox_inches = 'tight')
+#        print ("Signal Power figure created, check your output Workspace")
         
         # Lag Back Differences - how stdy are detection lags?
         lagBins =np.arange(-100,110,20)
 
-        plt.figure(figsize = (3,2)) 
-        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-        axs[0].hist(trues.lagDiff.values, lagBins, density = True)
-        axs[1].hist(falses.lagDiff.values, lagBins, density = True)
-        axs[0].set_xlabel('Lag Differences')  
-        axs[0].set_title('True')
-        axs[1].set_xlabel('Lag Differences')
-        axs[1].set_title('False Positive')
-        axs[0].set_ylabel('Frequency')
-        if self.site != None:
-            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_lagDifferences_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')                
-        else:
-            plt.savefig(os.path.join(self.figureWS,"%s_lagDifferences_class.png"%(self.recType)),bbox_inches = 'tight')
-        print ("Lag differences figure created, check your output Workspace")
+#        plt.figure(figsize = (3,2)) 
+#        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
+#        axs[0].hist(trues.lagDiff.values, lagBins, density = True)
+#        axs[1].hist(falses.lagDiff.values, lagBins, density = True)
+#        axs[0].set_xlabel('Lag Differences')  
+#        axs[0].set_title('True')
+#        axs[1].set_xlabel('Lag Differences')
+#        axs[1].set_title('False Positive')
+#        axs[0].set_ylabel('Frequency')
+#        if self.site != None:
+#            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_lagDifferences_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')                
+#        else:
+#            plt.savefig(os.path.join(self.figureWS,"%s_lagDifferences_class.png"%(self.recType)),bbox_inches = 'tight')
+#        print ("Lag differences figure created, check your output Workspace")
         
         # Consecutive Record Length ?
         conBins =np.arange(1,12,1)
 
-        plt.figure(figsize = (3,2)) 
-        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-        axs[0].hist(trues.conRecLength_max.values, conBins, density = True)
-        axs[1].hist(falses.conRecLength_max.values, conBins, density = True)
-        axs[0].set_xlabel('Consecutive Hit Length')  
-        axs[0].set_title('True')
-        axs[1].set_xlabel('Consecutive Hit Length')
-        axs[1].set_title('False Positive')
-        axs[0].set_ylabel('Frequency')
-        if self.site != None:
-            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_conRecLength_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')                
-        else:
-            plt.savefig(os.path.join(self.figureWS,"%s_conRecLength_class.png"%(self.recType)),bbox_inches = 'tight')
-        print ("Consecutive Hit Length figure created, check your output Workspace")
+#        plt.figure(figsize = (3,2)) 
+#        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
+#        axs[0].hist(trues.conRecLength_max.values, conBins, density = True)
+#        axs[1].hist(falses.conRecLength_max.values, conBins, density = True)
+#        axs[0].set_xlabel('Consecutive Hit Length')  
+#        axs[0].set_title('True')
+#        axs[1].set_xlabel('Consecutive Hit Length')
+#        axs[1].set_title('False Positive')
+#        axs[0].set_ylabel('Frequency')
+#        if self.site != None:
+#            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_conRecLength_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')                
+#        else:
+#            plt.savefig(os.path.join(self.figureWS,"%s_conRecLength_class.png"%(self.recType)),bbox_inches = 'tight')
+#        print ("Consecutive Hit Length figure created, check your output Workspace")
 
         # Noise Ratio
         noiseBins =np.arange(0,1.1,0.1)
 
-        plt.figure(figsize = (3,2)) 
-        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-        axs[0].hist(trues.noiseRatio.values, noiseBins, density = True)
-        axs[1].hist(falses.noiseRatio.values, noiseBins, density = True)
-        axs[0].set_xlabel('Noise Ratio')  
-        axs[0].set_title('True')
-        axs[1].set_xlabel('Noise Ratio')
-        axs[1].set_title('False Positive')
-        axs[0].set_ylabel('Frequency')
-        if self.site != None:
-            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_noiseRatio_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
-              
-        else:
-           plt.savefig(os.path.join(self.figureWS,"%s_noiseRatio_class.png"%(self.recType)),bbox_inches = 'tight')
-
-        print ("Noise Ratio figure created, check your output Workspace" )
+#        plt.figure(figsize = (3,2)) 
+#        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
+#        axs[0].hist(trues.noiseRatio.values, noiseBins, density = True)
+#        axs[1].hist(falses.noiseRatio.values, noiseBins, density = True)
+#        axs[0].set_xlabel('Noise Ratio')  
+#        axs[0].set_title('True')
+#        axs[1].set_xlabel('Noise Ratio')
+#        axs[1].set_title('False Positive')
+#        axs[0].set_ylabel('Frequency')
+#        if self.site != None:
+#            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_noiseRatio_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
+#              
+#        else:
+#           plt.savefig(os.path.join(self.figureWS,"%s_noiseRatio_class.png"%(self.recType)),bbox_inches = 'tight')
+#
+#        print ("Noise Ratio figure created, check your output Workspace" )
 
 #        # plot fish present
 #        minCount = self.class_stats_data.fishCount.min()//10 * 10
@@ -1889,22 +1887,22 @@ class classification_results():
         maxLogRatio = self.class_stats_data.logLikelihoodRatio_max.max()//1 * 1
         ratioBins =np.arange(minLogRatio,maxLogRatio+1,2)
         
-        plt.figure(figsize = (3,2)) 
-        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-        axs[0].hist(trues.logLikelihoodRatio_max.values, ratioBins, density = True)
-        axs[1].hist(falses.logLikelihoodRatio_max.values, ratioBins, density = True)
-        axs[0].set_xlabel('Log Likelihood Ratio')  
-        axs[0].set_title('True')
-        axs[1].set_xlabel('Log Likelihood Ratio')
-        axs[1].set_title('False Positive')
-        axs[0].set_ylabel('Frequency')
-        if self.site != None:
-            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_logLikeRatio_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
-
-        else:
-            plt.savefig(os.path.join(self.figureWS,"%s_logLikeRatio_class.png"%(self.recType)),bbox_inches = 'tight')
-
-        print ("Log Likelihood Figure Created, check output workspace")
+#        plt.figure(figsize = (3,2)) 
+#        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
+#        axs[0].hist(trues.logLikelihoodRatio_max.values, ratioBins, density = True)
+#        axs[1].hist(falses.logLikelihoodRatio_max.values, ratioBins, density = True)
+#        axs[0].set_xlabel('Log Likelihood Ratio')  
+#        axs[0].set_title('True')
+#        axs[1].set_xlabel('Log Likelihood Ratio')
+#        axs[1].set_title('False Positive')
+#        axs[0].set_ylabel('Frequency')
+#        if self.site != None:
+#            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_logLikeRatio_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
+#
+#        else:
+#            plt.savefig(os.path.join(self.figureWS,"%s_logLikeRatio_class.png"%(self.recType)),bbox_inches = 'tight')
+#
+#        print ("Log Likelihood Figure Created, check output workspace")
         
         # plot the log of the posterior ratio 
         minPostRatio = self.class_stats_data.logPostRatio_max.min()
@@ -1912,30 +1910,30 @@ class classification_results():
         postRatioBins = np.linspace(minPostRatio,maxPostRatio,10)
 
         
-        plt.figure(figsize = (3,2)) 
-        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-        axs[0].hist(trues.logPostRatio_max.values, postRatioBins, density = True)
-        axs[1].hist(falses.logPostRatio_max.values, postRatioBins, density = True)
-        axs[0].set_xlabel('Log Posterior Ratio')  
-        axs[0].set_title('True')
-        axs[1].set_xlabel('Log Posterior Ratio')
-        axs[1].set_title('False Positive')
-        axs[0].set_ylabel('Frequency')
-        if self.site != None:
-            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_logPostRatio_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
-                
-        else:
-            plt.savefig(os.path.join(self.figureWS,"%s_logPostRatio_class.png"%(self.recType)),bbox_inches = 'tight')
-
-        print ("Log Posterior Ratio Figure Created, check output workspace")
+#        plt.figure(figsize = (3,2)) 
+#        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
+#        axs[0].hist(trues.logPostRatio_max.values, postRatioBins, density = True)
+#        axs[1].hist(falses.logPostRatio_max.values, postRatioBins, density = True)
+#        axs[0].set_xlabel('Log Posterior Ratio')  
+#        axs[0].set_title('True')
+#        axs[1].set_xlabel('Log Posterior Ratio')
+#        axs[1].set_title('False Positive')
+#        axs[0].set_ylabel('Frequency')
+#        if self.site != None:
+#            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_logPostRatio_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
+#                
+#        else:
+#            plt.savefig(os.path.join(self.figureWS,"%s_logPostRatio_class.png"%(self.recType)),bbox_inches = 'tight')
+#
+#        print ("Log Posterior Ratio Figure Created, check output workspace")
 
         # make lattice plot for pubs
         figSize = (6,4)
         plt.figure() 
         fig, axs = plt.subplots(3,4,tight_layout = True,figsize = figSize)
         # hit ratio
-        axs[0,1].hist(trues.hitRatio_max.values, hitRatioBins, density = True, color = 'k')
-        axs[0,0].hist(falses.hitRatio_max.values, hitRatioBins, density = True, color = 'k')
+        axs[0,1].hist(trues.hitRatio_max.values, hitRatioBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
+        axs[0,0].hist(falses.hitRatio_max.values, hitRatioBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
         axs[0,0].set_xlabel('Hit Ratio')  
         axs[0,1].set_title('True')
         axs[0,1].set_xlabel('Hit Ratio')
@@ -1943,8 +1941,8 @@ class classification_results():
         axs[0,0].set_title('A',loc = 'left')
 
         # consecutive record length
-        axs[0,3].hist(trues.conRecLength_max.values, conBins, density = True, color = 'k')
-        axs[0,2].hist(falses.conRecLength_max.values, conBins, density = True, color = 'k')
+        axs[0,3].hist(trues.conRecLength_max.values, conBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
+        axs[0,2].hist(falses.conRecLength_max.values, conBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
         axs[0,2].set_xlabel('Consecutive Hit Length')  
         axs[0,3].set_title('True')
         axs[0,3].set_xlabel('Consecutive Hit Length')
@@ -1952,37 +1950,37 @@ class classification_results():
         axs[0,2].set_title('B',loc = 'left')
 
         # power
-        axs[1,1].hist(trues.Power.values, powerBins, density = True, color = 'k')
-        axs[1,0].hist(falses.Power.values, powerBins, density = True, color = 'k')
-        axs[1,0].set_xlabel('%s Signal Power'%(self.recType))  
-        axs[1,1].set_xlabel('%s Signal Power'%(self.recType))
+        axs[1,1].hist(trues.Power.values, powerBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
+        axs[1,0].hist(falses.Power.values, powerBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
+        axs[1,0].set_xlabel('Signal Power')  
+        axs[1,1].set_xlabel('Signal Power')
         axs[1,0].set_ylabel('Probability Density')
         axs[1,0].set_title('C',loc = 'left')
 
         # noise ratio
-        axs[1,3].hist(trues.noiseRatio.values, noiseBins, density = True, color = 'k')
-        axs[1,2].hist(falses.noiseRatio.values, noiseBins, density = True, color = 'k')
+        axs[1,3].hist(trues.noiseRatio.values, noiseBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
+        axs[1,2].hist(falses.noiseRatio.values, noiseBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
         axs[1,2].set_xlabel('Noise Ratio')  
         axs[1,3].set_xlabel('Noise Ratio')
         axs[1,2].set_title('D',loc = 'left')
 
         # lag diff
-        axs[2,1].hist(trues.lagDiff.values, lagBins, density = True, color = 'k')
-        axs[2,0].hist(falses.lagDiff.values, lagBins, density = True, color = 'k')
+        axs[2,1].hist(trues.lagDiff.values, lagBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
+        axs[2,0].hist(falses.lagDiff.values, lagBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
         axs[2,0].set_xlabel('Lag Differences')  
         axs[2,1].set_xlabel('Lag Differences')
         axs[2,0].set_title('E',loc = 'left')
 
         # log posterior ratio
-        axs[2,3].hist(trues.logPostRatio_max.values, postRatioBins, density = True, color = 'k')
-        axs[2,2].hist(falses.logPostRatio_max.values, postRatioBins, density = True, color = 'k')
+        axs[2,3].hist(trues.logPostRatio_max.values, postRatioBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
+        axs[2,2].hist(falses.logPostRatio_max.values, postRatioBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
         axs[2,2].set_xlabel('Log Posterior Ratio')  
         axs[2,3].set_xlabel('Log Posterior Ratio')
         axs[2,2].set_title('F',loc = 'left')
-        if self.site != None:
-           plt.savefig(os.path.join(self.figureWS,"%s_%s_lattice_class.png"%(self.recType,self.site)),bbox_inches = 'tight', dpi = 900)
-        else:
+        if self.rec_list != None:
            plt.savefig(os.path.join(self.figureWS,"%s_lattice_class.png"%(self.recType)),bbox_inches = 'tight', dpi = 900)
+        else:
+           plt.savefig(os.path.join(self.figureWS,"%s_%s_lattice_class.png"%(self.recType,self.site)),bbox_inches = 'tight', dpi = 900)
 
 class training_results():
     '''Python class object to hold the results of false positive classification'''
@@ -2090,108 +2088,108 @@ class training_results():
         # plot hit ratio histograms by detection class
         hitRatioBins =np.linspace(0,1.0,11)
         
-        figSize = (3,2)
-        plt.figure()
-        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True,figsize = figSize)
-        axs[0].hist(trues.hitRatio.values, hitRatioBins, density = True)
-        axs[1].hist(falses.hitRatio.values, hitRatioBins, density = True)
-        axs[0].set_xlabel('Hit Ratio')  
-        axs[0].set_title('True')
-        axs[1].set_xlabel('Hit Ratio')
-        axs[1].set_title('False Positive')
-        axs[0].set_ylabel('Probability Density')
-        if self.site != None:
-            plt.savefig(os.path.join(self.figureWS,"%s_%s_hitRatioCompare_train.png"%(self.recType,self.site)),bbox_inches = 'tight')
-        else:
-            plt.savefig(os.path.join(self.figureWS,"%s_hitRatioCompare_train.png"%(self.recType)),bbox_inches = 'tight')
-
-        print ("Hit Ratio figure created, check your output workspace")
+#        figSize = (3,2)
+#        plt.figure()
+#        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True,figsize = figSize)
+#        axs[0].hist(trues.hitRatio.values, hitRatioBins, density = True)
+#        axs[1].hist(falses.hitRatio.values, hitRatioBins, density = True)
+#        axs[0].set_xlabel('Hit Ratio')  
+#        axs[0].set_title('True')
+#        axs[1].set_xlabel('Hit Ratio')
+#        axs[1].set_title('False Positive')
+#        axs[0].set_ylabel('Probability Density')
+#        if self.site != None:
+#            plt.savefig(os.path.join(self.figureWS,"%s_%s_hitRatioCompare_train.png"%(self.recType,self.site)),bbox_inches = 'tight')
+#        else:
+#            plt.savefig(os.path.join(self.figureWS,"%s_hitRatioCompare_train.png"%(self.recType)),bbox_inches = 'tight')
+#
+#        print ("Hit Ratio figure created, check your output workspace")
         
         # plot signal power histograms by detection class
         minPower = self.train_stats_data.Power.min()//10 * 10
         maxPower = self.train_stats_data.Power.max()//10 * 10
         powerBins =np.arange(minPower,maxPower+20,10)
 
-        plt.figure() 
-        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True,figsize = figSize)
-        axs[0].hist(trues.Power.values, powerBins, density = True)
-        axs[1].hist(falses.Power.values, powerBins, density = True)
-        axs[0].set_xlabel('%s Signal Power'%(self.recType))  
-        axs[0].set_title('True')
-        axs[1].set_xlabel('%s Signal Power'%(self.recType))
-        axs[1].set_title('False Positive')
-        axs[0].set_ylabel('Probability Density')
-        if self.site != None:
-            plt.savefig(os.path.join(self.figureWS,"%s_%s_powerCompare_train.png"%(self.recType,self.site)),bbox_inches = 'tight')
-        else:
-            plt.savefig(os.path.join(self.figureWS,"%s_powerCompare_train.png"%(self.recType)),bbox_inches = 'tight')
-
-        print ("Signal Power figure created, check your output Workspace")
+#        plt.figure() 
+#        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True,figsize = figSize)
+#        axs[0].hist(trues.Power.values, powerBins, density = True)
+#        axs[1].hist(falses.Power.values, powerBins, density = True)
+#        axs[0].set_xlabel('%s Signal Power'%(self.recType))  
+#        axs[0].set_title('True')
+#        axs[1].set_xlabel('%s Signal Power'%(self.recType))
+#        axs[1].set_title('False Positive')
+#        axs[0].set_ylabel('Probability Density')
+#        if self.site != None:
+#            plt.savefig(os.path.join(self.figureWS,"%s_%s_powerCompare_train.png"%(self.recType,self.site)),bbox_inches = 'tight')
+#        else:
+#            plt.savefig(os.path.join(self.figureWS,"%s_powerCompare_train.png"%(self.recType)),bbox_inches = 'tight')
+#
+#        print ("Signal Power figure created, check your output Workspace")
         
         # Lag Back Differences - how stdy are detection lags?
         lagBins =np.arange(-100,110,20)
 
-        plt.figure() 
-        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True,figsize = figSize)
-        axs[0].hist(trues.lagDiff.values, lagBins, density = True)
-        axs[1].hist(falses.lagDiff.values, lagBins, density = True)
-        axs[0].set_xlabel('Lag Differences')  
-        axs[0].set_title('True')
-        axs[1].set_xlabel('Lag Differences')
-        axs[1].set_title('False Positive')
-        axs[0].set_ylabel('Probability Density')
-        if self.site != None:
-            plt.savefig(os.path.join(self.figureWS,"%s_%s_lagDifferences_train.png"%(self.recType,self.site)),bbox_inches = 'tight')
-        else:
-            plt.savefig(os.path.join(self.figureWS,"%s_lagDifferences_train.png"%(self.recType)),bbox_inches = 'tight')
-
+#        plt.figure() 
+#        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True,figsize = figSize)
+#        axs[0].hist(trues.lagDiff.values, lagBins, density = True)
+#        axs[1].hist(falses.lagDiff.values, lagBins, density = True)
+#        axs[0].set_xlabel('Lag Differences')  
+#        axs[0].set_title('True')
+#        axs[1].set_xlabel('Lag Differences')
+#        axs[1].set_title('False Positive')
+#        axs[0].set_ylabel('Probability Density')
+#        if self.site != None:
+#            plt.savefig(os.path.join(self.figureWS,"%s_%s_lagDifferences_train.png"%(self.recType,self.site)),bbox_inches = 'tight')
+#        else:
+#            plt.savefig(os.path.join(self.figureWS,"%s_lagDifferences_train.png"%(self.recType)),bbox_inches = 'tight')
+#
         print ("Lag differences figure created, check your output Workspace")
         
         # Consecutive Record Length ?
         conBins =np.arange(1,12,1)
 
-        plt.figure() 
-        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True,figsize = figSize)
-        axs[0].hist(trues.conRecLength.values, conBins, density = True)
-        axs[1].hist(falses.conRecLength.values, conBins, density = True)
-        axs[0].set_xlabel('Consecutive Hit Length')  
-        axs[0].set_title('True')
-        axs[1].set_xlabel('Consecutive Hit Length')
-        axs[1].set_title('False Positive')
-        axs[0].set_ylabel('Probability Density')
-        if self.site != None:
-            plt.savefig(os.path.join(self.figureWS,"%s_%s_conRecLength_train.png"%(self.recType,self.site)),bbox_inches = 'tight')
-        else:
-            plt.savefig(os.path.join(self.figureWS,"%s_conRecLength_train.png"%(self.recType)),bbox_inches = 'tight')
-
-        print ("Consecutive Hit Length figure created, check your output Workspace")
+#        plt.figure() 
+#        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True,figsize = figSize)
+#        axs[0].hist(trues.conRecLength.values, conBins, density = True)
+#        axs[1].hist(falses.conRecLength.values, conBins, density = True)
+#        axs[0].set_xlabel('Consecutive Hit Length')  
+#        axs[0].set_title('True')
+#        axs[1].set_xlabel('Consecutive Hit Length')
+#        axs[1].set_title('False Positive')
+#        axs[0].set_ylabel('Probability Density')
+#        if self.site != None:
+#            plt.savefig(os.path.join(self.figureWS,"%s_%s_conRecLength_train.png"%(self.recType,self.site)),bbox_inches = 'tight')
+#        else:
+#            plt.savefig(os.path.join(self.figureWS,"%s_conRecLength_train.png"%(self.recType)),bbox_inches = 'tight')
+#
+#        print ("Consecutive Hit Length figure created, check your output Workspace")
 
         # Noise Ratio
         noiseBins =np.arange(0,1.1,0.1)
 
-        plt.figure() 
-        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True,figsize = figSize)
-        axs[0].hist(trues.noiseRatio.values, noiseBins, density = True)
-        axs[1].hist(falses.noiseRatio.values, noiseBins, density = True)
-        axs[0].set_xlabel('Noise Ratio')  
-        axs[0].set_title('True')
-        axs[1].set_xlabel('Noise Ratio')
-        axs[1].set_title('False Positive')
-        axs[0].set_ylabel('Probability Density')
-        if self.site != None:
-           plt.savefig(os.path.join(self.figureWS,"%s_%s_noiseRatio_train.png"%(self.recType,self.site)),bbox_inches = 'tight')
-        else:
-           plt.savefig(os.path.join(self.figureWS,"%s_noiseRatio_train.png"%(self.recType)),bbox_inches = 'tight')
-
-        print ("Noise Ratio figure created, check your output Workspace")
+#        plt.figure() 
+#        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True,figsize = figSize)
+#        axs[0].hist(trues.noiseRatio.values, noiseBins, density = True)
+#        axs[1].hist(falses.noiseRatio.values, noiseBins, density = True)
+#        axs[0].set_xlabel('Noise Ratio')  
+#        axs[0].set_title('True')
+#        axs[1].set_xlabel('Noise Ratio')
+#        axs[1].set_title('False Positive')
+#        axs[0].set_ylabel('Probability Density')
+#        if self.site != None:
+#           plt.savefig(os.path.join(self.figureWS,"%s_%s_noiseRatio_train.png"%(self.recType,self.site)),bbox_inches = 'tight')
+#        else:
+#           plt.savefig(os.path.join(self.figureWS,"%s_noiseRatio_train.png"%(self.recType)),bbox_inches = 'tight')
+#
+#        print ("Noise Ratio figure created, check your output Workspace")
         
         # make lattice plot for pubs
         figSize = (3,7)
         plt.figure() 
         fig, axs = plt.subplots(5,2,tight_layout = True,figsize = figSize)
         # hit ratio
-        axs[0,1].hist(trues.hitRatio.values, hitRatioBins, density = True, color = 'k')
-        axs[0,0].hist(falses.hitRatio.values, hitRatioBins, density = True, color = 'k')
+        axs[0,1].hist(trues.hitRatio.values, hitRatioBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
+        axs[0,0].hist(falses.hitRatio.values, hitRatioBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
         axs[0,0].set_xlabel('Hit Ratio')  
         axs[0,1].set_title('True')
         axs[0,1].set_xlabel('Hit Ratio')
@@ -2199,30 +2197,30 @@ class training_results():
         axs[0,0].set_title('A',loc = 'left')
 
         # consecutive record length
-        axs[1,1].hist(trues.conRecLength.values, conBins, density = True, color = 'k')
-        axs[1,0].hist(falses.conRecLength.values, conBins, density = True, color = 'k')
+        axs[1,1].hist(trues.conRecLength.values, conBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
+        axs[1,0].hist(falses.conRecLength.values, conBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
         axs[1,0].set_xlabel('Consecutive Hit Length')  
         axs[1,1].set_xlabel('Consecutive Hit Length')
         axs[1,0].set_title('B',loc = 'left')
 
         # power
-        axs[2,1].hist(trues.Power.values, powerBins, density = True, color = 'k')
-        axs[2,0].hist(falses.Power.values, powerBins, density = True, color = 'k')
-        axs[2,0].set_xlabel('%s Signal Power'%(self.recType))  
-        axs[2,1].set_xlabel('%s Signal Power'%(self.recType))
+        axs[2,1].hist(trues.Power.values, powerBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
+        axs[2,0].hist(falses.Power.values, powerBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
+        axs[2,0].set_xlabel('Signal Power')  
+        axs[2,1].set_xlabel('Signal Power')
         axs[2,0].set_ylabel('Probability Density')
         axs[2,0].set_title('C',loc = 'left')
 
         # noise ratio
-        axs[3,1].hist(trues.noiseRatio.values, noiseBins, density = True, color = 'k')
-        axs[3,0].hist(falses.noiseRatio.values, noiseBins, density = True, color = 'k')
+        axs[3,1].hist(trues.noiseRatio.values, noiseBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
+        axs[3,0].hist(falses.noiseRatio.values, noiseBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
         axs[3,0].set_xlabel('Noise Ratio')  
         axs[3,1].set_xlabel('Noise Ratio')
         axs[3,0].set_title('D',loc = 'left')
 
         # lag diff
-        axs[4,1].hist(trues.lagDiff.values, lagBins, density = True, color = 'k')
-        axs[4,0].hist(falses.lagDiff.values, lagBins, density = True, color = 'k')
+        axs[4,1].hist(trues.lagDiff.values, lagBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
+        axs[4,0].hist(falses.lagDiff.values, lagBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
         axs[4,0].set_xlabel('Lag Differences')  
         axs[4,1].set_xlabel('Lag Differences')
         axs[4,0].set_title('E',loc = 'left')
@@ -3104,8 +3102,10 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
     receivers = receivers.recID.unique()                                       # get the unique receivers associated with this node    
     recapdata = pd.DataFrame(columns = ['FreqCode','Epoch','recID','timeStamp'])                # set up an empty data frame
     c = conn.cursor()
-    
+    c.close()
     for i in receivers:                                                            # for every receiver 
+        conn = sqlite3.connect(projectDB)                                              # connect to the database
+        c = conn.cursor()
         print ("Start selecting and merging data for receiver %s"%(i))
         c.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
         tbls = c.fetchall()
@@ -3125,28 +3125,53 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
                     max_iter_dict[i] = j
                 curr_idx = curr_idx + 1
         curr_idx = 0
-        
+        c.close()        
         
         # once we have a hash table of receiver to max classification, extract the classification dataset
         for j in max_iter_dict:
+            conn = sqlite3.connect(projectDB)                                              # connect to the database
+
             cursor = conn.execute('select * from %s'%(max_iter_dict[j]))
             names = [description[0] for description in cursor.description]
-            if 'hitRatio_A' in names:            
-                sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp,presence_number, overlapping, hitRatio_A, hitRatio_M, detHist_A, detHist_M, conRecLength_A, conRecLength_M, lag, lagDiff, test, RelDate 
-                FROM %s 
-                LEFT JOIN tblMasterTag ON %s.FreqCode = tblMasterTag.FreqCode 
-                LEFT JOIN tblOverlap ON %s.FreqCode = tblOverlap.FreqCode AND %s.Epoch = tblOverlap.Epoch AND %s.recID = tblOverlap.recID 
-                LEFT JOIN tblPresence ON %s.FreqCode = tblPresence.FreqCode AND %s.Epoch = tblPresence.Epoch AND %s.recID = tblPresence.recID'''%(max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j])       
-            else:
-                sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp,presence_number, overlapping,test, RelDate 
-                FROM %s 
-                LEFT JOIN tblMasterTag ON %s.FreqCode = tblMasterTag.FreqCode 
-                LEFT JOIN tblOverlap ON %s.FreqCode = tblOverlap.FreqCode AND %s.Epoch = tblOverlap.Epoch AND %s.recID = tblOverlap.recID 
-                LEFT JOIN tblPresence ON %s.FreqCode = tblPresence.FreqCode AND %s.Epoch = tblPresence.Epoch AND %s.recID = tblPresence.recID'''%(max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j])       
+            c = conn.cursor()
+            c.close()
+                    
+            try:
+                conn = sqlite3.connect(projectDB)                                              # connect to the database
+                if 'hitRatio_A' in names:
+                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp,presence_number, overlapping, hitRatio_A, hitRatio_M, detHist_A, detHist_M, conRecLength_A, conRecLength_M, lag, lagDiff, test, RelDate 
+                    FROM %s 
+                    LEFT JOIN tblMasterTag ON %s.FreqCode = tblMasterTag.FreqCode 
+                    LEFT JOIN tblOverlap ON %s.FreqCode = tblOverlap.FreqCode AND %s.Epoch = tblOverlap.Epoch AND %s.recID = tblOverlap.recID 
+                    LEFT JOIN tblPresence ON %s.FreqCode = tblPresence.FreqCode AND %s.Epoch = tblPresence.Epoch AND %s.recID = tblPresence.recID'''%(max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j])       
+                else:
+                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp,presence_number, overlapping,test, RelDate 
+                    FROM %s 
+                    LEFT JOIN tblMasterTag ON %s.FreqCode = tblMasterTag.FreqCode 
+                    LEFT JOIN tblOverlap ON %s.FreqCode = tblOverlap.FreqCode AND %s.Epoch = tblOverlap.Epoch AND %s.recID = tblOverlap.recID 
+                    LEFT JOIN tblPresence ON %s.FreqCode = tblPresence.FreqCode AND %s.Epoch = tblPresence.Epoch AND %s.recID = tblPresence.recID'''%(max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j])       
+                dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
+                dat['overlapping'].fillna(0,inplace = True)
+                dat = dat[dat.overlapping == 0]
+                c = conn.cursor()
+                c.close()
+
+            except:
+                conn = sqlite3.connect(projectDB)                                              # connect to the database
+
+                if 'hitRatio_A' in names:
+                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp, hitRatio_A, hitRatio_M, detHist_A, detHist_M, conRecLength_A, conRecLength_M, lag, lagDiff, test, RelDate 
+                    FROM %s 
+                    LEFT JOIN tblMasterTag ON %s.FreqCode = tblMasterTag.FreqCode'''%(max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j]) 
+                       
+                else:
+                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp, test, RelDate 
+                    FROM %s 
+                    LEFT JOIN tblMasterTag ON %s.FreqCode = tblMasterTag.FreqCode'''%(max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j])    
+                dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
+                c = conn.cursor()
+                c.close()
                 
-            dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
-            dat['overlapping'].fillna(0,inplace = True)
-            dat = dat[dat.overlapping == 0]
             dat = dat[dat.test == 1]
             dat['RelDate'] = pd.to_datetime(dat.RelDate)
             dat['timeStamp'] = pd.to_datetime(dat.timeStamp)
@@ -3158,9 +3183,12 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
                 dat = dat[(dat.timeStamp >= dat.RelDate)]
             recapdata = recapdata.append(dat)
             del dat
-    recapdata.drop_duplicates(keep = 'first', inplace = True)
-    recapdata.to_sql('tblRecaptures',con = conn,index = False)
     c.close()
+    
+      
+    recapdata.drop_duplicates(keep = 'first', inplace = True)
+    return recapdata
+
 
 class cjs_data_prep():
     '''Class creates input files for Cormack Jolly Seber modeling in MARK'''

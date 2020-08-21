@@ -8,11 +8,11 @@ import warnings
 warnings.filterwarnings('ignore')
 tS = time.time()
 #set script parameters
-class_iter= 2 #Enter the iteration number here--start at 2
+class_iter= 3 #Enter the iteration number here--start at 2
 site = 'T22'                                                                   # what is the site/receiver ID?
 recType = 'orion'                                                              # what is the receiver type?
 proj_dir = r'E:\Manuscript\CT_River_2015'                                      # what is the project directory?
-dbName = 'ctr_2015.db'                                                         # whad did you call the database?
+dbName = 'ctr_2015_v2.db'                                                         # whad did you call the database?
 
 # directory creations
 outputWS = os.path.join(proj_dir,'Output')                                 # we are getting time out error and database locks - so let's write to disk for now 
@@ -44,10 +44,12 @@ print ("There are %s fish to iterate through at site %s" %(len(histories),site))
 # create training data for this round of classification
 train = biotas.create_training_data(site,projectDB)
 
+counter = 0
 for i in histories:
+    counter = counter + 1
     class_dat =biotas.classify_data(i,site,fields,projectDB,outputScratch,train,informed_prior = prior,reclass_iter=class_iter)
     biotas.calc_class_params_map(class_dat)
-    print ('classified detections for fish %s'%(i))
+    print ('classified detections for fish %s, %s percent complete'%(i),round(counter/len(histories),2))
 print ("Detections classified!") 
 biotas.classDatAppend(site,outputScratch,projectDB,reclass_iter = class_iter)
 print ("process took %s to compile"%(round(time.time() - tS,3)))
