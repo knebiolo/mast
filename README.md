@@ -163,7 +163,7 @@ The first part of the Naïve Bayes classifier develops training data, which is c
 3.	Update Line 12 and identify the project directory, this is the same directory you created in step 1.  
 4.	Update Line 13, which identifies the project database.  This is the same as above.  
 5.  If the study had Orion receivers that switched between antennas, edit line 14 to indicate the time in seconds spent listening to each antenna.
-6.  If the study had Orion recievers taht switched between antennas, edit line 15 to indicate the number of antennas
+6.  Update Line 15: Update the value following the colon to the receiver ID (in quotes). If the study had Orion recievers that switched between antennas, change the value preceding the colon to indicate the number of antennas.
 7.  Update line 16, indicate the antenna to receiver relationship in Orion headers, Lotek receivers are arbitrary
 8.  If the study had Orion recievers that switched between antennas, uncomment line 31 and comment out line 28.  Leave as is otherwise.
 
