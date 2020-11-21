@@ -1639,7 +1639,7 @@ class classification_results():
         self.reclass_iter = reclass_iter
         self.rec_list = rec_list
         self.site = site
-        if rec_list == None:
+        if rec_list == None and site == None:
             recSQL = "SELECT * FROM tblMasterReceiver WHERE RecType = '%s'"%(self.recType) # SQL code to import data from this node
             receivers = pd.read_sql(recSQL,con = conn)                         # import data
             receivers = receivers.recID.unique()                               # get the unique receivers associated with this node    
@@ -1655,7 +1655,18 @@ class classification_results():
                 dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
                 self.initial_data = self.initial_data.append(dat)
                 del dat                 
-                
+        elif site != None and rec_list == None:
+            print ("Start selecting and merging data for receiver %s"%(site))
+
+            sql = "SELECT FreqCode,Epoch,recID,Power,noiseRatio,hitRatio_A,hitRatio_M,postTrue_A,postTrue_M,postFalse_A,postFalse_M,test,lagDiff,consDet_A, consDet_M, conRecLength_A, conRecLength_M,logLikelihoodRatio_A, logLikelihoodRatio_M FROM tblClassify_%s_%s "%(site, reclass_iter)
+            dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
+            self.class_stats_data = self.class_stats_data.append(dat)
+            del dat 
+            
+            sql = "SELECT FreqCode,Epoch,recID,Power,noiseRatio,hitRatio_A,hitRatio_M,postTrue_A,postTrue_M,postFalse_A,postFalse_M,test,lagDiff,consDet_A, consDet_M,conRecLength_A, conRecLength_M,logLikelihoodRatio_A, logLikelihoodRatio_M FROM tblClassify_%s_%s "%(site, 1)
+            dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
+            self.initial_data = self.initial_data.append(dat)
+            del dat            
         else:
             for i in rec_list:
                 print ("Start selecting and merging data for receiver %s"%(i))
