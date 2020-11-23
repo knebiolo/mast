@@ -856,7 +856,7 @@ class classify_data():
     The class is written in such a manner to take advantage of Python's multiprocessing
     capabilities.     
     '''
-    def __init__(self,i,site,classifyFields,projectDB,scratchWS,training_data,informed_prior = True,training = None, reclass_iter = None):
+    def __init__(self,i,site,classifyFields,projectDB,scratchWS,training_data = None,informed_prior = True,training = None, reclass_iter = None):
         '''when class is initialized, we will extract information for this animal (i)
         at reciever (site) from the project database (projectDB).  
         '''
@@ -888,7 +888,7 @@ class classify_data():
         self.histDF.sort_values(by = 'Epoch', inplace = True)
         self.histDF.set_index('Epoch', drop = False, inplace = True)
         self.histDF = self.histDF.drop_duplicates(subset = 'timeStamp')
-        self.trainDF = training_data
+
         # set some object variables
         self.fields = classifyFields
         self.i = i
@@ -914,7 +914,10 @@ class classify_data():
             self.trainingDB = training
         else:
             self.trainingDB = projectDB
-
+        if training_data != None:
+            self.trainDF = training_data
+        else:
+            self.trainDF = create_training_data(site,self.trainingDB)
 
 
 def likelihood(assumption,classify_object,status = 'A'):
