@@ -910,11 +910,11 @@ class classify_data():
         self.dead_factors = np.arange(self.MortRate,3600,self.MortRate)
         self.informed = informed_prior
         self.reclass_iter = reclass_iter
-        if training != None:
+        if training is not None:
             self.trainingDB = training
         else:
             self.trainingDB = projectDB
-        if training_data != None:
+        if training_data is not None:
             self.trainDF = training_data
         else:
             self.trainDF = create_training_data(site,self.trainingDB)
