@@ -5,7 +5,7 @@ import sqlite3
 import pandas as pd
 import warnings
 warnings.filterwarnings('ignore')
-import abtas
+import biotas
 
 #set script parameters
 site = 'T11'                                                                   # what is the site/receiver ID?
