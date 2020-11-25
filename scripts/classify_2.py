@@ -36,10 +36,10 @@ print ("There are %s files to iterate through"%(len(files)))
 tS = time.time()  
 
 # if you are using lotek receivers or orion receivers that do not employ switching:                                                          
-abtas.telemDataImport(site,recType,workFiles,projectDB) 
+biotas.telemDataImport(site,recType,workFiles,projectDB) 
 
 # if you are using orion recievers that use swtiching:
-#abtas.telemDataImport(site,recType,workFiles,projectDB, switch = True, scanTime = scanTime, channels = channels, ant_to_rec_dict = ant_to_rec_dict) 
+#biotas.telemDataImport(site,recType,workFiles,projectDB, switch = True, scanTime = scanTime, channels = channels, ant_to_rec_dict = ant_to_rec_dict) 
 
 for i in ant_to_rec_dict:
     # get the fish to iterate through using SQL
@@ -57,14 +57,14 @@ for i in ant_to_rec_dict:
     # create list of training data objects to iterate over with a Pool multiprocess
     iters = []
     for j in histories:
-        iters.append(abtas.classify_data(j,ant_to_rec_dict[i],fields,projectDB,outputScratch,training = trainingDB))
+        iters.append(biotas.classify_data(j,ant_to_rec_dict[i],fields,projectDB,outputScratch,training = trainingDB))
     print ("Finished creating history objects")
     for k in iters:
-        abtas.calc_class_params_map(k)     
+        biotas.calc_class_params_map(k)     
     print ("Detections classified!")
-    abtas.classDatAppend(site,outputScratch,projectDB)   
+    biotas.classDatAppend(site,outputScratch,projectDB)   
     print ("process took %s to compile"%(round(time.time() - tS,3)))
     # generate summary statistics for classification by receiver type
-    class_stats = abtas.classification_results(recType,projectDB,figure_ws,ant_to_rec_dict[i])
+    class_stats = biotas.classification_results(recType,projectDB,figure_ws,ant_to_rec_dict[i])
     class_stats.classify_stats()
     
