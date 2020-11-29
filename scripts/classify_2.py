@@ -11,17 +11,17 @@ warnings.filterwarnings('ignore')
 import biotas
 
 #set script parameters
-site = '101'                                                                   # what is the site/receiver ID?
+site = '102'                                                                   # what is the site/receiver ID?
 recType = 'orion'                                                              # what is the receiver type?
 proj_dir = r'C:\a\Projects\Winooski\2020\Data'                    # what is the project directory?
-dbName = 'Winooski_2020_101.db'                                                   # what is the name of the project database?
-t_DBName = 'Winooski_101_Trainer.db'                                                # what is the name of the training database?  We assume it is in the same directory
+dbName = 'Winooski_2020_102.db'                                                   # what is the name of the project database?
+t_DBName = 'Winooski_102_Trainer.db'                                                # what is the name of the training database?  We assume it is in the same directory
 
 # optional orion parameters if receivers used switching
 scanTime = 2.0
 channels = 1
 # even if you aren't using switching, fill in this dictionary with the antenna to reciever ID relationship
-ant_to_rec_dict = {1:'101'}
+ant_to_rec_dict = {1:'102'}
 
 # create worskspaces - you haven't changed the directory have you?                                              
 trainingDB = os.path.join(proj_dir,'Data',t_DBName)
