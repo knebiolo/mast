@@ -20,27 +20,26 @@ warnings.filterwarnings('ignore')
 import biotas
 
 #set script parameters
-site = '101'                                                                   # what is the site/receiver ID?
+site = '102'                                                                   # what is the site/receiver ID?
 recType = 'orion'                                                              # what is the receiver type? (OMIT??)
-proj_dir = r'C:\a\Projects\Winooski\2019\Data'                    # what is the project directory?
-dbName = 'Winooski_2019_101.db'    
-dbNew='Winooski_101_Trainer.db'    
+proj_dir = r'C:\a\Projects\Winooski\2019\Data\Databases'                    # what is the project directory?
+dbName = 'Winooski_2019_102.db'    
+dbNew='Winooski_102_Trainer.db'    
 
-class_iter='4'    #What was the last iteration during the classification process
+#biotas.createTrainDB(os.path.join(proj_dir,'TrainingDBs'),dbNew)  #This is where we'll stick the table.  For now this retains the full database structure.  I don't think that's necessary--in fact I've removed this.  REMOVE
 
 
-biotas.createTrainDB(proj_dir, dbNew)  #This is where we'll stick the table.  For now this retains the full database structure.  I don't think that's necessary
+class_iter = 5    #What was the last iteration during the classification process
 
-#out_name='tblTrain'
-
-projectDB = os.path.join(proj_dir,'Data',dbName)  #This is where the data will come from
-outputDB = os.path.join(proj_dir,'Data',dbNew)    #And this is where it's going
+projectDB = os.path.join(proj_dir,dbName)  #This is where the data will come from
+outputDB = os.path.join(proj_dir,'TrainingDBs',dbNew)    #And this is where it's going
 
 
 
-train = biotas.create_training_data(site,projectDB)  #This is where we call the function. This function outputs a new training table based on only known noise from the initial (raw) data input and the observations that were classified as good during the final iteration
+
+train = biotas.create_training_data(site,projectDB,reclass_iter=class_iter)  #This is where we call the function. This function outputs a new training table based on only known noise from the initial (raw) data input and the observations that were classified as good during the final iteration
 
 conn = sqlite3.connect(outputDB)
 c = conn.cursor()
-train.to_sql('tblTrain',con=conn,index = False, if_exists = 'append', chunksize = 1000)  #Copying this based on what I think it does...please check!
+train.to_sql('tblTrain',con=conn,index = False, if_exists = 'replace')#, chunksize = 1000)  #Copying this based on what I think it does...please check!
 c.close()      
