@@ -369,7 +369,7 @@ def studyDataImport(dataFrame,dbName,tblName):
     conn.commit()   
     c.close() 
 
-def orionImport(fileName,dbName,recName,switch = False, scanTime = None, channels = None, ant_to_rec_dict = None):
+def orionImport(fileName,rxfile,dbName,recName,switch = False, scanTime = None, channels = None, ant_to_rec_dict = None):
     '''Function imports raw Sigma Eight orion data.  
     
     Text parser uses simple column fixed column widths.
@@ -406,7 +406,7 @@ def orionImport(fileName,dbName,recName,switch = False, scanTime = None, channel
                                 dtype = {'Date':str,'Time':str,'Site':str,'Ant':str,'Freq':str,'Code':str,'Power':str}) 
 
     if len(telemDat) > 0:
-        #telemDat['fileName'] = np.repeat(fileName,len(telemDat))
+        telemDat['fileName'] = np.repeat(rxfile,len(telemDat))    #Note I'm going back here to the actual file name without the path.  Is that OK?  I prefer it, but it's a potential source of confusion
         telemDat['FreqCode'] = telemDat['Freq'].astype(str) + ' ' + telemDat['Code'].astype(str)
         telemDat['timeStamp'] = pd.to_datetime(telemDat['Date'] + ' ' + telemDat['Time'],errors = 'coerce')# create timestamp field from date and time and apply to index
         telemDat['ScanTime'] = np.repeat(scanTime,len(telemDat))
@@ -446,7 +446,7 @@ def orionImport(fileName,dbName,recName,switch = False, scanTime = None, channel
                     c.close()             
   
                         
-def lotek_import(fileName,dbName,recName):
+def lotek_import(fileName,rxfile,dbName,recName):
     ''' function imports raw lotek data, reads header data to find receiver parameters
     and automatically locates raw telemetry data.  Import procedure works with 
     standardized project database. Database must be created before function can be run'''
@@ -532,7 +532,7 @@ def lotek_import(fileName,dbName,recName):
         telemDat = pd.read_fwf(fileName,colspecs = [(0,8),(8,18),(18,28),(28,36),(36,51),(51,59)],names = ['Date','Time','ChannelID','TagID','Antenna','Power'],skiprows = dataRow)
         telemDat = telemDat.iloc[:-2]                                                   # remove last two rows, Lotek adds garbage at the end
 
-        #telemDat['fileName'] = np.repeat(fileName,len(telemDat))
+        telemDat['fileName'] = np.repeat(rxfile,len(telemDat))                   # Adding the filename into the dataset...drop the path (note this may cause confusion because above we use filename with path.  Decide what to do and fix)
         def id_to_freq(row,channelDict):
             if row[2] in channelDict:
                 return channelDict[row[2]]
@@ -638,7 +638,7 @@ def lotek_import(fileName,dbName,recName):
                 telemDat.drop(['day0','DayNumber'],axis = 1, inplace = True)       
                 telemDat['Epoch'] = (telemDat['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()    
                 telemDat.drop (['Date','Time','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
-                #telemDat['fileName'] = np.repeat(fileName,len(telemDat))
+                telemDat['fileName'] = np.repeat(rxfile,len(telemDat))            #Made change here as above--taking jsut the file name and writing it to the dataset.  Note naming issue.
                 telemDat['recID'] = np.repeat(recName,len(telemDat))
                 telemDat['noiseRatio'] = noiseRatio(5.0,telemDat,study_tags)            
                 telemDat['ScanTime'] = np.repeat(scanTime,len(telemDat))
@@ -693,7 +693,7 @@ def lotek_import(fileName,dbName,recName):
                 telemDat['events_per_duration'] = telemDat.Events / telemDat.duration
                 telemDat['Epoch'] = (telemDat['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()  
                 telemDat.drop (['Date_Start','Date_End','time_end','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
-                #telemDat['fileName'] = np.repeat(fileName,len(telemDat))
+                telemDat['fileName'] = np.repeat(rxfile,len(telemDat))            #This is the 4th time I'm assigning file to fileName in the saved data table.
                 telemDat['recID'] = np.repeat(recName,len(telemDat))
                 telemDat['ScanTime'] = np.repeat(scanTime,len(telemDat))
                 telemDat['Channels'] = np.repeat(channels,len(telemDat))
@@ -715,10 +715,11 @@ def telemDataImport(site,recType,file_directory,projectDB,switch = False, scanTi
     tFiles = os.listdir(file_directory)
     for f in tFiles:
         f_dir = os.path.join(file_directory,f)
+        rxfile=f
         if recType == 'lotek':
-            lotek_import(f_dir,projectDB,site)
+            lotek_import(f_dir,rxfile,projectDB,site)
         elif recType == 'orion':
-            orionImport(f_dir,projectDB,site,switch, scanTime, channels, ant_to_rec_dict)
+            orionImport(f_dir,rxfile,projectDB,site,switch, scanTime, channels, ant_to_rec_dict)
         else:
             print ("There currently is not an import routine created for this receiver type.  Please try again")
         print ("File %s imported"%(f))
@@ -863,12 +864,12 @@ class classify_data():
         conn = sqlite3.connect(projectDB, timeout=30.0)        
         c = conn.cursor()
         if reclass_iter == None:
-            sql = "SELECT FreqCode, Epoch, recID, timeStamp, Power, noiseRatio, ScanTime, Channels, RecType FROM tblRaw WHERE FreqCode == '%s' AND recID == '%s';"%(i,site)
+            sql = "SELECT FreqCode, Epoch, recID, timeStamp, Power, noiseRatio, ScanTime, Channels, RecType, fileName FROM tblRaw WHERE FreqCode == '%s' AND recID == '%s';"%(i,site)
             self.histDF = pd.read_sql(sql,con = conn,coerce_float  = True)
 
             
         else:
-            sql = "SELECT FreqCode, Epoch, recID, timeStamp, Power, noiseRatio, ScanTime, Channels, RecType FROM tblClassify_%s_%s WHERE FreqCode == '%s' AND test == '1';"%(site,reclass_iter-1,i)
+            sql = "SELECT FreqCode, Epoch, recID, timeStamp, Power, noiseRatio, ScanTime, Channels, RecType, fileName FROM tblClassify_%s_%s WHERE FreqCode == '%s' AND test == '1';"%(site,reclass_iter-1,i)
             self.histDF = pd.read_sql(sql,con = conn,coerce_float  = True)
 
         sql = 'SELECT PulseRate,MortRate FROM tblMasterTag WHERE FreqCode == "%s"'%(i)
