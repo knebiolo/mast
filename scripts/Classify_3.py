@@ -8,11 +8,11 @@ import warnings
 warnings.filterwarnings('ignore')
 tS = time.time()
 #set script parameters
-class_iter= 3 #Enter the iteration number here--start at 2
-site = 'T22'                                                                   # what is the site/receiver ID?
+class_iter= 5 #Enter the iteration number here--start at 2
+site = '14'                                                                   # what is the site/receiver ID?
 recType = 'orion'                                                              # what is the receiver type?
-proj_dir = r'E:\Manuscript\CT_River_2015'                                      # what is the project directory?
-dbName = 'ctr_2015_v2.db'                                                         # whad did you call the database?
+proj_dir = r'C:\a\Projects\Boquet\Data\BIOTAS'                                      # what is the project directory?
+dbName = 'Boquet2020.db'                                                         # whad did you call the database?
 
 # directory creations
 outputWS = os.path.join(proj_dir,'Output')                                 # we are getting time out error and database locks - so let's write to disk for now 
@@ -49,7 +49,7 @@ for i in histories:
     counter = counter + 1
     class_dat =biotas.classify_data(i,site,fields,projectDB,outputScratch,train,informed_prior = prior,reclass_iter=class_iter)
     biotas.calc_class_params_map(class_dat)
-    print ('classified detections for fish %s, %s percent complete'%(i),round(counter/len(histories),2))
+    print ('classified detections for fish %s, %s percent complete'%(i,round(counter/len(histories),2)))
 print ("Detections classified!") 
 biotas.classDatAppend(site,outputScratch,projectDB,reclass_iter = class_iter)
 print ("process took %s to compile"%(round(time.time() - tS,3)))
@@ -57,6 +57,6 @@ print ("process took %s to compile"%(round(time.time() - tS,3)))
 
 del train, class_dat
 
-class_stats = biotas.classification_results(recType,projectDB,figure_ws,site,reclass_iter = class_iter)
+class_stats = biotas.classification_results(recType,projectDB,figure_ws,site=site,reclass_iter = class_iter)
 class_stats.classify_stats()    
 
