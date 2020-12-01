@@ -1683,305 +1683,308 @@ class classification_results():
             print ("Classification summary statistics report")
         print ("----------------------------------------------------------------------------------")
         det_class_count = self.class_stats_data.groupby('test')['test'].count().to_frame()
-        print ("")
-        print ("%s detection class statistics:"%(self.recType)) 
-        print ("The probability that a detection was classified as true was %s"%((round(float(det_class_count.at[1,'test'])/float(det_class_count.sum()),3))))
-        print ("The probability that a detection was classified as fasle positive was %s"%((round(float(det_class_count.at[0,'test'])/float(det_class_count.sum()),3))))
-        print ("")
-        print ("----------------------------------------------------------------------------------")
-        print ("")
-        self.sta_class_count = self.class_stats_data.groupby(['recID','test'])['test'].count().to_frame()#.reset_index(drop = False)
-        self.recs = list(set(self.sta_class_count.index.levels[0]))
-        print ("Detection Class Counts Across Stations")
-        print ("          Classified     Classified")
-        print ("             False          True")
-        print ("       ______________________________")
-        print ("      |              |              |")
-        for i in self.recs:
-            print ("%6s|   %8s   |   %8s   |"%(i,self.sta_class_count.loc[(i,0)].values[0],self.sta_class_count.loc[(i,1)].values[0]))
-        print ("      |______________|______________|")    
-        print ("")
-        print ("----------------------------------------------------------------------------------")
-#        self.class_stats_data = cons_det_filter(self.class_stats_data)
-#
-#        print ("The consecutive detection filter described by Beeman & Perry (2012) would retain %s detections"%(self.class_stats_data.cons_det_filter.sum()))
-#        print ("A standard of three records in a row will only retain %s records"%len(self.class_stats_data[(self.class_stats_data.conRecLength_A >= 3) |(self.class_stats_data.conRecLength_M >= 3)]))
-#        print ("A standard of four records in a row will only retain %s records"%len(self.class_stats_data[(self.class_stats_data.conRecLength_A >= 4) |(self.class_stats_data.conRecLength_M >= 4)]))
-#        print ("A standard of five records in a row will only retain %s records"%len(self.class_stats_data[(self.class_stats_data.conRecLength_A >= 5) |(self.class_stats_data.conRecLength_M >= 5)]))
-#        print ("A standard of six records in a row will only retain %s records"%len(self.class_stats_data[(self.class_stats_data.conRecLength_A >= 6) |(self.class_stats_data.conRecLength_M >= 6)]))
-#
-#        print ("The algorithm retained a total of %s detections"%(self.class_stats_data.test.sum()))
-        print ("----------------------------------------------------------------------------------")
-        print ("Assess concordance with consecutive detection requirement (Beeman and Perry)")
-        
-        # calculate Cohen's Kappa (concordance)
-        # step 1, join the final trues to the initial classification dataset
-        # get true detections
-        trues = self.class_stats_data[self.class_stats_data.test == 1][['FreqCode','Epoch','test']]
-        trues.rename(columns = {'test':'final_test'},inplace = True)
-        print (len(trues))
-        # join true detections to initial data
-        self.initial_data = self.initial_data.merge(trues,how = 'left',left_on = ['FreqCode','Epoch'], right_on = ['FreqCode','Epoch'])
-        self.initial_data = cons_det_filter(self.initial_data)
-        self.initial_data.final_test.fillna(0,inplace = True)
-        self.initial_data.drop_duplicates(keep = 'first', inplace = True)
-        
-        n11 = len(self.initial_data[(self.initial_data.final_test == 1) & (self.initial_data.cons_det_filter == 1)])
-        print ("The algorithm and Beeman and Perry classified the same %s recoreds as true "%(n11))
-        n10 = len(self.initial_data[(self.initial_data.final_test == 1) & (self.initial_data.cons_det_filter == 0)])
-        print ("The algorithm classified %s records as true while Beeman and Perry classified them as false"%(n10))
-        n01 = len(self.initial_data[(self.initial_data.final_test == 0) & (self.initial_data.cons_det_filter == 1)])
-        print ("The algorithm classified %s records as false while Beeman and Perry classified them as true"%(n01))       
-        n00 = len(self.initial_data[(self.initial_data.final_test == 0) & (self.initial_data.cons_det_filter == 0)])
-        print ("The algorithm and Beeman and Perry classified the same %s records as false positive"%(n00))      
-        I_o = (n11 + n00)/(n11 + n10 + n01 + n00)
-        print ("The observed propotion of agreement was %s"%(I_o))
-        I_e = ((n11 + n01)*(n11 + n10) + (n10 + n00)*(n01 + n00))/(n11 + n10 + n01 + n00)**2
-        print ("The expected agreement due to chance alone was %s"%(I_e))
-
-        self.kappa = (I_o - I_e)/(1.- I_e)
-        
-        print ("Cohen's Kappa: %s"%(self.kappa))
-        print ("----------------------------------------------------------------------------------")
-        print ("Compiling Figures")        
-        # get data by detection class for side by side histograms
-        self.class_stats_data['Power'] = self.class_stats_data.Power.astype(float)
-        self.class_stats_data['lagDiff'] = self.class_stats_data.lagDiff.astype(float)
-        self.class_stats_data['conRecLength_A'] = self.class_stats_data.conRecLength_A.astype(float)
-        self.class_stats_data['noiseRatio'] = self.class_stats_data.noiseRatio.astype(float)
-        #self.class_stats_data['fishCount'] = self.class_stats_data.fishCount.astype(float)
-        self.class_stats_data['logPostRatio_A'] =np.log10(self.class_stats_data.postTrue_A.values/self.class_stats_data.postFalse_A.values)
-        self.class_stats_data['logPostRatio_M'] =np.log10(self.class_stats_data.postTrue_M.values/self.class_stats_data.postFalse_M.values)
-
-        '''Currently these figures only return data for hypothesized alive fish - but we can have dead fish in here and 
-        their inlcusion in the histograms may be biasing the results - find the max hit ratio, consecutive record length, and likelihood ratio 
-        '''
-        self.class_stats_data['hitRatio_max'] = self.class_stats_data[['hitRatio_A','hitRatio_M']].max(axis = 1)
-        self.class_stats_data['conRecLength_max'] = self.class_stats_data[['conRecLength_A','conRecLength_M']].max(axis = 1)
-        self.class_stats_data['logLikelihoodRatio_max'] = self.class_stats_data[['logLikelihoodRatio_A','logLikelihoodRatio_M']].max(axis = 1)
-        self.class_stats_data['logPostRatio_max'] = self.class_stats_data[['logPostRatio_A','logPostRatio_M']].max(axis = 1)
-
-        trues = self.class_stats_data[self.class_stats_data.test == 1] 
-        falses = self.class_stats_data[self.class_stats_data.test == 0] 
-        self.trues = trues
-        self.falses = falses
-        
-        # plot hit ratio histograms by detection class
-        hitRatioBins =np.linspace(0,1.0,11)
-        
-#        plt.figure(figsize = (3,2)) 
-#        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-#        axs[0].hist(trues.hitRatio_max.values, hitRatioBins, density = True)
-#        axs[1].hist(falses.hitRatio_max.values, hitRatioBins, density = True)
-#        axs[0].set_xlabel('Hit Ratio')  
-#        axs[0].set_title('True')
-#        axs[1].set_xlabel('Hit Ratio')
-#        axs[1].set_title('False Positive')
-#        axs[0].set_ylabel('Probability Density')
-#        if self.site != None:
-#            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_hitRatioCompare_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
-#            
-#        else:
-#            plt.savefig(os.path.join(self.figureWS,"%s_hitRatioCompare_class.png"%(self.recType)),bbox_inches = 'tight')
-#
-#        print ("Hit Ratio figure created, check your output workspace")
-        
-        # plot signal power histograms by detection class
-        minPower = self.class_stats_data.Power.min()//5 * 5
-        maxPower = self.class_stats_data.Power.max()//5 * 5
-        powerBins =np.arange(minPower,maxPower+20,10)
-
-#        plt.figure(figsize = (3,2)) 
-#        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-#        axs[0].hist(trues.Power.values, powerBins, density = True)
-#        axs[1].hist(falses.Power.values, powerBins, density = True)
-#        axs[0].set_xlabel('%s Signal Power'%(self.recType))  
-#        axs[0].set_title('True')
-#        axs[1].set_xlabel('%s Signal Power'%(self.recType))
-#        axs[1].set_title('False Positive')
-#        axs[0].set_ylabel('Frequency')
-#        if self.site != None:
-#            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_powerCompare_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
-#        else:
-#            plt.savefig(os.path.join(self.figureWS,"%s_powerCompare_class.png"%(self.recType)),bbox_inches = 'tight')
-#        print ("Signal Power figure created, check your output Workspace")
-        
-        # Lag Back Differences - how stdy are detection lags?
-        lagBins =np.arange(-100,110,20)
-
-#        plt.figure(figsize = (3,2)) 
-#        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-#        axs[0].hist(trues.lagDiff.values, lagBins, density = True)
-#        axs[1].hist(falses.lagDiff.values, lagBins, density = True)
-#        axs[0].set_xlabel('Lag Differences')  
-#        axs[0].set_title('True')
-#        axs[1].set_xlabel('Lag Differences')
-#        axs[1].set_title('False Positive')
-#        axs[0].set_ylabel('Frequency')
-#        if self.site != None:
-#            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_lagDifferences_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')                
-#        else:
-#            plt.savefig(os.path.join(self.figureWS,"%s_lagDifferences_class.png"%(self.recType)),bbox_inches = 'tight')
-#        print ("Lag differences figure created, check your output Workspace")
-        
-        # Consecutive Record Length ?
-        conBins =np.arange(1,12,1)
-
-#        plt.figure(figsize = (3,2)) 
-#        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-#        axs[0].hist(trues.conRecLength_max.values, conBins, density = True)
-#        axs[1].hist(falses.conRecLength_max.values, conBins, density = True)
-#        axs[0].set_xlabel('Consecutive Hit Length')  
-#        axs[0].set_title('True')
-#        axs[1].set_xlabel('Consecutive Hit Length')
-#        axs[1].set_title('False Positive')
-#        axs[0].set_ylabel('Frequency')
-#        if self.site != None:
-#            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_conRecLength_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')                
-#        else:
-#            plt.savefig(os.path.join(self.figureWS,"%s_conRecLength_class.png"%(self.recType)),bbox_inches = 'tight')
-#        print ("Consecutive Hit Length figure created, check your output Workspace")
-
-        # Noise Ratio
-        noiseBins =np.arange(0,1.1,0.1)
-
-#        plt.figure(figsize = (3,2)) 
-#        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-#        axs[0].hist(trues.noiseRatio.values, noiseBins, density = True)
-#        axs[1].hist(falses.noiseRatio.values, noiseBins, density = True)
-#        axs[0].set_xlabel('Noise Ratio')  
-#        axs[0].set_title('True')
-#        axs[1].set_xlabel('Noise Ratio')
-#        axs[1].set_title('False Positive')
-#        axs[0].set_ylabel('Frequency')
-#        if self.site != None:
-#            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_noiseRatio_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
-#              
-#        else:
-#           plt.savefig(os.path.join(self.figureWS,"%s_noiseRatio_class.png"%(self.recType)),bbox_inches = 'tight')
-#
-#        print ("Noise Ratio figure created, check your output Workspace" )
-
-#        # plot fish present
-#        minCount = self.class_stats_data.fishCount.min()//10 * 10
-#        maxCount = self.class_stats_data.fishCount.max()//10 * 10
-#        countBins =np.arange(minCount,maxCount+20,10)
-#
-#        plt.figure(figsize = (6,3)) 
-#        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-#        axs[0].hist(trues.fishCount.values, countBins)
-#        axs[1].hist(falses.fishCount.values, countBins)
-#        axs[0].set_xlabel('Fish Present')  
-#        axs[0].set_title('True')
-#        axs[1].set_xlabel('Fish Present')
-#        axs[1].set_title('False Positive')
-#        axs[0].set_ylabel('Probability Density')
-#        if self.site != None:
-#           plt.savefig(os.path.join(self.figureWS,"%s_%s_fishPresentCompare_class.png"%(self.recType,self.site)),bbox_inches = 'tight')
-#        else:
-#           plt.savefig(os.path.join(self.figureWS,"%s_fishPresentCompare_class.png"%(self.recType)),bbox_inches = 'tight')
-
-#        print ("Fish Present Figure Created, check output workspace")
-
-        # plot the log likelihood ratio 
-        minLogRatio = self.class_stats_data.logLikelihoodRatio_max.min()//1 * 1
-        maxLogRatio = self.class_stats_data.logLikelihoodRatio_max.max()//1 * 1
-        ratioBins =np.arange(minLogRatio,maxLogRatio+1,2)
-        
-#        plt.figure(figsize = (3,2)) 
-#        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-#        axs[0].hist(trues.logLikelihoodRatio_max.values, ratioBins, density = True)
-#        axs[1].hist(falses.logLikelihoodRatio_max.values, ratioBins, density = True)
-#        axs[0].set_xlabel('Log Likelihood Ratio')  
-#        axs[0].set_title('True')
-#        axs[1].set_xlabel('Log Likelihood Ratio')
-#        axs[1].set_title('False Positive')
-#        axs[0].set_ylabel('Frequency')
-#        if self.site != None:
-#            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_logLikeRatio_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
-#
-#        else:
-#            plt.savefig(os.path.join(self.figureWS,"%s_logLikeRatio_class.png"%(self.recType)),bbox_inches = 'tight')
-#
-#        print ("Log Likelihood Figure Created, check output workspace")
-        
-        # plot the log of the posterior ratio 
-        minPostRatio = self.class_stats_data.logPostRatio_max.min()
-        maxPostRatio = self.class_stats_data.logPostRatio_max.max()
-        postRatioBins = np.linspace(minPostRatio,maxPostRatio,10)
-
-        
-#        plt.figure(figsize = (3,2)) 
-#        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-#        axs[0].hist(trues.logPostRatio_max.values, postRatioBins, density = True)
-#        axs[1].hist(falses.logPostRatio_max.values, postRatioBins, density = True)
-#        axs[0].set_xlabel('Log Posterior Ratio')  
-#        axs[0].set_title('True')
-#        axs[1].set_xlabel('Log Posterior Ratio')
-#        axs[1].set_title('False Positive')
-#        axs[0].set_ylabel('Frequency')
-#        if self.site != None:
-#            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_logPostRatio_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
-#                
-#        else:
-#            plt.savefig(os.path.join(self.figureWS,"%s_logPostRatio_class.png"%(self.recType)),bbox_inches = 'tight')
-#
-#        print ("Log Posterior Ratio Figure Created, check output workspace")
-
-        # make lattice plot for pubs
-        figSize = (6,4)
-        plt.figure() 
-        fig, axs = plt.subplots(3,4,tight_layout = True,figsize = figSize)
-        # hit ratio
-        axs[0,1].hist(trues.hitRatio_max.values, hitRatioBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
-        axs[0,0].hist(falses.hitRatio_max.values, hitRatioBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
-        axs[0,0].set_xlabel('Hit Ratio')  
-        axs[0,1].set_title('True')
-        axs[0,1].set_xlabel('Hit Ratio')
-        axs[0,0].set_title('False Positive')
-        axs[0,0].set_title('A',loc = 'left')
-
-        # consecutive record length
-        axs[0,3].hist(trues.conRecLength_max.values, conBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
-        axs[0,2].hist(falses.conRecLength_max.values, conBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
-        axs[0,2].set_xlabel('Consecutive Hit Length')  
-        axs[0,3].set_title('True')
-        axs[0,3].set_xlabel('Consecutive Hit Length')
-        axs[0,2].set_title('False Positive')
-        axs[0,2].set_title('B',loc = 'left')
-
-        # power
-        axs[1,1].hist(trues.Power.values, powerBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
-        axs[1,0].hist(falses.Power.values, powerBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
-        axs[1,0].set_xlabel('Signal Power')  
-        axs[1,1].set_xlabel('Signal Power')
-        axs[1,0].set_ylabel('Probability Density')
-        axs[1,0].set_title('C',loc = 'left')
-
-        # noise ratio
-        axs[1,3].hist(trues.noiseRatio.values, noiseBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
-        axs[1,2].hist(falses.noiseRatio.values, noiseBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
-        axs[1,2].set_xlabel('Noise Ratio')  
-        axs[1,3].set_xlabel('Noise Ratio')
-        axs[1,2].set_title('D',loc = 'left')
-
-        # lag diff
-        axs[2,1].hist(trues.lagDiff.values, lagBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
-        axs[2,0].hist(falses.lagDiff.values, lagBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
-        axs[2,0].set_xlabel('Lag Differences')  
-        axs[2,1].set_xlabel('Lag Differences')
-        axs[2,0].set_title('E',loc = 'left')
-
-        # log posterior ratio
-        axs[2,3].hist(trues.logPostRatio_max.values, postRatioBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
-        axs[2,2].hist(falses.logPostRatio_max.values, postRatioBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
-        axs[2,2].set_xlabel('Log Posterior Ratio')  
-        axs[2,3].set_xlabel('Log Posterior Ratio')
-        axs[2,2].set_title('F',loc = 'left')
-        if self.rec_list != None:
-           plt.savefig(os.path.join(self.figureWS,"%s_lattice_class.png"%(self.recType)),bbox_inches = 'tight', dpi = 900)
+        if len(det_class_count)>1:
+            print ("")
+            print ("%s detection class statistics:"%(self.recType)) 
+            print ("The probability that a detection was classified as true was %s"%((round(float(det_class_count.at[1,'test'])/float(det_class_count.sum()),3))))
+            print ("The probability that a detection was classified as fasle positive was %s"%((round(float(det_class_count.at[0,'test'])/float(det_class_count.sum()),3))))
+            print ("")
+            print ("----------------------------------------------------------------------------------")
+            print ("")
+            self.sta_class_count = self.class_stats_data.groupby(['recID','test'])['test'].count().to_frame()#.reset_index(drop = False)
+            self.recs = list(set(self.sta_class_count.index.levels[0]))
+            print ("Detection Class Counts Across Stations")
+            print ("          Classified     Classified")
+            print ("             False          True")
+            print ("       ______________________________")
+            print ("      |              |              |")
+            for i in self.recs:
+                print ("%6s|   %8s   |   %8s   |"%(i,self.sta_class_count.loc[(i,0)].values[0],self.sta_class_count.loc[(i,1)].values[0]))
+            print ("      |______________|______________|")    
+            print ("")
+            print ("----------------------------------------------------------------------------------")
+    #        self.class_stats_data = cons_det_filter(self.class_stats_data)
+    #
+    #        print ("The consecutive detection filter described by Beeman & Perry (2012) would retain %s detections"%(self.class_stats_data.cons_det_filter.sum()))
+    #        print ("A standard of three records in a row will only retain %s records"%len(self.class_stats_data[(self.class_stats_data.conRecLength_A >= 3) |(self.class_stats_data.conRecLength_M >= 3)]))
+    #        print ("A standard of four records in a row will only retain %s records"%len(self.class_stats_data[(self.class_stats_data.conRecLength_A >= 4) |(self.class_stats_data.conRecLength_M >= 4)]))
+    #        print ("A standard of five records in a row will only retain %s records"%len(self.class_stats_data[(self.class_stats_data.conRecLength_A >= 5) |(self.class_stats_data.conRecLength_M >= 5)]))
+    #        print ("A standard of six records in a row will only retain %s records"%len(self.class_stats_data[(self.class_stats_data.conRecLength_A >= 6) |(self.class_stats_data.conRecLength_M >= 6)]))
+    #
+    #        print ("The algorithm retained a total of %s detections"%(self.class_stats_data.test.sum()))
+            print ("----------------------------------------------------------------------------------")
+            print ("Assess concordance with consecutive detection requirement (Beeman and Perry)")
+            
+            # calculate Cohen's Kappa (concordance)
+            # step 1, join the final trues to the initial classification dataset
+            # get true detections
+            trues = self.class_stats_data[self.class_stats_data.test == 1][['FreqCode','Epoch','test']]
+            trues.rename(columns = {'test':'final_test'},inplace = True)
+            print (len(trues))
+            # join true detections to initial data
+            self.initial_data = self.initial_data.merge(trues,how = 'left',left_on = ['FreqCode','Epoch'], right_on = ['FreqCode','Epoch'])
+            self.initial_data = cons_det_filter(self.initial_data)
+            self.initial_data.final_test.fillna(0,inplace = True)
+            self.initial_data.drop_duplicates(keep = 'first', inplace = True)
+            
+            n11 = len(self.initial_data[(self.initial_data.final_test == 1) & (self.initial_data.cons_det_filter == 1)])
+            print ("The algorithm and Beeman and Perry classified the same %s recoreds as true "%(n11))
+            n10 = len(self.initial_data[(self.initial_data.final_test == 1) & (self.initial_data.cons_det_filter == 0)])
+            print ("The algorithm classified %s records as true while Beeman and Perry classified them as false"%(n10))
+            n01 = len(self.initial_data[(self.initial_data.final_test == 0) & (self.initial_data.cons_det_filter == 1)])
+            print ("The algorithm classified %s records as false while Beeman and Perry classified them as true"%(n01))       
+            n00 = len(self.initial_data[(self.initial_data.final_test == 0) & (self.initial_data.cons_det_filter == 0)])
+            print ("The algorithm and Beeman and Perry classified the same %s records as false positive"%(n00))      
+            I_o = (n11 + n00)/(n11 + n10 + n01 + n00)
+            print ("The observed propotion of agreement was %s"%(I_o))
+            I_e = ((n11 + n01)*(n11 + n10) + (n10 + n00)*(n01 + n00))/(n11 + n10 + n01 + n00)**2
+            print ("The expected agreement due to chance alone was %s"%(I_e))
+    
+            self.kappa = (I_o - I_e)/(1.- I_e)
+            
+            print ("Cohen's Kappa: %s"%(self.kappa))
+            print ("----------------------------------------------------------------------------------")
+            print ("Compiling Figures")        
+            # get data by detection class for side by side histograms
+            self.class_stats_data['Power'] = self.class_stats_data.Power.astype(float)
+            self.class_stats_data['lagDiff'] = self.class_stats_data.lagDiff.astype(float)
+            self.class_stats_data['conRecLength_A'] = self.class_stats_data.conRecLength_A.astype(float)
+            self.class_stats_data['noiseRatio'] = self.class_stats_data.noiseRatio.astype(float)
+            #self.class_stats_data['fishCount'] = self.class_stats_data.fishCount.astype(float)
+            self.class_stats_data['logPostRatio_A'] =np.log10(self.class_stats_data.postTrue_A.values/self.class_stats_data.postFalse_A.values)
+            self.class_stats_data['logPostRatio_M'] =np.log10(self.class_stats_data.postTrue_M.values/self.class_stats_data.postFalse_M.values)
+    
+            '''Currently these figures only return data for hypothesized alive fish - but we can have dead fish in here and 
+            their inlcusion in the histograms may be biasing the results - find the max hit ratio, consecutive record length, and likelihood ratio 
+            '''
+            self.class_stats_data['hitRatio_max'] = self.class_stats_data[['hitRatio_A','hitRatio_M']].max(axis = 1)
+            self.class_stats_data['conRecLength_max'] = self.class_stats_data[['conRecLength_A','conRecLength_M']].max(axis = 1)
+            self.class_stats_data['logLikelihoodRatio_max'] = self.class_stats_data[['logLikelihoodRatio_A','logLikelihoodRatio_M']].max(axis = 1)
+            self.class_stats_data['logPostRatio_max'] = self.class_stats_data[['logPostRatio_A','logPostRatio_M']].max(axis = 1)
+    
+            trues = self.class_stats_data[self.class_stats_data.test == 1] 
+            falses = self.class_stats_data[self.class_stats_data.test == 0] 
+            self.trues = trues
+            self.falses = falses
+            
+            # plot hit ratio histograms by detection class
+            hitRatioBins =np.linspace(0,1.0,11)
+            
+    #        plt.figure(figsize = (3,2)) 
+    #        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
+    #        axs[0].hist(trues.hitRatio_max.values, hitRatioBins, density = True)
+    #        axs[1].hist(falses.hitRatio_max.values, hitRatioBins, density = True)
+    #        axs[0].set_xlabel('Hit Ratio')  
+    #        axs[0].set_title('True')
+    #        axs[1].set_xlabel('Hit Ratio')
+    #        axs[1].set_title('False Positive')
+    #        axs[0].set_ylabel('Probability Density')
+    #        if self.site != None:
+    #            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_hitRatioCompare_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
+    #            
+    #        else:
+    #            plt.savefig(os.path.join(self.figureWS,"%s_hitRatioCompare_class.png"%(self.recType)),bbox_inches = 'tight')
+    #
+    #        print ("Hit Ratio figure created, check your output workspace")
+            
+            # plot signal power histograms by detection class
+            minPower = self.class_stats_data.Power.min()//5 * 5
+            maxPower = self.class_stats_data.Power.max()//5 * 5
+            powerBins =np.arange(minPower,maxPower+20,10)
+    
+    #        plt.figure(figsize = (3,2)) 
+    #        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
+    #        axs[0].hist(trues.Power.values, powerBins, density = True)
+    #        axs[1].hist(falses.Power.values, powerBins, density = True)
+    #        axs[0].set_xlabel('%s Signal Power'%(self.recType))  
+    #        axs[0].set_title('True')
+    #        axs[1].set_xlabel('%s Signal Power'%(self.recType))
+    #        axs[1].set_title('False Positive')
+    #        axs[0].set_ylabel('Frequency')
+    #        if self.site != None:
+    #            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_powerCompare_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
+    #        else:
+    #            plt.savefig(os.path.join(self.figureWS,"%s_powerCompare_class.png"%(self.recType)),bbox_inches = 'tight')
+    #        print ("Signal Power figure created, check your output Workspace")
+            
+            # Lag Back Differences - how stdy are detection lags?
+            lagBins =np.arange(-100,110,20)
+    
+    #        plt.figure(figsize = (3,2)) 
+    #        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
+    #        axs[0].hist(trues.lagDiff.values, lagBins, density = True)
+    #        axs[1].hist(falses.lagDiff.values, lagBins, density = True)
+    #        axs[0].set_xlabel('Lag Differences')  
+    #        axs[0].set_title('True')
+    #        axs[1].set_xlabel('Lag Differences')
+    #        axs[1].set_title('False Positive')
+    #        axs[0].set_ylabel('Frequency')
+    #        if self.site != None:
+    #            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_lagDifferences_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')                
+    #        else:
+    #            plt.savefig(os.path.join(self.figureWS,"%s_lagDifferences_class.png"%(self.recType)),bbox_inches = 'tight')
+    #        print ("Lag differences figure created, check your output Workspace")
+            
+            # Consecutive Record Length ?
+            conBins =np.arange(1,12,1)
+    
+    #        plt.figure(figsize = (3,2)) 
+    #        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
+    #        axs[0].hist(trues.conRecLength_max.values, conBins, density = True)
+    #        axs[1].hist(falses.conRecLength_max.values, conBins, density = True)
+    #        axs[0].set_xlabel('Consecutive Hit Length')  
+    #        axs[0].set_title('True')
+    #        axs[1].set_xlabel('Consecutive Hit Length')
+    #        axs[1].set_title('False Positive')
+    #        axs[0].set_ylabel('Frequency')
+    #        if self.site != None:
+    #            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_conRecLength_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')                
+    #        else:
+    #            plt.savefig(os.path.join(self.figureWS,"%s_conRecLength_class.png"%(self.recType)),bbox_inches = 'tight')
+    #        print ("Consecutive Hit Length figure created, check your output Workspace")
+    
+            # Noise Ratio
+            noiseBins =np.arange(0,1.1,0.1)
+    
+    #        plt.figure(figsize = (3,2)) 
+    #        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
+    #        axs[0].hist(trues.noiseRatio.values, noiseBins, density = True)
+    #        axs[1].hist(falses.noiseRatio.values, noiseBins, density = True)
+    #        axs[0].set_xlabel('Noise Ratio')  
+    #        axs[0].set_title('True')
+    #        axs[1].set_xlabel('Noise Ratio')
+    #        axs[1].set_title('False Positive')
+    #        axs[0].set_ylabel('Frequency')
+    #        if self.site != None:
+    #            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_noiseRatio_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
+    #              
+    #        else:
+    #           plt.savefig(os.path.join(self.figureWS,"%s_noiseRatio_class.png"%(self.recType)),bbox_inches = 'tight')
+    #
+    #        print ("Noise Ratio figure created, check your output Workspace" )
+    
+    #        # plot fish present
+    #        minCount = self.class_stats_data.fishCount.min()//10 * 10
+    #        maxCount = self.class_stats_data.fishCount.max()//10 * 10
+    #        countBins =np.arange(minCount,maxCount+20,10)
+    #
+    #        plt.figure(figsize = (6,3)) 
+    #        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
+    #        axs[0].hist(trues.fishCount.values, countBins)
+    #        axs[1].hist(falses.fishCount.values, countBins)
+    #        axs[0].set_xlabel('Fish Present')  
+    #        axs[0].set_title('True')
+    #        axs[1].set_xlabel('Fish Present')
+    #        axs[1].set_title('False Positive')
+    #        axs[0].set_ylabel('Probability Density')
+    #        if self.site != None:
+    #           plt.savefig(os.path.join(self.figureWS,"%s_%s_fishPresentCompare_class.png"%(self.recType,self.site)),bbox_inches = 'tight')
+    #        else:
+    #           plt.savefig(os.path.join(self.figureWS,"%s_fishPresentCompare_class.png"%(self.recType)),bbox_inches = 'tight')
+    
+    #        print ("Fish Present Figure Created, check output workspace")
+    
+            # plot the log likelihood ratio 
+            minLogRatio = self.class_stats_data.logLikelihoodRatio_max.min()//1 * 1
+            maxLogRatio = self.class_stats_data.logLikelihoodRatio_max.max()//1 * 1
+            ratioBins =np.arange(minLogRatio,maxLogRatio+1,2)
+            
+    #        plt.figure(figsize = (3,2)) 
+    #        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
+    #        axs[0].hist(trues.logLikelihoodRatio_max.values, ratioBins, density = True)
+    #        axs[1].hist(falses.logLikelihoodRatio_max.values, ratioBins, density = True)
+    #        axs[0].set_xlabel('Log Likelihood Ratio')  
+    #        axs[0].set_title('True')
+    #        axs[1].set_xlabel('Log Likelihood Ratio')
+    #        axs[1].set_title('False Positive')
+    #        axs[0].set_ylabel('Frequency')
+    #        if self.site != None:
+    #            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_logLikeRatio_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
+    #
+    #        else:
+    #            plt.savefig(os.path.join(self.figureWS,"%s_logLikeRatio_class.png"%(self.recType)),bbox_inches = 'tight')
+    #
+    #        print ("Log Likelihood Figure Created, check output workspace")
+            
+            # plot the log of the posterior ratio 
+            minPostRatio = self.class_stats_data.logPostRatio_max.min()
+            maxPostRatio = self.class_stats_data.logPostRatio_max.max()
+            postRatioBins = np.linspace(minPostRatio,maxPostRatio,10)
+    
+            
+    #        plt.figure(figsize = (3,2)) 
+    #        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
+    #        axs[0].hist(trues.logPostRatio_max.values, postRatioBins, density = True)
+    #        axs[1].hist(falses.logPostRatio_max.values, postRatioBins, density = True)
+    #        axs[0].set_xlabel('Log Posterior Ratio')  
+    #        axs[0].set_title('True')
+    #        axs[1].set_xlabel('Log Posterior Ratio')
+    #        axs[1].set_title('False Positive')
+    #        axs[0].set_ylabel('Frequency')
+    #        if self.site != None:
+    #            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_logPostRatio_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
+    #                
+    #        else:
+    #            plt.savefig(os.path.join(self.figureWS,"%s_logPostRatio_class.png"%(self.recType)),bbox_inches = 'tight')
+    #
+    #        print ("Log Posterior Ratio Figure Created, check output workspace")
+    
+            # make lattice plot for pubs
+            figSize = (6,4)
+            plt.figure() 
+            fig, axs = plt.subplots(3,4,tight_layout = True,figsize = figSize)
+            # hit ratio
+            axs[0,1].hist(trues.hitRatio_max.values, hitRatioBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
+            axs[0,0].hist(falses.hitRatio_max.values, hitRatioBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
+            axs[0,0].set_xlabel('Hit Ratio')  
+            axs[0,1].set_title('True')
+            axs[0,1].set_xlabel('Hit Ratio')
+            axs[0,0].set_title('False Positive')
+            axs[0,0].set_title('A',loc = 'left')
+    
+            # consecutive record length
+            axs[0,3].hist(trues.conRecLength_max.values, conBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
+            axs[0,2].hist(falses.conRecLength_max.values, conBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
+            axs[0,2].set_xlabel('Consecutive Hit Length')  
+            axs[0,3].set_title('True')
+            axs[0,3].set_xlabel('Consecutive Hit Length')
+            axs[0,2].set_title('False Positive')
+            axs[0,2].set_title('B',loc = 'left')
+    
+            # power
+            axs[1,1].hist(trues.Power.values, powerBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
+            axs[1,0].hist(falses.Power.values, powerBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
+            axs[1,0].set_xlabel('Signal Power')  
+            axs[1,1].set_xlabel('Signal Power')
+            axs[1,0].set_ylabel('Probability Density')
+            axs[1,0].set_title('C',loc = 'left')
+    
+            # noise ratio
+            axs[1,3].hist(trues.noiseRatio.values, noiseBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
+            axs[1,2].hist(falses.noiseRatio.values, noiseBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
+            axs[1,2].set_xlabel('Noise Ratio')  
+            axs[1,3].set_xlabel('Noise Ratio')
+            axs[1,2].set_title('D',loc = 'left')
+    
+            # lag diff
+            axs[2,1].hist(trues.lagDiff.values, lagBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
+            axs[2,0].hist(falses.lagDiff.values, lagBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
+            axs[2,0].set_xlabel('Lag Differences')  
+            axs[2,1].set_xlabel('Lag Differences')
+            axs[2,0].set_title('E',loc = 'left')
+    
+            # log posterior ratio
+            axs[2,3].hist(trues.logPostRatio_max.values, postRatioBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
+            axs[2,2].hist(falses.logPostRatio_max.values, postRatioBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
+            axs[2,2].set_xlabel('Log Posterior Ratio')  
+            axs[2,3].set_xlabel('Log Posterior Ratio')
+            axs[2,2].set_title('F',loc = 'left')
+            if self.rec_list != None:
+               plt.savefig(os.path.join(self.figureWS,"%s_lattice_class.png"%(self.recType)),bbox_inches = 'tight', dpi = 900)
+            else:
+               plt.savefig(os.path.join(self.figureWS,"%s_%s_lattice_class.png"%(self.recType,self.site)),bbox_inches = 'tight', dpi = 900)
         else:
-           plt.savefig(os.path.join(self.figureWS,"%s_%s_lattice_class.png"%(self.recType,self.site)),bbox_inches = 'tight', dpi = 900)
+           print("There were insufficient data to quantify summary statistics or histogram plots, either because there were no false positives or because there were no valid detections")
 
 class training_results():
     '''Python class object to hold the results of false positive classification'''
