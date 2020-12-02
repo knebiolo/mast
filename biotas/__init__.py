@@ -856,7 +856,7 @@ class classify_data():
     The class is written in such a manner to take advantage of Python's multiprocessing
     capabilities.     
     '''
-    def __init__(self,i,site,classifyFields,projectDB,scratchWS,training_data,informed_prior = True,training = None, reclass_iter = None):
+    def __init__(self,i,site,classifyFields,projectDB,scratchWS,training_data = None,informed_prior = True,training = None, reclass_iter = None):
         '''when class is initialized, we will extract information for this animal (i)
         at reciever (site) from the project database (projectDB).  
         '''
@@ -888,7 +888,7 @@ class classify_data():
         self.histDF.sort_values(by = 'Epoch', inplace = True)
         self.histDF.set_index('Epoch', drop = False, inplace = True)
         self.histDF = self.histDF.drop_duplicates(subset = 'timeStamp')
-        self.trainDF = training_data
+
         # set some object variables
         self.fields = classifyFields
         self.i = i
@@ -910,11 +910,14 @@ class classify_data():
         self.dead_factors = np.arange(self.MortRate,3600,self.MortRate)
         self.informed = informed_prior
         self.reclass_iter = reclass_iter
-        if training != None:
+        if training is not None:
             self.trainingDB = training
         else:
             self.trainingDB = projectDB
-
+        if training_data is not None:
+            self.trainDF = training_data
+        else:
+            self.trainDF = create_training_data(site,self.trainingDB)
 
 
 def likelihood(assumption,classify_object,status = 'A'):
@@ -1639,7 +1642,7 @@ class classification_results():
         self.reclass_iter = reclass_iter
         self.rec_list = rec_list
         self.site = site
-        if rec_list == None:
+        if rec_list == None and site == None:
             recSQL = "SELECT * FROM tblMasterReceiver WHERE RecType = '%s'"%(self.recType) # SQL code to import data from this node
             receivers = pd.read_sql(recSQL,con = conn)                         # import data
             receivers = receivers.recID.unique()                               # get the unique receivers associated with this node    
@@ -1655,7 +1658,18 @@ class classification_results():
                 dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
                 self.initial_data = self.initial_data.append(dat)
                 del dat                 
-                
+        elif site != None and rec_list == None:
+            print ("Start selecting and merging data for receiver %s"%(site))
+
+            sql = "SELECT FreqCode,Epoch,recID,Power,noiseRatio,hitRatio_A,hitRatio_M,postTrue_A,postTrue_M,postFalse_A,postFalse_M,test,lagDiff,consDet_A, consDet_M, conRecLength_A, conRecLength_M,logLikelihoodRatio_A, logLikelihoodRatio_M FROM tblClassify_%s_%s "%(site, reclass_iter)
+            dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
+            self.class_stats_data = self.class_stats_data.append(dat)
+            del dat 
+            
+            sql = "SELECT FreqCode,Epoch,recID,Power,noiseRatio,hitRatio_A,hitRatio_M,postTrue_A,postTrue_M,postFalse_A,postFalse_M,test,lagDiff,consDet_A, consDet_M,conRecLength_A, conRecLength_M,logLikelihoodRatio_A, logLikelihoodRatio_M FROM tblClassify_%s_%s "%(site, 1)
+            dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
+            self.initial_data = self.initial_data.append(dat)
+            del dat            
         else:
             for i in rec_list:
                 print ("Start selecting and merging data for receiver %s"%(i))
@@ -2231,27 +2245,7 @@ class training_results():
         else:
            plt.savefig(os.path.join(self.figureWS,"%s_lattice_train.png"%(self.recType)),bbox_inches = 'tight', dpi = 900)
 
-#
-#        # plot fish present
-#        minCount = self.train_stats_data.FishCount.min()//10 * 10
-#        maxCount = self.train_stats_data.FishCount.max()//10 * 10
-#        countBins =np.arange(minCount,maxCount+20,10)
-#
-#        plt.figure() 
-#        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True,figsize = figSize)
-#        axs[0].hist(trues.FishCount.values, countBins, density = True)
-#        axs[1].hist(falses.FishCount.values, countBins, density = True)
-#        axs[0].set_xlabel('Fish Present')  
-#        axs[0].set_title('True')
-#        axs[1].set_xlabel('Fish Present')
-#        axs[1].set_title('Fish Present')
-#        axs[0].set_ylabel('Probability Density')
-#        if self.site != None:
-#           plt.savefig(os.path.join(self.figureWS,"%s_%s_fishPresentCompare_train.png"%(self.recType,self.site)),bbox_inches = 'tight')
-#        else:
-#           plt.savefig(os.path.join(self.figureWS,"%s_fishPresentCompare_train.png"%(self.recType)),bbox_inches = 'tight')
-            
-#        print ("Fish Present Figure Created, check output workspace")
+
         
 class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, covariates = None, bucket_length = 15):
     '''Class imports standardized raw state presences and converts data structure
@@ -3102,10 +3096,9 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
     receivers = receivers.recID.unique()                                       # get the unique receivers associated with this node    
     recapdata = pd.DataFrame(columns = ['FreqCode','Epoch','recID','timeStamp'])                # set up an empty data frame
     c = conn.cursor()
-    c.close()
+
     for i in receivers:                                                            # for every receiver 
-        conn = sqlite3.connect(projectDB)                                              # connect to the database
-        c = conn.cursor()
+
         print ("Start selecting and merging data for receiver %s"%(i))
         c.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
         tbls = c.fetchall()
@@ -3124,20 +3117,17 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
                     max_iter = int(j[-1])
                     max_iter_dict[i] = j
                 curr_idx = curr_idx + 1
-        curr_idx = 0
-        c.close()        
+        curr_idx = 0     
         
         # once we have a hash table of receiver to max classification, extract the classification dataset
-        for j in max_iter_dict:
-            conn = sqlite3.connect(projectDB)                                              # connect to the database
+        for j in max_iter_dict:                                              
 
             cursor = conn.execute('select * from %s'%(max_iter_dict[j]))
             names = [description[0] for description in cursor.description]
-            c = conn.cursor()
-            c.close()
+
                     
             try:
-                conn = sqlite3.connect(projectDB)                                              # connect to the database
+
                 if 'hitRatio_A' in names:
                     sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp,presence_number, overlapping, hitRatio_A, hitRatio_M, detHist_A, detHist_M, conRecLength_A, conRecLength_M, lag, lagDiff, test, RelDate 
                     FROM %s 
@@ -3153,11 +3143,10 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
                 dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
                 dat['overlapping'].fillna(0,inplace = True)
                 dat = dat[dat.overlapping == 0]
-                c = conn.cursor()
-                c.close()
+
 
             except:
-                conn = sqlite3.connect(projectDB)                                              # connect to the database
+                                              # connect to the database
 
                 if 'hitRatio_A' in names:
                     sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp, hitRatio_A, hitRatio_M, detHist_A, detHist_M, conRecLength_A, conRecLength_M, lag, lagDiff, test, RelDate 
@@ -3169,8 +3158,7 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
                     FROM %s 
                     LEFT JOIN tblMasterTag ON %s.FreqCode = tblMasterTag.FreqCode'''%(max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j])    
                 dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
-                c = conn.cursor()
-                c.close()
+
                 
             dat = dat[dat.test == 1]
             dat['RelDate'] = pd.to_datetime(dat.RelDate)
@@ -3183,10 +3171,11 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
                 dat = dat[(dat.timeStamp >= dat.RelDate)]
             recapdata = recapdata.append(dat)
             del dat
-    c.close()
-    
-      
+                                            
+
     recapdata.drop_duplicates(keep = 'first', inplace = True)
+    recapdata.to_sql('tblRecaptures', con = conn, if_exists = 'append')   
+    c.close()
     return recapdata
 
 
