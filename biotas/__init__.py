@@ -2245,27 +2245,7 @@ class training_results():
         else:
            plt.savefig(os.path.join(self.figureWS,"%s_lattice_train.png"%(self.recType)),bbox_inches = 'tight', dpi = 900)
 
-#
-#        # plot fish present
-#        minCount = self.train_stats_data.FishCount.min()//10 * 10
-#        maxCount = self.train_stats_data.FishCount.max()//10 * 10
-#        countBins =np.arange(minCount,maxCount+20,10)
-#
-#        plt.figure() 
-#        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True,figsize = figSize)
-#        axs[0].hist(trues.FishCount.values, countBins, density = True)
-#        axs[1].hist(falses.FishCount.values, countBins, density = True)
-#        axs[0].set_xlabel('Fish Present')  
-#        axs[0].set_title('True')
-#        axs[1].set_xlabel('Fish Present')
-#        axs[1].set_title('Fish Present')
-#        axs[0].set_ylabel('Probability Density')
-#        if self.site != None:
-#           plt.savefig(os.path.join(self.figureWS,"%s_%s_fishPresentCompare_train.png"%(self.recType,self.site)),bbox_inches = 'tight')
-#        else:
-#           plt.savefig(os.path.join(self.figureWS,"%s_fishPresentCompare_train.png"%(self.recType)),bbox_inches = 'tight')
-            
-#        print ("Fish Present Figure Created, check output workspace")
+
         
 class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, covariates = None, bucket_length = 15):
     '''Class imports standardized raw state presences and converts data structure
@@ -3197,10 +3177,10 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
                 dat = dat[(dat.timeStamp >= dat.RelDate)]
             recapdata = recapdata.append(dat)
             del dat
-    c.close()
-    
-      
+    conn = sqlite3.connect(projectDB)                                              # connect to the database
+
     recapdata.drop_duplicates(keep = 'first', inplace = True)
+    recapdata.to_sql('tblRecaptures', con = conn, if_exists = 'append')    
     return recapdata
 
 
