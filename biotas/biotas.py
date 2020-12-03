@@ -3128,20 +3128,16 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
                     max_iter = int(j[-1])
                     max_iter_dict[i] = j
                 curr_idx = curr_idx + 1
-        curr_idx = 0
-        c.close()        
+        curr_idx = 0       
         
         # once we have a hash table of receiver to max classification, extract the classification dataset
-        for j in max_iter_dict:
-            conn = sqlite3.connect(projectDB)                                              # connect to the database
+        for j in max_iter_dict:                                            
 
             cursor = conn.execute('select * from %s'%(max_iter_dict[j]))
             names = [description[0] for description in cursor.description]
-            c = conn.cursor()
-            c.close()
+
                     
             try:
-                conn = sqlite3.connect(projectDB)                                              # connect to the database
                 if 'hitRatio_A' in names:
                     sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp,presence_number, overlapping, hitRatio_A, hitRatio_M, detHist_A, detHist_M, conRecLength_A, conRecLength_M, lag, lagDiff, test, RelDate, fileName 
                     FROM %s 
@@ -3157,11 +3153,9 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
                 dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
                 dat['overlapping'].fillna(0,inplace = True)
                 dat = dat[dat.overlapping == 0]
-                c = conn.cursor()
-                c.close()
+
 
             except:
-                conn = sqlite3.connect(projectDB)                                              # connect to the database
 
                 if 'hitRatio_A' in names:
                     sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp, hitRatio_A, hitRatio_M, detHist_A, detHist_M, conRecLength_A, conRecLength_M, lag, lagDiff, test, RelDate, fileName 
@@ -3173,8 +3167,7 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
                     FROM %s 
                     LEFT JOIN tblMasterTag ON %s.FreqCode = tblMasterTag.FreqCode'''%(max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j])    
                 dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver 
-                c = conn.cursor()
-                c.close()
+
                 
             dat = dat[dat.test == 1]
             dat['RelDate'] = pd.to_datetime(dat.RelDate)
@@ -3188,7 +3181,6 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
             recapdata = recapdata.append(dat)
             del dat
     c.close()
-    
       
     recapdata.drop_duplicates(keep = 'first', inplace = True)
     return recapdata
