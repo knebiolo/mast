@@ -26,15 +26,10 @@ proj_dir = r'C:\a\Projects\Winooski\2019\Data\Databases'                    # wh
 dbName = 'Winooski_2019_102.db'    
 dbNew='Winooski_102_Trainer.db'    
 
-#biotas.createTrainDB(os.path.join(proj_dir,'TrainingDBs'),dbNew)  #This is where we'll stick the table.  For now this retains the full database structure.  I don't think that's necessary--in fact I've removed this.  REMOVE
-
-
 class_iter = 5    #What was the last iteration during the classification process
 
 projectDB = os.path.join(proj_dir,dbName)  #This is where the data will come from
 outputDB = os.path.join(proj_dir,'TrainingDBs',dbNew)    #And this is where it's going
-
-
 
 
 train = biotas.create_training_data(site,projectDB,reclass_iter=class_iter)  #This is where we call the function. This function outputs a new training table based on only known noise from the initial (raw) data input and the observations that were classified as good during the final iteration
