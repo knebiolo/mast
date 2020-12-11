@@ -45,12 +45,12 @@ train = biotas.create_training_data(site,projectDB)
 
 # create a training object and classify each specimen
 for i in histories:
-    class_dat = biotas.classify_data(i,site,fields,projectDB,scratch_ws,train,informed_prior = prior)
+    class_dat = biotas.classify_data(i,site,fields,projectDB,scratch_ws,training=train,informed_prior = prior)
     biotas.calc_class_params_map(class_dat)   
     print ("Fish %s classified"%(i))
 print ("Detections classified!")
 biotas.classDatAppend(site, scratch_ws, projectDB)
 
 print ("process took %s to compile"%(round(time.time() - tS,3)))
-class_stats = biotas.classification_results(recType,projectDB,figure_ws,site)
+class_stats = biotas.classification_results(recType,projectDB,figure_ws,rec_list=[site])
 class_stats.classify_stats()

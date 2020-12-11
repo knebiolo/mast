@@ -57,6 +57,6 @@ print ("process took %s to compile"%(round(time.time() - tS,3)))
 
 del train, class_dat
 
-class_stats = biotas.classification_results(recType,projectDB,figure_ws,site=site,reclass_iter = class_iter)
+class_stats = biotas.classification_results(recType,projectDB,figure_ws,rec_list=[site],reclass_iter = class_iter)
 class_stats.classify_stats()    
 
