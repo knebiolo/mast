@@ -23,11 +23,11 @@ channels = 1
 # even if you aren't using switching, fill in this dictionary with the antenna to reciever ID relationship
 ant_to_rec_dict = {1:'102'}
 
-# create worskspaces - you haven't changed the directory have you?                                              
+# create worskspaces - you haven't changed the directory have you?
 trainingDB = os.path.join(proj_dir,'Data',t_DBName)
 
-outputWS = os.path.join(proj_dir,'Output')                                     # we are getting time out error and database locks - so let's write to disk for now 
-outputScratch = os.path.join(outputWS,'Scratch')                           # we are getting time out error and database locks - so let's write to disk for now 
+outputWS = os.path.join(proj_dir,'Output')                                     # we are getting time out error and database locks - so let's write to disk for now
+outputScratch = os.path.join(outputWS,'Scratch')                           # we are getting time out error and database locks - so let's write to disk for now
 figure_ws = os.path.join(outputWS,'Figures')
 workFiles = os.path.join(proj_dir,'Data','Training_Files')
 projectDB = os.path.join(proj_dir,'Data',dbName)
@@ -37,13 +37,13 @@ projectDB = os.path.join(proj_dir,'Data',dbName)
 fields = ['conRecLength','consDet','hitRatio','noiseRatio','seriesHit','power','lagDiff']
 files = os.listdir(workFiles)
 print ("There are %s files to iterate through"%(len(files)))
-tS = time.time()  
+tS = time.time()
 
-# if you are using lotek receivers or orion receivers that do not employ switching:                                                          
-biotas.telemDataImport(site,recType,workFiles,projectDB) 
+# if you are using receivers that do not employ antenna switching:
+biotas.telemDataImport(site,recType,workFiles,projectDB)
 
-# if you are using orion recievers that use swtiching:
-#biotas.telemDataImport(site,recType,workFiles,projectDB, switch = True, scanTime = scanTime, channels = channels, ant_to_rec_dict = ant_to_rec_dict) 
+# if you are using recievers that use swtiching:
+#biotas.telemDataImport(site,recType,workFiles,projectDB, scanTime = scanTime, channels = channels, ant_to_rec_dict = ant_to_rec_dict)
 
 for i in ant_to_rec_dict:
     # get the fish to iterate through using SQL
@@ -57,26 +57,26 @@ for i in ant_to_rec_dict:
     c.close()
     print ("There are %s fish to iterate through at site %s" %(len(histories),site))
     print ("This will take a while")
-    print ("Grab a coffee, call your mother.")    
+    print ("Grab a coffee, call your mother.")
     # create list of training data objects to iterate over with a Pool multiprocess
-    
+
     conn = sqlite3.connect(trainingDB)
     c = conn.cursor()
     sql = "SELECT * FROM tblTrain WHERE recID == '%s';"%(site)
     tblTrainDF = pd.read_sql(sql,con = conn)
     c.close()
-    
-    
+
+
     iters = []
     for j in histories:
         iters.append(biotas.classify_data(j,ant_to_rec_dict[i],fields,projectDB,outputScratch,training_data=tblTrainDF,training = trainingDB))
     print ("Finished creating history objects")
     for k in iters:
-        biotas.calc_class_params_map(k)     
+        biotas.calc_class_params_map(k)
     print ("Detections classified!")
-    biotas.classDatAppend(site,outputScratch,projectDB)   
+    biotas.classDatAppend(site,outputScratch,projectDB)
     print ("process took %s to compile"%(round(time.time() - tS,3)))
     # generate summary statistics for classification by receiver type
     class_stats = biotas.classification_results(recType,projectDB,figure_ws,rec_list=[ant_to_rec_dict[i]])
     class_stats.classify_stats()
-    
+
