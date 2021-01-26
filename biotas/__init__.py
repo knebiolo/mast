@@ -538,10 +538,10 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict = None):
 #       telemDat = telemDat.iloc[:-2]                                                   # remove last two rows, Lotek adds garbage at the end
 
         #Master Firmware: Version 9.12.5
-        telemDat = pd.read_fwf(fileName,colspecs = [(0,8),(8,23),(23,33),(33,41),(41,56),(56,64)],names = ['Date','Time','ChannelID','TagID','Antenna','Power'],skiprows = dataRow)
+        telemDat = pd.read_fwf(fileName,colspecs = [(0,8),(8,18),(23,33),(33,41),(41,56),(56,64)],names = ['Date','Time','ChannelID','TagID','Antenna','Power'],skiprows = dataRow)
         telemDat = telemDat.iloc[:-2]                                                   # remove last two 
 
-
+        telemDat['Antenna'] = telemDat['Antenna'].astype(str)                   #TCS Added this to get dict to line up with data
 
         telemDat['fileName'] = np.repeat(rxfile,len(telemDat))                   # Adding the filename into the dataset...drop the path (note this may cause confusion because above we use filename with path.  Decide what to do and fix)
         def id_to_freq(row,channelDict):
@@ -576,10 +576,10 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict = None):
                     telemDat_sub['Epoch'] = (telemDat_sub['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()
                     telemDat_sub = noiseRatio(5.0,telemDat_sub,study_tags)
                     telemDat_sub.drop (['Date','Time','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
-                    telemDat_sub['ScanTime'] = np.repeat(scanTime,len(telemDat))
-                    telemDat_sub['Channels'] = np.repeat(channels,len(telemDat))
-                    telemDat_sub['RecType'] = np.repeat(recType,len(telemDat))
-                    telemDat_sub['recID'] = np.repeat(recName,len(telemDat))
+                    telemDat_sub['ScanTime'] = np.repeat(scanTime,len(telemDat_sub))
+                    telemDat_sub['Channels'] = np.repeat(channels,len(telemDat_sub))
+                    telemDat_sub['RecType'] = np.repeat(recType,len(telemDat_sub))
+                    telemDat_sub['recID'] = np.repeat(site,len(telemDat_sub))
                     telemDat_sub.to_sql('tblRaw',con = conn,index = False, if_exists = 'append')
 
     else:
