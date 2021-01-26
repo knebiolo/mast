@@ -538,7 +538,7 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict = None):
 #       telemDat = telemDat.iloc[:-2]                                                   # remove last two rows, Lotek adds garbage at the end
 
         #Master Firmware: Version 9.12.5
-        telemDat = pd.read_fwf(fileName,colspecs = [(0,8),(8,18),(23,33),(33,41),(41,56),(56,64)],names = ['Date','Time','ChannelID','TagID','Antenna','Power'],skiprows = dataRow)
+        telemDat = pd.read_fwf(fileName,colspecs = [(0,8),(8,23),(23,33),(33,41),(41,56),(56,64)],names = ['Date','Time','ChannelID','TagID','Antenna','Power'],skiprows = dataRow)
         telemDat = telemDat.iloc[:-2]                                                   # remove last two 
 
         telemDat['Antenna'] = telemDat['Antenna'].astype(str)                   #TCS Added this to get dict to line up with data
