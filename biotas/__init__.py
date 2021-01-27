@@ -539,7 +539,7 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict = None):
 
         #Master Firmware: Version 9.12.5
         telemDat = pd.read_fwf(fileName,colspecs = [(0,8),(8,23),(23,33),(33,41),(41,56),(56,64)],names = ['Date','Time','ChannelID','TagID','Antenna','Power'],skiprows = dataRow)
-        telemDat = telemDat.iloc[:-2]                                                   # remove last two 
+        telemDat = telemDat.iloc[:-2]                                                   # remove last two
 
         telemDat['Antenna'] = telemDat['Antenna'].astype(str)                   #TCS Added this to get dict to line up with data
 
@@ -3160,7 +3160,7 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
         recSQL = "SELECT * FROM tblMasterReceiver"                                 # SQL code to import data from this node
     receivers = pd.read_sql(recSQL,con = conn)                                 # import data
     receivers = receivers.recID.unique()                                       # get the unique receivers associated with this node
-    recapdata = pd.DataFrame(columns = ['FreqCode','Epoch','recID','timeStamp','fileName'])                # set up an empty data frame
+    recapdata = pd.DataFrame(columns = ['FreqCode','Epoch','recID','timeStamp'])                # set up an empty data frame
     c = conn.cursor()
     c.close()
     for i in receivers:                                                            # for every receiver
@@ -3195,13 +3195,13 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
 
             try:
                 if 'hitRatio_A' in names:
-                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp,presence_number, overlapping, hitRatio_A, hitRatio_M, detHist_A, detHist_M, conRecLength_A, conRecLength_M, lag, lagDiff, test, RelDate, fileName
+                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp,presence_number, overlapping, hitRatio_A, hitRatio_M, detHist_A, detHist_M, conRecLength_A, conRecLength_M, lag, lagDiff, test, RelDate
                     FROM %s
                     LEFT JOIN tblMasterTag ON %s.FreqCode = tblMasterTag.FreqCode
                     LEFT JOIN tblOverlap ON %s.FreqCode = tblOverlap.FreqCode AND %s.Epoch = tblOverlap.Epoch AND %s.recID = tblOverlap.recID
                     LEFT JOIN tblPresence ON %s.FreqCode = tblPresence.FreqCode AND %s.Epoch = tblPresence.Epoch AND %s.recID = tblPresence.recID'''%(max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j])
                 else:
-                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp,presence_number, overlapping,test, RelDate, fileName
+                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp,presence_number, overlapping,test, RelDate
                     FROM %s
                     LEFT JOIN tblMasterTag ON %s.FreqCode = tblMasterTag.FreqCode
                     LEFT JOIN tblOverlap ON %s.FreqCode = tblOverlap.FreqCode AND %s.Epoch = tblOverlap.Epoch AND %s.recID = tblOverlap.recID
@@ -3214,12 +3214,12 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
             except:
 
                 if 'hitRatio_A' in names:
-                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp, hitRatio_A, hitRatio_M, detHist_A, detHist_M, conRecLength_A, conRecLength_M, lag, lagDiff, test, RelDate, fileName
+                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp, hitRatio_A, hitRatio_M, detHist_A, detHist_M, conRecLength_A, conRecLength_M, lag, lagDiff, test, RelDate
                     FROM %s
                     LEFT JOIN tblMasterTag ON %s.FreqCode = tblMasterTag.FreqCode'''%(max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j])
 
                 else:
-                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp, test, RelDate, fileName
+                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp, test, RelDate
                     FROM %s
                     LEFT JOIN tblMasterTag ON %s.FreqCode = tblMasterTag.FreqCode'''%(max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j])
                 dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver
