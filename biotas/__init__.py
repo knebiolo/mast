@@ -528,9 +528,20 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict = None):
         c = conn.cursor()
         study_tags = pd.read_sql('SELECT FreqCode, TagType FROM tblMasterTag',con = conn)
         study_tags = study_tags[study_tags.TagType == 'Study'].FreqCode.values
+
+
         # with our data row, extract information using pandas fwf import procedure
-        telemDat = pd.read_fwf(fileName,colspecs = [(0,8),(8,18),(18,28),(28,36),(36,51),(51,59)],names = ['Date','Time','ChannelID','TagID','Antenna','Power'],skiprows = dataRow)
-        telemDat = telemDat.iloc[:-2]                                                   # remove last two rows, Lotek adds garbage at the end
+
+        #Depending on firmware the data structure will change.  This is for xxx firmware.  See below for additional firmware configs
+
+#       telemDat = pd.read_fwf(fileName,colspecs = [(0,8),(8,18),(18,28),(28,36),(36,51),(51,59)],names = ['Date','Time','ChannelID','TagID','Antenna','Power'],skiprows = dataRow)
+#       telemDat = telemDat.iloc[:-2]                                                   # remove last two rows, Lotek adds garbage at the end
+
+        #Master Firmware: Version 9.12.5
+        telemDat = pd.read_fwf(fileName,colspecs = [(0,8),(8,23),(23,33),(33,41),(41,56),(56,64)],names = ['Date','Time','ChannelID','TagID','Antenna','Power'],skiprows = dataRow)
+        telemDat = telemDat.iloc[:-2]                                                   # remove last two 
+
+        telemDat['Antenna'] = telemDat['Antenna'].astype(str)                   #TCS Added this to get dict to line up with data
 
         telemDat['fileName'] = np.repeat(rxfile,len(telemDat))                   # Adding the filename into the dataset...drop the path (note this may cause confusion because above we use filename with path.  Decide what to do and fix)
         def id_to_freq(row,channelDict):
@@ -565,10 +576,10 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict = None):
                     telemDat_sub['Epoch'] = (telemDat_sub['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()
                     telemDat_sub = noiseRatio(5.0,telemDat_sub,study_tags)
                     telemDat_sub.drop (['Date','Time','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
-                    telemDat_sub['ScanTime'] = np.repeat(scanTime,len(telemDat))
-                    telemDat_sub['Channels'] = np.repeat(channels,len(telemDat))
-                    telemDat_sub['RecType'] = np.repeat(recType,len(telemDat))
-                    telemDat_sub['recID'] = np.repeat(recName,len(telemDat))
+                    telemDat_sub['ScanTime'] = np.repeat(scanTime,len(telemDat_sub))
+                    telemDat_sub['Channels'] = np.repeat(channels,len(telemDat_sub))
+                    telemDat_sub['RecType'] = np.repeat(recType,len(telemDat_sub))
+                    telemDat_sub['recID'] = np.repeat(site,len(telemDat_sub))
                     telemDat_sub.to_sql('tblRaw',con = conn,index = False, if_exists = 'append')
 
     else:
@@ -762,7 +773,7 @@ def telemDataImport(site,recType,file_directory,projectDB,switch = False, scanTi
         f_dir = os.path.join(file_directory,f)
         rxfile=f
         if recType == 'lotek':
-            lotek_import(f_dir,rxfile,projectDB,site)
+            lotek_import(f_dir,rxfile,projectDB,site,ant_to_rec_dict)
         elif recType == 'orion':
             orionImport(f_dir,rxfile,projectDB,site,switch, scanTime, channels, ant_to_rec_dict)
         else:
