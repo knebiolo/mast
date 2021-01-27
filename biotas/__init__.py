@@ -787,7 +787,7 @@ class training_data():
         sql = "SELECT FreqCode, Epoch, recID, timeStamp, Power, noiseRatio, ScanTime, Channels, RecType FROM tblRaw WHERE FreqCode == '%s' AND tblRaw.recID == '%s';"%(i,site)
         self.histDF = pd.read_sql(sql,con = conn, parse_dates  = 'timeStamp',coerce_float  = True)
         sql = 'SELECT PulseRate,MortRate FROM tblMasterTag WHERE FreqCode == "%s"'%(i)
-        rates = pd.read_sql(sql,con = conn)
+        rates = pd.read_sql(sql,con = conn, coerce_float = True)
         self.rates = rates
         sql = 'SELECT FreqCode FROM tblMasterTag'
         allTags = pd.read_sql(sql,con = conn)
@@ -918,7 +918,7 @@ class classify_data():
             self.histDF = pd.read_sql(sql,con = conn,coerce_float  = True)
 
         sql = 'SELECT PulseRate,MortRate FROM tblMasterTag WHERE FreqCode == "%s"'%(i)
-        rates = pd.read_sql(sql,con = conn)
+        rates = pd.read_sql(sql,con = conn, coerce_float = True)
         sql = 'SELECT FreqCode FROM tblMasterTag'
         allTags = pd.read_sql(sql,con = conn)
         sql = 'SELECT * FROM tblAlgParams'
