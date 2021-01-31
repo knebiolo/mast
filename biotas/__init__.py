@@ -539,7 +539,7 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict = None):
 
         #Master Firmware: Version 9.12.5
         telemDat = pd.read_fwf(fileName,colspecs = [(0,8),(8,23),(23,33),(33,41),(41,56),(56,64)],names = ['Date','Time','ChannelID','TagID','Antenna','Power'],skiprows = dataRow)
-        telemDat = telemDat.iloc[:-2]                                                   # remove last two
+        telemDat = telemDat.iloc[:-2]                                                   # remove last two 
 
         telemDat['Antenna'] = telemDat['Antenna'].astype(str)                   #TCS Added this to get dict to line up with data
 
@@ -798,7 +798,7 @@ class training_data():
         sql = "SELECT FreqCode, Epoch, recID, timeStamp, Power, noiseRatio, ScanTime, Channels, RecType FROM tblRaw WHERE FreqCode == '%s' AND tblRaw.recID == '%s';"%(i,site)
         self.histDF = pd.read_sql(sql,con = conn, parse_dates  = 'timeStamp',coerce_float  = True)
         sql = 'SELECT PulseRate,MortRate FROM tblMasterTag WHERE FreqCode == "%s"'%(i)
-        rates = pd.read_sql(sql,con = conn, coerce_float = True)
+        rates = pd.read_sql(sql,con = conn)
         self.rates = rates
         sql = 'SELECT FreqCode FROM tblMasterTag'
         allTags = pd.read_sql(sql,con = conn)
@@ -837,7 +837,7 @@ class training_data():
         if len(rates.PulseRate.values) > 0:
             self.PulseRate = rates.at[0,'PulseRate']
         else:
-            self.PulseRate = 3.0
+            self.PulseRate = 9.0
         if np.any(rates.MortRate.values == None) or len(rates.MortRate.values) == 0:
             self.MortRate = 9999.0
         else:
@@ -929,7 +929,7 @@ class classify_data():
             self.histDF = pd.read_sql(sql,con = conn,coerce_float  = True)
 
         sql = 'SELECT PulseRate,MortRate FROM tblMasterTag WHERE FreqCode == "%s"'%(i)
-        rates = pd.read_sql(sql,con = conn, coerce_float = True)
+        rates = pd.read_sql(sql,con = conn)
         sql = 'SELECT FreqCode FROM tblMasterTag'
         allTags = pd.read_sql(sql,con = conn)
         sql = 'SELECT * FROM tblAlgParams'
@@ -1126,7 +1126,7 @@ def calc_class_params_map(classify_object):
         classify_object.histDF = detHist(classify_object.histDF,classify_object.MortRate,classify_object.det,'M')             # calculate detection history
         classify_object.histDF['powerBin'] = (classify_object.histDF.Power//5)*5
         classify_object.histDF['noiseBin'] = (classify_object.histDF.noiseRatio//.1)*.1
-        classify_object.histDF['lagDiffBin'] = (classify_object.histDF.lagDiff//10)*.10
+        classify_object.histDF['lagDiffBin'] = (classify_object.histDF.lagDiff//10)*10
 
         # Update Data Types - they've got to match or the merge doesn't work!!!!
         trainDF.Detection = trainDF.Detection.astype(int)
@@ -1139,7 +1139,7 @@ def calc_class_params_map(classify_object):
         trainDF['hitRatio'] = trainDF.hitRatio.astype(float).round(4)
         trainDF['powerBin'] = (trainDF.Power//5)*5
         trainDF['noiseBin'] = (trainDF.noiseRatio//.1)*.1
-        trainDF['lagDiffBin'] = (trainDF.lagDiff//10)*.10
+        trainDF['lagDiffBin'] = (trainDF.lagDiff//10)*10
 
         # making sure our classify object data types match
         classify_object.histDF.seriesHit_A = classify_object.histDF.seriesHit_A.astype(np.int64)
@@ -1471,7 +1471,7 @@ class cross_validated():
         self.trainDF.hitRatio = self.trainDF.hitRatio.astype(float)
         self.trainDF['powerBin'] = (self.trainDF.Power//5)*5
         self.trainDF['noiseBin'] = (self.trainDF.noiseRatio//.1)*.1
-        self.trainDF['lagDiffBin'] = (self.trainDF.lagDiff//10)*.10
+        self.trainDF['lagDiffBin'] = (self.trainDF.lagDiff//10)*10
         cols = ['priorF','LDetHistF','LPowerF','LHitRatioF','LnoiseF','LconRecF','postFalse','priorT','LDetHistT','LPowerT','LHitRatioT','LnoiseT','LconRecT','postTrue','test']
         for i in self.trainDF.columns:
             cols.append(i)
@@ -3148,7 +3148,9 @@ def manage_node_overlap_data(inputWS, projectDB):
         os.remove(os.path.join(inputWS,f))
     c.close()
 
-def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filter = False, rec_list = None, con_rec_filter = None):
+
+
+def the_little_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filter = False, rec_list = None, con_rec_filter = None):
     '''function takes classified data, merges across sites and then joins presence
     and overlapping data into one big file for model building.'''
     conn = sqlite3.connect(projectDB)                                              # connect to the database
@@ -3160,7 +3162,7 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
         recSQL = "SELECT * FROM tblMasterReceiver"                                 # SQL code to import data from this node
     receivers = pd.read_sql(recSQL,con = conn)                                 # import data
     receivers = receivers.recID.unique()                                       # get the unique receivers associated with this node
-    recapdata = pd.DataFrame(columns = ['FreqCode','Epoch','recID','timeStamp'])                # set up an empty data frame
+    recapdata = pd.DataFrame(columns = ['FreqCode','Epoch','recID','timeStamp','fileName'])                # set up an empty data frame
     c = conn.cursor()
     c.close()
     for i in receivers:                                                            # for every receiver
@@ -3195,13 +3197,112 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
 
             try:
                 if 'hitRatio_A' in names:
-                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp,presence_number, overlapping, hitRatio_A, hitRatio_M, detHist_A, detHist_M, conRecLength_A, conRecLength_M, lag, lagDiff, test, RelDate
+                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp,presence_number, overlapping, hitRatio_A, hitRatio_M, detHist_A, detHist_M, conRecLength_A, conRecLength_M, lag, lagDiff, test, RelDate, fileName
+                    FROM %s
+                    LEFT JOIN tblMasterTag ON %s.FreqCode = tblMasterTag.FreqCode'''%(max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j])
+                else:
+                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp,presence_number, overlapping,test, RelDate, fileName
+                    FROM %s
+                    LEFT JOIN tblMasterTag ON %s.FreqCode = tblMasterTag.FreqCode'''%(max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j])
+                dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver
+                dat['overlapping'].fillna(0,inplace = True)
+                dat = dat[dat.overlapping == 0]
+
+
+            except:
+
+                if 'hitRatio_A' in names:
+                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp, hitRatio_A, hitRatio_M, detHist_A, detHist_M, conRecLength_A, conRecLength_M, lag, lagDiff, test, RelDate, fileName
+                    FROM %s
+                    LEFT JOIN tblMasterTag ON %s.FreqCode = tblMasterTag.FreqCode'''%(max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j])
+
+                else:
+                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp, test, RelDate, fileName
+                    FROM %s
+                    LEFT JOIN tblMasterTag ON %s.FreqCode = tblMasterTag.FreqCode'''%(max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j])
+                dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver
+
+
+            dat = dat[dat.test == 1]
+            dat['RelDate'] = pd.to_datetime(dat.RelDate)
+            dat['timeStamp'] = pd.to_datetime(dat.timeStamp)
+            if hitRatio_Filter == True:
+                dat = dat[(dat.hitRatio_A > 0.10)]# | (dat.hitRatio_M > 0.10)]
+            if con_rec_filter != None:
+                dat = dat[(dat.conRecLength_A >= con_rec_filter) | (dat.conRecLength_M >= con_rec_filter)]
+            if pre_release_Filter == True:
+                dat = dat[(dat.timeStamp >= dat.RelDate)]
+            recapdata = recapdata.append(dat)
+            del dat
+    c.close()
+
+    recapdata.drop_duplicates(keep = 'first', inplace = True)
+    return recapdata
+
+
+
+
+
+
+
+
+
+
+
+def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filter = False, rec_list = None, con_rec_filter = None):
+    '''function takes classified data, merges across sites and then joins presence
+    and overlapping data into one big file for model building.'''
+    conn = sqlite3.connect(projectDB)                                              # connect to the database
+    if rec_list != None:
+        recSQL = "SELECT * FROM tblMasterReceiver WHERE recID = '%s'"%(rec_list[0])
+        for i in rec_list[1:]:
+            recSQL = recSQL + " OR recID = '%s'"%(i)
+    else:
+        recSQL = "SELECT * FROM tblMasterReceiver"                                 # SQL code to import data from this node
+    receivers = pd.read_sql(recSQL,con = conn)                                 # import data
+    receivers = receivers.recID.unique()                                       # get the unique receivers associated with this node
+    recapdata = pd.DataFrame(columns = ['FreqCode','Epoch','recID','timeStamp','fileName'])                # set up an empty data frame
+    c = conn.cursor()
+    c.close()
+    for i in receivers:                                                            # for every receiver
+        conn = sqlite3.connect(projectDB)                                              # connect to the database
+        c = conn.cursor()
+        print ("Start selecting and merging data for receiver %s"%(i))
+        c.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
+        tbls = c.fetchall()
+        tblList = []
+        for j in tbls:
+            if i in j[0]:
+                tblList.append(j[0])
+        del j
+        # iterate over the receivers to find the final classification (aka the largest _n)
+        max_iter_dict = {} # receiver:max iter
+        curr_idx = 0
+        max_iter = 1
+        while curr_idx <= len(tblList) - 1:
+            for j in tblList:
+                if int(j[-1]) >= max_iter:
+                    max_iter = int(j[-1])
+                    max_iter_dict[i] = j
+                curr_idx = curr_idx + 1
+        curr_idx = 0
+
+        # once we have a hash table of receiver to max classification, extract the classification dataset
+        for j in max_iter_dict:
+
+            cursor = conn.execute('select * from %s'%(max_iter_dict[j]))
+            names = [description[0] for description in cursor.description]
+
+
+            try:
+                if 'hitRatio_A' in names:
+                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp,presence_number, overlapping, hitRatio_A, hitRatio_M, detHist_A, detHist_M, conRecLength_A, conRecLength_M, lag, lagDiff, test, RelDate, fileName
                     FROM %s
                     LEFT JOIN tblMasterTag ON %s.FreqCode = tblMasterTag.FreqCode
                     LEFT JOIN tblOverlap ON %s.FreqCode = tblOverlap.FreqCode AND %s.Epoch = tblOverlap.Epoch AND %s.recID = tblOverlap.recID
                     LEFT JOIN tblPresence ON %s.FreqCode = tblPresence.FreqCode AND %s.Epoch = tblPresence.Epoch AND %s.recID = tblPresence.recID'''%(max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j])
                 else:
-                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp,presence_number, overlapping,test, RelDate
+                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp,presence_number, overlapping,test, RelDate, fileName
                     FROM %s
                     LEFT JOIN tblMasterTag ON %s.FreqCode = tblMasterTag.FreqCode
                     LEFT JOIN tblOverlap ON %s.FreqCode = tblOverlap.FreqCode AND %s.Epoch = tblOverlap.Epoch AND %s.recID = tblOverlap.recID
@@ -3214,12 +3315,12 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
             except:
 
                 if 'hitRatio_A' in names:
-                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp, hitRatio_A, hitRatio_M, detHist_A, detHist_M, conRecLength_A, conRecLength_M, lag, lagDiff, test, RelDate
+                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp, hitRatio_A, hitRatio_M, detHist_A, detHist_M, conRecLength_A, conRecLength_M, lag, lagDiff, test, RelDate, fileName
                     FROM %s
                     LEFT JOIN tblMasterTag ON %s.FreqCode = tblMasterTag.FreqCode'''%(max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j])
 
                 else:
-                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp, test, RelDate
+                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp, test, RelDate, fileName
                     FROM %s
                     LEFT JOIN tblMasterTag ON %s.FreqCode = tblMasterTag.FreqCode'''%(max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j])
                 dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver
