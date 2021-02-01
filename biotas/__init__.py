@@ -3162,10 +3162,10 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
     receivers = receivers.recID.unique()                                       # get the unique receivers associated with this node
     recapdata = pd.DataFrame(columns = ['FreqCode','Epoch','recID','timeStamp'])                # set up an empty data frame
     c = conn.cursor()
-    c.close()
+
+    bouts = False
     for i in receivers:                                                            # for every receiver
-        conn = sqlite3.connect(projectDB)                                              # connect to the database
-        c = conn.cursor()
+
         print ("Start selecting and merging data for receiver %s"%(i))
         c.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
         tbls = c.fetchall()
@@ -3173,6 +3173,8 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
         for j in tbls:
             if i in j[0]:
                 tblList.append(j[0])
+            if j[0] == 'tblPresence' or j[0]== 'tblOverlap':
+                bouts = True
         del j
         # iterate over the receivers to find the final classification (aka the largest _n)
         max_iter_dict = {} # receiver:max iter
@@ -3193,7 +3195,7 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
             names = [description[0] for description in cursor.description]
 
 
-            try:
+            if bouts == True:
                 if 'hitRatio_A' in names:
                     sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp,presence_number, overlapping, hitRatio_A, hitRatio_M, detHist_A, detHist_M, conRecLength_A, conRecLength_M, lag, lagDiff, test, RelDate
                     FROM %s
@@ -3211,7 +3213,7 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
                 dat = dat[dat.overlapping == 0]
 
 
-            except:
+            else:
 
                 if 'hitRatio_A' in names:
                     sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp, hitRatio_A, hitRatio_M, detHist_A, detHist_M, conRecLength_A, conRecLength_M, lag, lagDiff, test, RelDate
