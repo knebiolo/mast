@@ -3261,7 +3261,7 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
         recSQL = "SELECT * FROM tblMasterReceiver"                                 # SQL code to import data from this node
     receivers = pd.read_sql(recSQL,con = conn)                                 # import data
     receivers = receivers.recID.unique()                                       # get the unique receivers associated with this node
-    recapdata = pd.DataFrame(columns = ['FreqCode','Epoch','recID','timeStamp','fileName'])                # set up an empty data frame
+    recapdata = pd.DataFrame(columns = ['FreqCode','Epoch','recID','timeStamp','Power','fileName'])                # set up an empty data frame
     c = conn.cursor()
 
     bouts = False
@@ -3298,13 +3298,13 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
 
             if bouts == True:
                 if 'hitRatio_A' in names:
-                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp,presence_number, overlapping, hitRatio_A, hitRatio_M, detHist_A, detHist_M, conRecLength_A, conRecLength_M, lag, lagDiff, test, RelDate, fileName
+                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp,Power,presence_number, overlapping, hitRatio_A, hitRatio_M, detHist_A, detHist_M, conRecLength_A, conRecLength_M, lag, lagDiff, test, RelDate, fileName
                     FROM %s
                     LEFT JOIN tblMasterTag ON %s.FreqCode = tblMasterTag.FreqCode
                     LEFT JOIN tblOverlap ON %s.FreqCode = tblOverlap.FreqCode AND %s.Epoch = tblOverlap.Epoch AND %s.recID = tblOverlap.recID
                     LEFT JOIN tblPresence ON %s.FreqCode = tblPresence.FreqCode AND %s.Epoch = tblPresence.Epoch AND %s.recID = tblPresence.recID'''%(max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j])
                 else:
-                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp,presence_number, overlapping,test, RelDate, fileName
+                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp,Power,presence_number, overlapping,test, RelDate, fileName
                     FROM %s
                     LEFT JOIN tblMasterTag ON %s.FreqCode = tblMasterTag.FreqCode
                     LEFT JOIN tblOverlap ON %s.FreqCode = tblOverlap.FreqCode AND %s.Epoch = tblOverlap.Epoch AND %s.recID = tblOverlap.recID
@@ -3317,12 +3317,12 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
             else:
 
                 if 'hitRatio_A' in names:
-                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp, hitRatio_A, hitRatio_M, detHist_A, detHist_M, conRecLength_A, conRecLength_M, lag, lagDiff, test, RelDate, fileName
+                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp,Power, hitRatio_A, hitRatio_M, detHist_A, detHist_M, conRecLength_A, conRecLength_M, lag, lagDiff, test, RelDate, fileName
                     FROM %s
                     LEFT JOIN tblMasterTag ON %s.FreqCode = tblMasterTag.FreqCode'''%(max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j])
 
                 else:
-                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp, test, RelDate, fileName
+                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp,Power, test, RelDate, fileName
                     FROM %s
                     LEFT JOIN tblMasterTag ON %s.FreqCode = tblMasterTag.FreqCode'''%(max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j])
                 dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver
