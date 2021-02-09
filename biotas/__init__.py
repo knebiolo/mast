@@ -322,8 +322,8 @@ def createTrainDB(project_dir, dbName):
     c.execute('''DROP TABLE IF EXISTS tblRaw''')
     c.execute('''DROP TABLE IF EXISTS tblTrain''')
 
-    c.execute('''CREATE TABLE tblTrain(Channels INTEGER, Detection INTEGER, FreqCode TEXT, Power REAL, lag INTEGER, lagDiff REAL, FishCount INTEGER, conRecLength INTEGER, miss_to_hit REAL, consDet INTEGER, detHist TEXT, hitRatio REAL, noiseRatio REAL, seriesHit INTEGER, timeStamp TIMESTAMP, Epoch INTEGER, Seconds INTEGER, fileName TEXT, recID TEXT, recType TEXT, ScanTime REAL)''') # create full radio table - table includes all records, final version will be designed for specific receiver types
-    c.execute('''CREATE TABLE tblRaw(timeStamp TIMESTAMP, Epoch INTEGER, FreqCode TEXT, Power REAL,noiseRatio, fileName TEXT, recID TEXT, ScanTime REAL, Channels REAL, RecType TEXT)''')
+    c.execute('''CREATE TABLE tblTrain(Channels INTEGER, Detection INTEGER, FreqCode TEXT, Power REAL, Antenna TEXT, lag INTEGER, lagDiff REAL, FishCount INTEGER, conRecLength INTEGER, miss_to_hit REAL, consDet INTEGER, detHist TEXT, hitRatio REAL, noiseRatio REAL, seriesHit INTEGER, timeStamp TIMESTAMP, Epoch INTEGER, Seconds INTEGER, fileName TEXT, recID TEXT, recType TEXT, ScanTime REAL)''') # create full radio table - table includes all records, final version will be designed for specific receiver types
+    c.execute('''CREATE TABLE tblRaw(timeStamp TIMESTAMP, Epoch INTEGER, FreqCode TEXT, Power REAL,Antenna TEXT, noiseRatio, fileName TEXT, recID TEXT, ScanTime REAL, Channels REAL, RecType TEXT)''')
     #c.execute('''CREATE INDEX idx_fileNameRaw ON tblRaw (fileName)''')
     c.execute('''CREATE INDEX idx_RecID_Raw ON tblRaw (recID)''')
     c.execute('''CREATE INDEX idx_FreqCode On tblRaw (FreqCode)''')
@@ -420,7 +420,7 @@ def orionImport(fileName,rxfile,dbName,recName,switch = False, scanTime = None, 
             telemDat.drop (['Date','Time','Freq','Code','Site'],axis = 1, inplace = True)
             telemDat = noiseRatio(5.0,telemDat,study_tags)
             if ant_to_rec_dict == None:
-                telemDat.drop(['Ant'], axis = 1, inplace = True)
+#               telemDat.drop(['Ant'], axis = 1, inplace = True)
                 telemDat['recID'] = np.repeat(recName,len(telemDat))
                 tuples = zip(telemDat.FreqCode.values,telemDat.recID.values,telemDat.Epoch.values)
                 index = pd.MultiIndex.from_tuples(tuples, names=['FreqCode', 'recID','Epoch'])
@@ -438,7 +438,7 @@ def orionImport(fileName,rxfile,dbName,recName,switch = False, scanTime = None, 
                     tuples = zip(telemDat_sub.FreqCode.values,telemDat_sub.recID.values,telemDat_sub.Epoch.values)
                     index = pd.MultiIndex.from_tuples(tuples, names=['FreqCode', 'recID','Epoch'])
                     telemDat_sub.set_index(index,inplace = True,drop = False)
-                    telemDat_sub.drop(['Ant'], axis = 1, inplace = True)
+#                   telemDat_sub.drop(['Ant'], axis = 1, inplace = True)
                     telemDat_sub.to_sql('tblRaw',con = conn,index = False, if_exists = 'append')
 #                    recParamLine = [(site,recType,scanTime,channels,fileName)]
 #                    conn.executemany('INSERT INTO tblReceiverParameters VALUES (?,?,?,?,?)',recParamLine)
@@ -558,7 +558,7 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict = None):
                 telemDat['timeStamp'] = pd.to_datetime(telemDat['Date'] + ' ' + telemDat['Time'])# create timestamp field from date and time and apply to index
                 telemDat['Epoch'] = (telemDat['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()
                 telemDat = noiseRatio(5.0,telemDat,study_tags)
-                telemDat.drop (['Date','Time','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
+                telemDat.drop (['Date','Time','Frequency','TagID','ChannelID'],axis = 1, inplace = True)
                 telemDat['ScanTime'] = np.repeat(scanTime,len(telemDat))
                 telemDat['Channels'] = np.repeat(channels,len(telemDat))
                 telemDat['RecType'] = np.repeat(recType,len(telemDat))
@@ -575,7 +575,7 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict = None):
                     telemDat_sub['timeStamp'] = pd.to_datetime(telemDat_sub['Date'] + ' ' + telemDat_sub['Time'])# create timestamp field from date and time and apply to index
                     telemDat_sub['Epoch'] = (telemDat_sub['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()
                     telemDat_sub = noiseRatio(5.0,telemDat_sub,study_tags)
-                    telemDat_sub.drop (['Date','Time','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
+                    telemDat_sub.drop (['Date','Time','Frequency','TagID','ChannelID'],axis = 1, inplace = True)
                     telemDat_sub['ScanTime'] = np.repeat(scanTime,len(telemDat_sub))
                     telemDat_sub['Channels'] = np.repeat(channels,len(telemDat_sub))
                     telemDat_sub['RecType'] = np.repeat(recType,len(telemDat_sub))
@@ -668,7 +668,7 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict = None):
                     telemDat['timeStamp'] = pd.to_datetime(telemDat['Date'] + ' ' + telemDat['Time'])# create timestamp field from date and time and apply to index
                     telemDat.drop(['day0','DayNumber'],axis = 1, inplace = True)
                     telemDat['Epoch'] = (telemDat['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()
-                    telemDat.drop (['Date','Time','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
+                    telemDat.drop (['Date','Time','Frequency','TagID','ChannelID'],axis = 1, inplace = True)
                     telemDat['fileName'] = np.repeat(rxfile,len(telemDat))            #Made change here as above--taking jsut the file name and writing it to the dataset.  Note naming issue.
                     telemDat['recID'] = np.repeat(recName,len(telemDat))
                     telemDat['noiseRatio'] = noiseRatio(5.0,telemDat,study_tags)
@@ -692,7 +692,7 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict = None):
                     telemDat_sub['timeStamp'] = pd.to_datetime(telemDat_sub['Date'] + ' ' + telemDat_sub['Time'])# create timestamp field from date and time and apply to index
                     telemDat.drop(['day0','DayNumber'],axis = 1, inplace = True)
                     telemDat_sub['Epoch'] = (telemDat_sub['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()
-                    telemDat_sub.drop (['Date','Time','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
+                    telemDat_sub.drop (['Date','Time','Frequency','TagID','ChannelID'],axis = 1, inplace = True)
                     telemDat_sub['fileName'] = np.repeat(rxfile,len(telemDat_sub))            #Made change here as above--taking jsut the file name and writing it to the dataset.  Note naming issue.
                     telemDat_sub['recID'] = np.repeat(recName,len(telemDat_sub))
                     telemDat_sub['noiseRatio'] = noiseRatio(5.0,telemDat_sub,study_tags)
@@ -748,7 +748,7 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict = None):
                 telemDat['duration'] = (telemDat.time_end - telemDat.timeStamp).astype('timedelta64[s]')
                 telemDat['events_per_duration'] = telemDat.Events / telemDat.duration
                 telemDat['Epoch'] = (telemDat['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()
-                telemDat.drop (['Date_Start','Date_End','time_end','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
+                telemDat.drop (['Date_Start','Date_End','time_end','Frequency','TagID','ChannelID'],axis = 1, inplace = True)
                 telemDat['fileName'] = np.repeat(rxfile,len(telemDat))            #This is the 4th time I'm assigning file to fileName in the saved data table.
                 telemDat['recID'] = np.repeat(recName,len(telemDat))
                 telemDat['ScanTime'] = np.repeat(scanTime,len(telemDat))
@@ -795,7 +795,7 @@ class training_data():
         '''
         conn = sqlite3.connect(projectDB, timeout=30.0)
         c = conn.cursor()
-        sql = "SELECT FreqCode, Epoch, recID, timeStamp, Power, noiseRatio, ScanTime, Channels, RecType FROM tblRaw WHERE FreqCode == '%s' AND tblRaw.recID == '%s';"%(i,site)
+        sql = "SELECT FreqCode, Epoch, recID, timeStamp, Antenna, Power, noiseRatio, ScanTime, Channels, RecType FROM tblRaw WHERE FreqCode == '%s' AND tblRaw.recID == '%s';"%(i,site)
         self.histDF = pd.read_sql(sql,con = conn, parse_dates  = 'timeStamp',coerce_float  = True)
         sql = 'SELECT PulseRate,MortRate FROM tblMasterTag WHERE FreqCode == "%s"'%(i)
         rates = pd.read_sql(sql,con = conn)
@@ -920,12 +920,12 @@ class classify_data():
         conn = sqlite3.connect(projectDB, timeout=30.0)
         c = conn.cursor()
         if reclass_iter == None:
-            sql = "SELECT FreqCode, Epoch, recID, timeStamp, Power, noiseRatio, ScanTime, Channels, RecType, fileName FROM tblRaw WHERE FreqCode == '%s' AND recID == '%s';"%(i,site)
+            sql = "SELECT FreqCode, Epoch, recID, timeStamp, Antenna, Power, noiseRatio, ScanTime, Channels, RecType, fileName FROM tblRaw WHERE FreqCode == '%s' AND recID == '%s';"%(i,site)
             self.histDF = pd.read_sql(sql,con = conn,coerce_float  = True)
 
 
         else:
-            sql = "SELECT FreqCode, Epoch, recID, timeStamp, Power, noiseRatio, ScanTime, Channels, RecType, fileName FROM tblClassify_%s_%s WHERE FreqCode == '%s' AND test == '1';"%(site,reclass_iter-1,i)
+            sql = "SELECT FreqCode, Epoch, recID, timeStamp,Antenna, Power, noiseRatio, ScanTime, Channels, RecType, fileName FROM tblClassify_%s_%s WHERE FreqCode == '%s' AND test == '1';"%(site,reclass_iter-1,i)
             self.histDF = pd.read_sql(sql,con = conn,coerce_float  = True)
 
         sql = 'SELECT PulseRate,MortRate FROM tblMasterTag WHERE FreqCode == "%s"'%(i)
@@ -1368,7 +1368,7 @@ def classDatAppend(site,inputWS,projectDB,reclass_iter = 1):
         out_name = 'tblClassify_%s_%s'%(site,reclass_iter)
         dat = pd.read_csv(os.path.join(inputWS,f),dtype = {"detHist_A":str,"detHist_M":str})
         #dat.drop(['recID1'],axis = 1,inplace = True)
-        dtype = {'FreqCode':'TEXT', 'Epoch': 'INTEGER', 'recID':'TEXT','timeStamp':'TIMESTAMP', 'Power':'REAL', 'ScanTime':'REAL',
+        dtype = {'FreqCode':'TEXT', 'Epoch': 'INTEGER', 'recID':'TEXT','timeStamp':'TIMESTAMP', 'Antenna':'TEXT', 'Power':'REAL', 'ScanTime':'REAL',
                  'Channels':'REAL', 'RecType':'TEXT', 'recID1':'TEXT', 'RowSeconds':'REAL', 'lag':'REAL', 'lagDiff':'REAL','noiseRatio':'REAL',
                  'seriesHit_A':'INTEGER', 'seriesHit_M':'INTEGER', 'consDet_A':'INTEGER', 'hitRatio_A':'REAL', 'detHist_A':'TEXT',
                  'conRecLength_A':'INTEGER', 'consDet_M':'INTEGER', 'hitRatio_M':'REAL', 'detHist_M':'TEXT','conRecLength_M':'INTEGER',
