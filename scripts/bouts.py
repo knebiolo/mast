@@ -7,23 +7,23 @@ our brute force method in current use'''
 # import modules
 import os
 import warnings
-import abtas
+import biotas
 warnings.filterwarnings('ignore')
 # set up script parameters
-proj_dir = r'C:\Users\Kevin Nebiolo\Desktop\Articles for Submission\Ted'             # what is the project directory?
-dbName = 'manuscript.db'                                                       # whad did you call the database?
+proj_dir = r'C:\a\Projects\BCHydro\Data'             # what is the project directory?
+dbName = 'SiteC_2020.db'                                                       # whad did you call the database?
 
 inputWS = os.path.join(proj_dir,'Data')                             
 scratchWS = os.path.join(proj_dir,'Output','Scratch')
 figureWS = os.path.join(proj_dir,'Output','Figures')
 projectDB = os.path.join(inputWS,dbName)
 # which node do you care about?
-nodes = ['S02','S04','S06','S07','S08','S05']
+nodes = ['1']#,'F34','F35','F36','F37','F38','F39','F40']
 #nodes = ['S13']
 bout_len_dict = dict()
 for i in nodes:   
     # Step 1, initialize the bout class object
-    bout = abtas.bout(i,projectDB,lag_window = 15, time_limit = 3600)
+    bout = biotas.bout(i,projectDB,lag_window = 50, time_limit = 10000)
     # Step 2: get fishes - we only care about test = 1 and hitRatio > 0.3
     fishes = bout.fishes    
     print ("Got a list of tags at this node")
@@ -45,4 +45,4 @@ for i in nodes:
     # clean up your mess
     del bout
 # manage all of that data, there's a lot of it!
-abtas.manage_node_presence_data(scratchWS,projectDB)
+biotas.manage_node_presence_data(scratchWS,projectDB)
