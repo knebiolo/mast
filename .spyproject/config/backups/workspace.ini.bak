@@ -1,0 +1,10 @@
+[workspace]
+restore_data_on_startup = True
+save_data_on_exit = True
+save_history = True
+save_non_project_files = False
+
+[main]
+version = 0.2.0
+recent_files = ['biotas\\__init__.py', '..\\stryke\\Stryke\\stryke_v2.py', '..\\stryke\\Stryke\\upper_barker2.py', 'D:\\Harris\\Project\\PhaseIIStructureAnalysis\\Python\\Structure_Analysis\\inundation.py', 'D:\\Newbury\\Bathymetry_Burn\\Python\\Program\\generate_cross_section.py', '..\\flow_stats\\flow_stats.py', 'J:\\1508\\027\\GIS\\ADCP\\ADCP_for_CFD\\Python\\Program\\the_validator.py']
+
