@@ -6,5 +6,5 @@ save_non_project_files = False
 
 [main]
 version = 0.2.0
-recent_files = ['biotas\\__init__.py', '..\\stryke\\Stryke\\stryke_v2.py', '..\\stryke\\Stryke\\upper_barker2.py', 'D:\\Harris\\Project\\PhaseIIStructureAnalysis\\Python\\Structure_Analysis\\inundation.py', 'D:\\Newbury\\Bathymetry_Burn\\Python\\Program\\generate_cross_section.py', '..\\flow_stats\\flow_stats.py', 'J:\\1508\\027\\GIS\\ADCP\\ADCP_for_CFD\\Python\\Program\\the_validator.py']
+recent_files = ['biotas\\__init__.py', 'requirements.txt', 'setup.py', 'biotas\\radio_project.py', 'biotas\\false_positive.py', 'biotas\\table_merge.py', 'biotas\\overlap_removal.py', 'biotas\\fish_history.py', 'biotas\\formatter.py', 'biotas\\biotas.py', 'scripts\\project_setup.py']
 
