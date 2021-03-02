@@ -23,6 +23,43 @@ font = {'family': 'serif','size': 6}
 rcParams['font.size'] = 6
 rcParams['font.family'] = 'serif'
 
+def noiseRatio (duration,data,study_tags):
+
+    ''' function calculates the ratio of miscoded, pure noise detections, to matching frequency/code
+    detections within the duration specified.
+
+    In other words, what is the ratio of miscoded to correctly coded detections within the duration specified
+
+    duration = moving window length in minutes
+    data = current data file
+    study_tags = list or list like object of study tags
+    '''
+    # identify miscodes
+    data['miscode'] = np.isin(data.FreqCode.values, study_tags, invert = True)
+
+    # bin everything into nearest 5 min time bin and count miscodes and total number of detections
+    duration_s = str(int(duration * 60)) + 's'
+    miscode = data.groupby(pd.Grouper(key = 'timeStamp', freq = duration_s)).miscode.sum().to_frame()
+    total = data.groupby(pd.Grouper(key = 'timeStamp', freq = duration_s)).FreqCode.count().to_frame()
+
+    # rename
+    total.rename(columns = {'FreqCode':'total'}, inplace = True)
+
+    # merge dataframes, calculate noise ratio
+    noise = total.merge(miscode, left_on = 'timeStamp', right_on ='timeStamp')
+    noise.reset_index(inplace = True)
+    noise.fillna(value = 0, inplace = True)
+    noise['noiseRatio'] = noise.miscode / noise.total
+    noise.dropna(inplace = True)
+    noise['Epoch'] = (noise['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()
+    # create function for noise ratio at time
+    if len(noise) >= 2:
+        noise_ratio_fun = interpolate.interp1d(noise.Epoch.values,noise.noiseRatio.values,kind = 'linear',bounds_error = False, fill_value ='extrapolate')
+        # interpolate noise ratio as a function of time for every row in data
+        data['noiseRatio'] = noise_ratio_fun(data.Epoch.values)
+    data.drop(columns = ['miscode'], inplace = True)
+    return data
+
 def createTrainDB(project_dir, dbName):
     ''' function creates empty project database, user can edit project parameters using
     DB Broswer for sqlite found at: http://sqlitebrowser.org/'''
@@ -105,11 +142,8 @@ def setAlgorithmParameters(det,duration,dbName):
     c.close()
 
 def studyDataImport(dataFrame,dbName,tblName):
-    '''function imports formatted data into project database. The code in its current
-    function does not check for inconsistencies with data structures.  If you're
-    shit isn't right, this isn't going to work for you.  Make sure your table data
-    structures match exactly, that column names and datatypes match.  I'm not your
-    mother, clean up your shit.
+    '''function imports formatted data into project database. The code in its 
+    current form does not check for inconsistencies with data structures. 
 
     dataFrame = pandas dataframe imported from your structured file.
     dbName = full directory path to project database

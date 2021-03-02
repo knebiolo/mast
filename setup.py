@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(name = 'biotas',
-      version = '0.0.2',
+      version = '0.0.3',
       description = '''BIO-Telemetry Analysis Software (BIOTAS) for use in
       removing false positive and overlap detections from radio telemetry projects.''',
       url = 'https://github.com/knebiolo/biotas',

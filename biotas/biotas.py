@@ -354,10 +354,7 @@ def setAlgorithmParameters(det,duration,dbName):
 
 def studyDataImport(dataFrame,dbName,tblName):
     '''function imports formatted data into project database. The code in its current
-    function does not check for inconsistencies with data structures.  If you're
-    shit isn't right, this isn't going to work for you.  Make sure your table data
-    structures match exactly, that column names and datatypes match.  I'm not your
-    mother, clean up your shit.
+    function does not check for inconsistencies with data structures.  
 
     dataFrame = pandas dataframe imported from your structured file.
     dbName = full directory path to project database
