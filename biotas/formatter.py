@@ -318,10 +318,14 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
         self.dbDir = dbDir
         conn = sqlite3.connect(dbDir)
         c = conn.cursor()
-        sql = 'SELECT tblRecaptures.FreqCode, Epoch, timeStamp, Node, TagType, presence_number, overlapping, CapLoc, RelLoc, test FROM tblRecaptures LEFT JOIN tblMasterReceiver ON tblRecaptures.recID = tblMasterReceiver.recID LEFT JOIN tblMasterTag ON tblRecaptures.FreqCode = tblMasterTag.FreqCode WHERE tblRecaptures.recID = "%s"'%(receiver_list[0])
+        sql = 'SELECT * FROM tblRecaptures WHERE tblRecaptures.recID = "%s"'%(receiver_list[0])
         for i in receiver_list[1:]:
             sql = sql + ' OR tblRecaptures.recID = "%s"'%(i)
         self.data = pd.read_sql_query(sql,con = conn)
+        rec_dat = pd.read_sql_query('SELECT recID, Node FROM tblMasterReceiver', con = conn)
+        tag_dat = pd.read_sql_query('SELECT FreqCode, TagType, CapLoc, RelLoc FROM tblMasterTag', con = conn)
+        self.data = self.data.merge(rec_dat,how = 'left', on = 'recID')
+        self.data = self.data.merge(tag_dat,how = 'left', on = 'FreqCode')
         self.data['timeStamp'] = pd.to_datetime(self.data.timeStamp)
         self.data = self.data[self.data.TagType == 'Study']
         self.data = self.data[self.data.test == 1]
