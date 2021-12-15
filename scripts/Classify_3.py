@@ -3,16 +3,16 @@ import time
 import os
 import sqlite3
 import pandas as pd
-import biotas
+import biotas.biotas as biotas
 import warnings
 warnings.filterwarnings('ignore')
 tS = time.time()
 #set script parameters
-class_iter= 5 #Enter the iteration number here--start at 2
-site = '14'                                                                   # what is the site/receiver ID?
-recType = 'orion'                                                              # what is the receiver type?
-proj_dir = r'C:\a\Projects\Boquet\Data\BIOTAS'                                      # what is the project directory?
-dbName = 'Boquet2020.db'                                                         # whad did you call the database?
+class_iter= 4 #Enter the iteration number here--start at 2
+site = 'T14'                                                                   # what is the site/receiver ID?
+recType = 'lotek'                                                              # what is the receiver type?
+proj_dir = r'D:\Manuscript\CT_River_2015'                                      # what is the project directory?
+dbName = 'ctr_2015_v2.db'                                                           # whad did you call the database?
 
 # directory creations
 outputWS = os.path.join(proj_dir,'Output')                                 # we are getting time out error and database locks - so let's write to disk for now 
@@ -25,7 +25,7 @@ figure_ws = os.path.join(proj_dir,'Output','Figures')
 # ['conRecLength','consDet','hitRatio','noiseRatio','seriesHit','power','lagDiff']
 fields = ['conRecLength','hitRatio','lagDiff','power','noiseRatio']
 # Do we want to use an informed prior?
-prior = True
+prior = False
 print ("Set Up Complete, Creating Histories")
 # get the fish to iterate through using SQL 
 conn = sqlite3.connect(projectDB)
@@ -42,7 +42,7 @@ print ("There are %s fish to iterate through at site %s" %(len(histories),site))
 # create list of training data objects to iterate over with a Pool multiprocess
 
 # create training data for this round of classification
-train = biotas.create_training_data(site,projectDB)
+train = biotas.create_training_data(site,projectDB, rec_list = [site])
 
 counter = 0
 for i in histories:

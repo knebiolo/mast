@@ -3,8 +3,10 @@ restore_data_on_startup = True
 save_data_on_exit = True
 save_history = True
 save_non_project_files = False
+project_type = empty-project-type
+recent_files = ['biotas\\biotas.py']
 
 [main]
 version = 0.2.0
-recent_files = ['biotas\\__init__.py', 'requirements.txt', 'setup.py', 'biotas\\radio_project.py', 'biotas\\false_positive.py', 'biotas\\table_merge.py', 'biotas\\overlap_removal.py', 'biotas\\fish_history.py', 'biotas\\formatter.py', 'biotas\\biotas.py', 'scripts\\project_setup.py', '..\\stryke\\Stryke\\francis_v2.py', '..\\stryke\\Stryke\\kaplan_v2.py', '..\\stryke\\Stryke\\stryke_v2.py']
+recent_files = []
 

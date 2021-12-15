@@ -1,41 +1,41 @@
 '''Script Intent: The Intent of this script is to identify overlapping records 
 to remove redundant detections and to positively place a fish.'''
 # import modules
-import abtas
+import biotas.biotas as biotas
 import os
 import warnings
 warnings.filterwarnings('ignore')
 import time
-if __name__ == "__main__":
-    tS = time.time()
-    # set up script parameters
-    proj_dir = r'C:\Users\Kevin Nebiolo\Desktop\Articles for Submission\Ted'             # what is the project directory?
-    dbName = 'manuscript.db'                                                       # whad did you call the database?
-       
-    outputWS = os.path.join(proj_dir,'Output','Scratch')
-    figureWS = os.path.join(proj_dir,'Output','Figures')
-    projectDB = os.path.join(proj_dir,'Data',dbName)
-    # which node do you care about?
-    nodes = ['S02','S03','S04','S05','S06','S07','S08']
-    edges = [('S02','S03'),('S02','S04'),('S02','S05'),('S02','S06'),('S02','S07'),
-             ('S06','S07'),
-             ('S07','S05'),('S07','S06'),('S07','S04'),('S07','S02'),
-             ('S08','S07'),('S08','S06'),('S08','S05'),('S08','S04'),
-             ('S05','S07'),]
-    # Step 1, create an overlap object
-    print ("Start creating overlap data objects - 1 per node")
-    iters = []
-    for i in nodes:
-        iters.append(abtas.overlap_reduction(i,nodes,edges,projectDB,outputWS,figureWS))
-        print ("Completed overlap data object for node %s"%(i))
-    print ("Start Multiprocessing")
-    print ("This will take a while")
-    print ("Grab a coffee, call your mother.")    
-    for i in iters:
-        abtas.russian_doll(i)
 
-    print ("Overlap analysis complete proceed to data management")
-    # Step 3, Manage Data   
-    abtas.manage_node_overlap_data(outputWS,projectDB)
-    print ("Overlap Removal Process complete, took %s seconds to compile"%(round(time.time() - tS,4)))
-    del iters
+tS = time.time()
+# set up script parameters
+proj_dir = r'D:\Manuscript\CT_River_2015'                                      # what is the project directory?
+dbName = 'ctr_2015_v2.db'                                                         # whad did you call the database?
+  
+outputWS = os.path.join(proj_dir,'Output','Scratch')
+figureWS = os.path.join(proj_dir,'Output','Figures')
+projectDB = os.path.join(proj_dir,'Data',dbName)
+# which node do you care about?
+nodes = ['T08','T09','T05','T06','S2','T19','T24','T23','T25','T20','S3','T17','T15','T16']
+edges = [('T08','T09'),('T08','T05'),('T08','T06'),('T08','S2'),
+         ('T05','S2'),
+         ('T06','T05'),('T06','S2'),
+         ('T17','T15'),('T17','T16'),
+         ('T19','T23'),('T19','S3'),
+         ('T20','T23'),('T20','S3'),
+         ('T23','T25'),('T23','S3'),
+         ('T24','T25')]
+# Step 1, create an overlap object
+print ("Start creating overlap data objects - 1 per node")
+
+for i in nodes:
+    dat = biotas.overlap_reduction(i,nodes,edges,projectDB,outputWS,figureWS)
+    print ("Completed overlap data object for node %s"%(i))
+    biotas.russian_doll(dat)
+    print ("Completed russian doll for node %s"%(i))
+    del dat
+
+print ("Overlap analysis complete proceed to data management")
+# Step 3, Manage Data   
+biotas.manage_node_overlap_data(outputWS,projectDB)
+print ("Overlap Removal Process complete, took %s seconds to compile"%(round(time.time() - tS,4)))

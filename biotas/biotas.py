@@ -16,6 +16,7 @@ import statsmodels.formula.api as smf
 import networkx as nx
 from matplotlib import rcParams
 from scipy import interpolate
+from sklearn import metrics
 
 font = {'family': 'serif','size': 6}
 rcParams['font.size'] = 6
@@ -366,7 +367,7 @@ def studyDataImport(dataFrame,dbName,tblName):
     conn.commit()
     c.close()
 
-def orionImport(fileName,rxfile,dbName,recName,switch = False, scanTime = None, channels = None, ant_to_rec_dict = None):
+def orionImport(fileName,rxfile,dbName,recName, scanTime = 1, channels = 1, ant_to_rec_dict = None):
     '''Function imports raw Sigma Eight orion data.
 
     Text parser uses simple column fixed column widths.
@@ -378,9 +379,7 @@ def orionImport(fileName,rxfile,dbName,recName,switch = False, scanTime = None, 
     study_tags = study_tags[study_tags.TagType == 'Study'].FreqCode.values
 
     recType = 'orion'
-    if switch == False:
-        scanTime = 1
-        channels = 1
+
     # what orion firmware is it?  the header row is the key
     o_file =open(fileName, encoding='utf-8')
     header = o_file.readline()[:-1]                                            # read first line in file
@@ -416,7 +415,7 @@ def orionImport(fileName,rxfile,dbName,recName,switch = False, scanTime = None, 
             telemDat['Epoch'] = (telemDat['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()
             telemDat.drop (['Date','Time','Freq','Code','Site'],axis = 1, inplace = True)
             telemDat = noiseRatio(5.0,telemDat,study_tags)
-            if switch == False:
+            if ant_to_rec_dict == None:
                 telemDat.drop(['Ant'], axis = 1, inplace = True)
                 telemDat['recID'] = np.repeat(recName,len(telemDat))
                 tuples = zip(telemDat.FreqCode.values,telemDat.recID.values,telemDat.Epoch.values)
@@ -427,6 +426,7 @@ def orionImport(fileName,rxfile,dbName,recName,switch = False, scanTime = None, 
 #                conn.executemany('INSERT INTO tblReceiverParameters VALUES (?,?,?,?,?)',recParamLine)
                 conn.commit()
                 c.close()
+                
             else:
                 for i in ant_to_rec_dict:
                     site = ant_to_rec_dict[i]
@@ -439,8 +439,9 @@ def orionImport(fileName,rxfile,dbName,recName,switch = False, scanTime = None, 
                     telemDat_sub.to_sql('tblRaw',con = conn,index = False, if_exists = 'append')
 #                    recParamLine = [(site,recType,scanTime,channels,fileName)]
 #                    conn.executemany('INSERT INTO tblReceiverParameters VALUES (?,?,?,?,?)',recParamLine)
-                    conn.commit()
-                    c.close()
+                conn.commit()
+                c.close()                
+
 
 
 def lotek_import(fileName,rxfile,dbName,recName):
@@ -456,80 +457,120 @@ def lotek_import(fileName,rxfile,dbName,recName):
     dbName = name of project database with full directory and extension
     recName = official receiver name'''
 
-    # declare the workspace - in practice we will identify all files in diretory and iterate over them as part of function, all this crap passed as parameters
-    recType = 'lotek'
 
-    headerDat = {}                                                              # create empty dictionary to hold Lotek header data indexed by line number - to be imported to Pandas dataframe
-    lineCounter = []                                                            # create empty array to hold line indices
-    lineList = []                                                               # generate a list of header lines - contains all data we need to write to project set up database
-    o_file = open(fileName, encoding='utf-8')
-    counter = 0                                                                 # start line counter
-    line = o_file.readline()[:-1]                                               # read first line in file
-    lineCounter.append(counter)                                                 # append the current line counter to the counter array
-    lineList.append(line)                                                       # append the current line of header data to the line list
+    recType = 'lotek'
+    # create empty dictionary to hold Lotek header data indexed by line number - to be imported to Pandas dataframe
+    headerDat = {}                                                             
+    # create empty array to hold line indices
+    lineCounter = []                                                               
+    # generate a list of header lines - contains all data we need to write to project set up database
+    lineList = []   
+    # open file passed to function
+    o_file = open(fileName, encoding='utf-8')   
+    # start line counter
+    counter = 0                                                                     
+    # read first line in file
+    line = o_file.readline()[:-1]                                                   
+    # append the current line counter to the counter array
+    lineCounter.append(counter)                                                     
+    # append the current line of header data to the line list
+    lineList.append(line)                                                       
 
     if line == "SRX800 / 800D Information:":
         # find where data begins and header data ends
         with o_file as f:
             for line in f:
+                # if this current line signifies the start of the data stream, the data starts three rows down from this
                 if "** Data Segment **" in line:
                     counter = counter + 1
-                    dataRow = counter + 5                                               # if this current line signifies the start of the data stream, the data starts three rows down from this
-                    break                                                               # break the loop, we have reached our stop point
+                    dataRow = counter + 5                                               
+                    # break the loop, we have reached our stop point
+                    break                                                              
+                # else we are still reading header data increase the line counter by 1
                 else:
-                    counter = counter + 1                                               # if we are still reading header data increase the line counter by 1
-                    lineCounter.append(counter)                                         # append the line counter to the count array
-                    lineList.append(line)                                               # append line of data to the data array
+                    counter = counter + 1                                               
+                    # append the line counter to the count array
+                    lineCounter.append(counter)                                         
+                    # append line of data to the data array
+                    lineList.append(line)                                               
 
-        headerDat['idx'] = lineCounter                                                  # add count array to dictionary with field name 'idx' as key
-        headerDat['line'] = lineList                                                    # add data line array to dictionary with field name 'line' as key
-        headerDF = pd.DataFrame.from_dict(headerDat)                                    # create pandas dataframe of header data indexed by row number
+        # add count array to dictionary with field name 'idx' as key
+        headerDat['idx'] = lineCounter                                                  
+        # add data line array to dictionary with field name 'line' as key
+        headerDat['line'] = lineList  
+        # create pandas dataframe of header data indexed by row number                                         
+        headerDF = pd.DataFrame.from_dict(headerDat)                                    
         headerDF.set_index('idx',inplace = True)
 
         # find scan time
-        for row in headerDF.iterrows():                                                # for every header data row
-            if 'Scan Time' in row[1][0]:                                            # if the first 9 characters of the line say 'Scan Time' = we have found the scan time in the document
-                scanTimeStr = row[1][0][-7:-1]                                          # get the number value from the row
-                scanTimeSplit = scanTimeStr.split(':')                                  # split the string
-                scanTime = float(scanTimeSplit[1])                                      # convert the scan time string to float
-                break                                                                   # stop that loop, we done
+        # for every header data row
+        for row in headerDF.iterrows():                                                
+            # if the first 9 characters of the line say 'Scan Time' = we have found the scan time in the document
+            if 'Scan Time' in row[1][0]:                                            
+                # get the number value from the row
+                scanTimeStr = row[1][0][-7:-1]                                          
+                # split the string
+                scanTimeSplit = scanTimeStr.split(':')                                  
+                # convert the scan time string to float
+                scanTime = float(scanTimeSplit[1])                                      
+                # stop the loop, we have extracted scan time
+                break                                                                   
         del row
 
         # find number of channels and create channel dictionary
-        scanChan = []                                                                   # create empty array of channel ID's
-        channelDict = {}                                                                # create empty channel ID: frequency dictionary
-        counter = 0                                                                     # create counter
-        rows = headerDF.iterrows()                                                      # create row iterator
-        for row in rows:                                                               # for every row
-            if 'Active scan_table:' in row[1][0]:                                   # if the first 18 characters say what that says
-                idx0 = counter + 2                                                      # channel dictionary data starts two rows from here
-                while next(rows)[1][0] != '\n':                                       # while the next row isn't empty
-                    counter = counter + 1                                               # increase the counter, when the row is empty we have reached the end of channels, break loop
-                idx1 = counter + 1                                                      # get index of last data row
-                break                                                                   # break that loop, we done
+        # create empty array of channel ID's
+        scanChan = []                                                                   
+        # create empty channel ID: frequency dictionary
+        channelDict = {}                                                                
+        # create counter
+        counter = 0                                                                     
+        # create row iterator
+        rows = headerDF.iterrows()                                                      
+        # for every row
+        for row in rows:                                                               
+            # if the first 18 characters say what that says
+            if 'Active scan_table:' in row[1][0]:                                  
+                # channel dictionary data starts two rows from here
+                idx0 = counter + 2                                                      
+                # while the next row isn't empty
+                while next(rows)[1][0] != '\n':                                       
+                    # increase the counter
+                    counter = counter + 1                                               
+                # get index of last data row
+                idx1 = counter + 1                                                      
+                # when the row is empty we have reached the end of channels,
+                break                                                                   
+             # else, increase the counter by 1
             else:
-                counter = counter + 1                                                   # if it isn't a data row, increase the counter by 1
+                counter = counter + 1                                                  
         del row, rows
-        channelDat = headerDF.iloc[idx0:idx1]                                           # extract channel dictionary data using rows identified earlier
-
+        
+        # extract channel dictionary data using rows identified earlier
+        channelDat = headerDF.iloc[idx0:idx1]                                           
         for row in channelDat.iterrows():
             dat = row[1][0]
             channel = int(dat[0:4])
             frequency = dat[10:17]
             channelDict[channel] = frequency
-            scanChan.append(channel)                                              # extract that channel ID from the data row and append to array
-
+            # extract that channel ID from the data row and append to array
+            scanChan.append(channel)                                              
         channels = len(scanChan)
 
+        # connect to database, read telemetry data using extracted parameters
         conn = sqlite3.connect(dbName, timeout=30.0)
         c = conn.cursor()
         study_tags = pd.read_sql('SELECT FreqCode, TagType FROM tblMasterTag',con = conn)
         study_tags = study_tags[study_tags.TagType == 'Study'].FreqCode.values
         # with our data row, extract information using pandas fwf import procedure
-        telemDat = pd.read_fwf(fileName,colspecs = [(0,8),(8,18),(18,28),(28,36),(36,51),(51,59)],names = ['Date','Time','ChannelID','TagID','Antenna','Power'],skiprows = dataRow)
-        telemDat = telemDat.iloc[:-2]                                                   # remove last two rows, Lotek adds garbage at the end
-
-        telemDat['fileName'] = np.repeat(rxfile,len(telemDat))                   # Adding the filename into the dataset...drop the path (note this may cause confusion because above we use filename with path.  Decide what to do and fix)
+        telemDat = pd.read_fwf(fileName,colspecs = [(0,8),(8,18),(18,28),(28,36),(36,51),(51,59)],
+                               names = ['Date','Time','ChannelID','TagID','Antenna','Power'],
+                               skiprows = dataRow)
+        # remove last two rows, Lotek adds garbage at the end
+        telemDat = telemDat.iloc[:-2]                                                   
+        # Adding the filename into the dataset...drop the path
+        ''' (note this may cause confusion because above we use filename with path.  
+        Decide what to do and fix)'''
+        telemDat['fileName'] = np.repeat(rxfile,len(telemDat))                   
         def id_to_freq(row,channelDict):
             if row[2] in channelDict:
                 return channelDict[row[2]]
@@ -549,65 +590,104 @@ def lotek_import(fileName,rxfile,dbName,recName):
             telemDat['RecType'] = np.repeat(recType,len(telemDat))
             telemDat['recID'] = np.repeat(recName,len(telemDat))
             telemDat.to_sql('tblRaw',con = conn,index = False, if_exists = 'append')
+        c.close()
+        
     else:
         lotek400 = False
         # find where data begins and header data ends
         with o_file as f:
             for line in f:
                 if "********************************* Data Segment *********************************" in line:
+                    # if this current line signifies the start of the data stream
                     counter = counter + 1
-                    dataRow = counter + 5                                               # if this current line signifies the start of the data stream, the data starts three rows down from this
-                    break                                                               # break the loop, we have reached our stop point
+                    # the data starts 5 rows down from this
+                    dataRow = counter + 5  
+                    # break the loop, we have reached our stop point                         
+                    break                                                               
                 elif line[0:14] == "Code_log data:":
+                    # you have a lotek400
                     counter = counter + 1
                     dataRow = counter + 3
                     lotek400 = True
                     break
                 else:
-                    counter = counter + 1                                               # if we are still reading header data increase the line counter by 1
-                    lineCounter.append(counter)                                         # append the line counter to the count array
-                    lineList.append(line)                                               # append line of data to the data array
-
-        headerDat['idx'] = lineCounter                                                  # add count array to dictionary with field name 'idx' as key
-        headerDat['line'] = lineList                                                    # add data line array to dictionary with field name 'line' as key
-        headerDF = pd.DataFrame.from_dict(headerDat)                                    # create pandas dataframe of header data indexed by row number
+                    # if we are still reading header data increase the line counter by 1
+                    counter = counter + 1                                               
+                    # append the line counter to the count array
+                    lineCounter.append(counter)                                         
+                    # append line of data to the data array
+                    lineList.append(line)                                               
+        # add count array to dictionary with field name 'idx' as key
+        headerDat['idx'] = lineCounter                                         
+        # add data line array to dictionary with field name 'line' as key
+        headerDat['line'] = lineList                                           
+        # create pandas dataframe of header data indexed by row number
+        headerDF = pd.DataFrame.from_dict(headerDat)                           
         headerDF.set_index('idx',inplace = True)
 
         # find scan time
-        for row in headerDF.iterrows():                                                # for every header data row
-            if 'scan time' in row[1][0] or 'Scan time' in row[1][0]:                   # if the first 9 characters of the line say 'Scan Time' = we have found the scan time in the document
-                scanTimeStr = row[1][0][-7:-1]                                          # get the number value from the row
-                scanTimeSplit = scanTimeStr.split(':')                                  # split the string
-                scanTime = float(scanTimeSplit[1])                                      # convert the scan time string to float
-                break                                                                   # stop that loop, we done
+        # for every header data row
+        for row in headerDF.iterrows():                                                
+            if 'scan time' in row[1][0] or 'Scan time' in row[1][0]:                   
+                # get the number value from the row
+                scanTimeStr = row[1][0][-7:-1]                                          
+                # split the string
+                scanTimeSplit = scanTimeStr.split(':')                                  
+                # convert the scan time string to float
+                scanTime = float(scanTimeSplit[1])
+                # stop that loop, we done                                    
+                break                                                                   
         del row
+        if lotek400 == True:
+            # determine if researchers used CRTO and extract
+            for row in headerDF.iterrows():                                   
+                if 'Continuous record time-out' in row[1][0]:                  
+                    crto_split = row[1][0].split('=')                          
+                    crto_time = crto_split[1]                                  
+                    if crto_time == '0:00.00':
+                        crto = False
+                    else:
+                        crto = True
+                    break                                                      
+            del row
 
         # find number of channels and create channel dictionary
-        scanChan = []                                                                   # create empty array of channel ID's
-        channelDict = {}                                                                # create empty channel ID: frequency dictionary
-        counter = 0                                                                     # create counter
-        rows = headerDF.iterrows()                                                      # create row iterator
-        for row in rows:                                                               # for every row
-            if 'Active scan_table:' in row[1][0]:                                   # if the first 18 characters say what that says
-                idx0 = counter + 2                                                      # channel dictionary data starts two rows from here
-                while next(rows)[1][0] != '\n':                                       # while the next row isn't empty
-                    counter = counter + 1                                               # increase the counter, when the row is empty we have reached the end of channels, break loop
-                idx1 = counter + 1                                                      # get index of last data row
-                break                                                                   # break that loop, we done
+        # create empty array of channel ID's
+        scanChan = []                                                                   
+        # create empty channel ID: frequency dictionary
+        channelDict = {}                                                                
+        # create counter
+        counter = 0                                                                     
+        # create row iterator
+        rows = headerDF.iterrows()                                                      
+        for row in rows:     
+            # if the first 18 characters say Active scan_table                                                          
+            if 'Active scan_table:' in row[1][0]:    
+                # channel dictionary data starts two rows from here                               
+                idx0 = counter + 2 
+                # while the next row isn't empty                                   
+                while next(rows)[1][0] != '\n':                                       
+                    # increase the counter
+                    counter = counter + 1                                               
+                # get index of last data row
+                idx1 = counter + 1                                                      
+                break                                                                   
             else:
-                counter = counter + 1                                                   # if it isn't a data row, increase the counter by 1
+                counter = counter + 1                                                   
         del row, rows
-        channelDat = headerDF.iloc[idx0:idx1]                                           # extract channel dictionary data using rows identified earlier
-
+        
+        # extract channel dictionary data using rows identified earlier
+        channelDat = headerDF.iloc[idx0:idx1]                                           
         for row in channelDat.iterrows():
+            # extract that channel ID from the data row and append to array
             dat = row[1][0]
             channel = int(dat[0:4])
             frequency = dat[10:17]
             channelDict[channel] = frequency
-            scanChan.append(channel)                                              # extract that channel ID from the data row and append to array
-
+            scanChan.append(channel)                                              
         channels = len(scanChan)
 
+        # connect to the project database
         conn = sqlite3.connect(dbName, timeout=30.0)
         c = conn.cursor()
         study_tags = pd.read_sql('SELECT FreqCode FROM tblMasterTag WHERE TagType == "Study" OR TagType == "Beacon"',con = conn).FreqCode.values
@@ -620,8 +700,12 @@ def lotek_import(fileName,rxfile,dbName,recName):
 
         # with our data row, extract information using pandas fwf import procedure
         if lotek400 == False:
-            telemDat = pd.read_fwf(os.path.join(fileName),colspecs = [(0,5),(5,14),(14,23),(23,31),(31,46),(46,54)],names = ['DayNumber','Time','ChannelID','TagID','Antenna','Power'],skiprows = dataRow)
-            telemDat = telemDat.iloc[:-2]                                                   # remove last two rows, Lotek adds garbage at the end
+            telemDat = pd.read_fwf(os.path.join(fileName),
+                                   colspecs = [(0,5),(5,14),(14,23),(23,31),(31,46),(46,54)],
+                                   names = ['DayNumber','Time','ChannelID','TagID','Antenna','Power'],
+                                   skiprows = dataRow)
+            # remove last two rows, Lotek adds garbage at the end
+            telemDat = telemDat.iloc[:-2]                                                   
             telemDat.dropna(inplace = True)
             if len(telemDat) > 0:
                 telemDat['Frequency'] = telemDat.apply(id_to_freq, axis = 1, args = (channelDict,))
@@ -631,11 +715,11 @@ def lotek_import(fileName,rxfile,dbName,recName):
                 telemDat['day0'] = np.repeat(pd.to_datetime("1900-01-01"),len(telemDat))
                 telemDat['Date'] = telemDat['day0'] + pd.to_timedelta(telemDat['DayNumber'].astype(int), unit='d')
                 telemDat['Date'] = telemDat.Date.astype('str')
-                telemDat['timeStamp'] = pd.to_datetime(telemDat['Date'] + ' ' + telemDat['Time'])# create timestamp field from date and time and apply to index
+                telemDat['timeStamp'] = pd.to_datetime(telemDat['Date'] + ' ' + telemDat['Time'])
                 telemDat.drop(['day0','DayNumber'],axis = 1, inplace = True)
                 telemDat['Epoch'] = (telemDat['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()
                 telemDat.drop (['Date','Time','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
-                telemDat['fileName'] = np.repeat(rxfile,len(telemDat))            #Made change here as above--taking jsut the file name and writing it to the dataset.  Note naming issue.
+                telemDat['fileName'] = np.repeat(rxfile,len(telemDat))            
                 telemDat['recID'] = np.repeat(recName,len(telemDat))
                 telemDat['noiseRatio'] = noiseRatio(5.0,telemDat,study_tags)
                 telemDat['ScanTime'] = np.repeat(scanTime,len(telemDat))
@@ -647,32 +731,12 @@ def lotek_import(fileName,rxfile,dbName,recName):
                 telemDat.to_sql('tblRaw',con = conn,index = False, if_exists = 'append')
 
         else:
-            telemDat = pd.read_fwf(os.path.join(fileName),colspecs = [(0,6),(6,14),(14,22),(22,27),(27,35),(35,41),(41,48),(48,56),(56,67),(67,80)],names = ['DayNumber_Start','StartTime','ChannelID','TagID','Antenna','Power','Data','Events','DayNumber_End','EndTime'],skiprows = dataRow)
-
+            telemDat = pd.read_fwf(os.path.join(fileName),
+                                   colspecs = [(0,6),(6,14),(14,22),(22,27),(27,35),(35,41),(41,48),(48,56),(56,67),(67,80)],
+                                   names = ['DayNumber_Start','StartTime','ChannelID','TagID','Antenna','Power','Data','Events','DayNumber_End','EndTime'],
+                                   skiprows = dataRow)
             telemDat.dropna(inplace = True)
-#            if len(telemDat) > 0:
-#                telemDat['Frequency'] = telemDat.apply(id_to_freq, axis = 1, args = (channelDict,))
-#                telemDat = telemDat[telemDat.Frequency != '888']
-#                telemDat = telemDat[telemDat.TagID != 999]
-#                telemDat['FreqCode'] = telemDat['Frequency'].astype(str) + ' ' + telemDat['TagID'].astype(int).astype(str)
-#                telemDat['day0'] = np.repeat(pd.to_datetime("1900-01-01"),len(telemDat))
-#                telemDat['Date_Start'] = telemDat['day0'] + pd.to_timedelta(telemDat['DayNumber_Start'].astype(int), unit='d')
-#                telemDat['Date_Start'] = telemDat.Date_Start.astype('str')
-#                telemDat['Date_End'] = telemDat['day0'] + pd.to_timedelta(telemDat['DayNumber_End'].astype(int), unit='d')
-#                telemDat['Date_End'] = telemDat.Date_End.astype('str')
-#                telemDat['timeStamp'] = pd.to_datetime(telemDat['Date_Start'] + ' ' + telemDat['StartTime'])# create timestamp field from date and time and apply to index
-#                telemDat['time_end'] = pd.to_datetime(telemDat['Date_End'] + ' ' + telemDat['EndTime'])# create timestamp field from date and time and apply to index
-#                telemDat.drop(['day0','DayNumber_Start','DayNumber_End'],axis = 1, inplace = True)
-#                telemDat['duration'] = (telemDat.time_end - telemDat.timeStamp).astype('timedelta64[s]')
-#                telemDat['events_per_duration'] = telemDat.Events / telemDat.duration
-#                telemDat['Epoch'] = (telemDat['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()
-#                telemDat.drop (['Date_Start','Date_End','time_end','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
-#                telemDat['fileName'] = np.repeat(fileName,len(telemDat))
-#                telemDat['recID'] = np.repeat(recName,len(telemDat))
-#                tuples = zip(telemDat.FreqCode.values,telemDat.recID.values,telemDat.Epoch.values)
-#                index = pd.MultiIndex.from_tuples(tuples, names=['FreqCode', 'recID','Epoch'])
-#                telemDat.set_index(index,inplace = True,drop = False)
-#                telemDat.to_sql('tblRaw_Lotek400',con = conn,index = False, if_exists = 'append')
+
             if len(telemDat) > 0:
                 telemDat['Frequency'] = telemDat.apply(id_to_freq, axis = 1, args = (channelDict,))
                 telemDat = telemDat[telemDat.Frequency != '888']
@@ -683,14 +747,16 @@ def lotek_import(fileName,rxfile,dbName,recName):
                 telemDat['Date_Start'] = telemDat.Date_Start.astype('str')
                 telemDat['Date_End'] = telemDat['day0'] + pd.to_timedelta(telemDat['DayNumber_End'].astype(int), unit='d')
                 telemDat['Date_End'] = telemDat.Date_End.astype('str')
-                telemDat['timeStamp'] = pd.to_datetime(telemDat['Date_Start'] + ' ' + telemDat['StartTime'])# create timestamp field from date and time and apply to index
-                telemDat['time_end'] = pd.to_datetime(telemDat['Date_End'] + ' ' + telemDat['EndTime'])# create timestamp field from date and time and apply to index
+                telemDat['timeStamp'] = pd.to_datetime(telemDat['Date_Start'] + ' ' + telemDat['StartTime'])
+                telemDat['time_end'] = pd.to_datetime(telemDat['Date_End'] + ' ' + telemDat['EndTime'])
                 telemDat.drop(['day0','DayNumber_Start','DayNumber_End'],axis = 1, inplace = True)
                 telemDat['duration'] = (telemDat.time_end - telemDat.timeStamp).astype('timedelta64[s]')
+                if crto == True:
+                    telemDat = telemDat[telemDat.Events > 1]
                 telemDat['events_per_duration'] = telemDat.Events / telemDat.duration
                 telemDat['Epoch'] = (telemDat['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()
                 telemDat.drop (['Date_Start','Date_End','time_end','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
-                telemDat['fileName'] = np.repeat(rxfile,len(telemDat))            #This is the 4th time I'm assigning file to fileName in the saved data table.
+                telemDat['fileName'] = np.repeat(rxfile,len(telemDat))           
                 telemDat['recID'] = np.repeat(recName,len(telemDat))
                 telemDat['ScanTime'] = np.repeat(scanTime,len(telemDat))
                 telemDat['Channels'] = np.repeat(channels,len(telemDat))
@@ -701,22 +767,20 @@ def lotek_import(fileName,rxfile,dbName,recName):
                 telemDat.set_index(index,inplace = True,drop = False)
                 telemDat.to_sql('tblRaw',con = conn,index = False, if_exists = 'append')
 
-
-    # add receiver parameters to database
-#    recParamLine = [(recName,recType,scanTime,channels,fileName)]
-#    conn.executemany('INSERT INTO tblReceiverParameters VALUES (?,?,?,?,?)',recParamLine)
+    # commit and closee
     conn.commit()
     c.close()
 
-def telemDataImport(site,recType,file_directory,projectDB,switch = False, scanTime = None, channels = None, ant_to_rec_dict = None):
+def telemDataImport(site,recType,file_directory,projectDB, scanTime = 1, channels = 1, ant_to_rec_dict = None):
     tFiles = os.listdir(file_directory)
     for f in tFiles:
+        print ("start importing file %s"%(f))
         f_dir = os.path.join(file_directory,f)
         rxfile=f
         if recType == 'lotek':
             lotek_import(f_dir,rxfile,projectDB,site)
         elif recType == 'orion':
-            orionImport(f_dir,rxfile,projectDB,site,switch, scanTime, channels, ant_to_rec_dict)
+            orionImport(f_dir,rxfile,projectDB,site, scanTime, channels, ant_to_rec_dict)
         else:
             print ("There currently is not an import routine created for this receiver type.  Please try again")
         print ("File %s imported"%(f))
@@ -745,7 +809,6 @@ class training_data():
         allTags = pd.read_sql(sql,con = conn)
         sql = 'SELECT * FROM tblAlgParams'
         algParams = pd.read_sql(sql,con = conn)
-        #sql = 'SELECT * FROM tblReceiverParameters WHERE RecID == "%s"'%(site)
         recType = self.histDF.RecType.unique()
         c.close()
         # do some data management when importing training dataframe
@@ -765,7 +828,6 @@ class training_data():
         self.duration = float(algParams.at[0,'duration'])
         self.studyTags = allTags.FreqCode.values
         self.recType = self.histDF.RecType.unique()
-        #self.histDF['recType'] = np.repeat(self.recType,len(self.histDF))
 
         # for training data, we know the tag's detection class ahead of time,
         # if the tag is in the study tag list, it is a known detection class, if
@@ -787,6 +849,7 @@ class training_data():
         # create a list of factors to search for series hit
         self.alive_factors = np.arange(self.PulseRate,3600,self.PulseRate)
         self.dead_factors = np.arange(self.MortRate,3600,self.MortRate)
+        
 
 # we are going to map this function
 def calc_train_params_map(trainee):                                                       # for every Freq/Code combination...
@@ -800,15 +863,6 @@ def calc_train_params_map(trainee):                                             
     scratchWS = trainee.scratchWS
     det = trainee.det
 
-#    # get data
-#    conn = sqlite3.connect(projectDB, timeout=30.0)
-#    c = conn.cursor()
-#    sql = "SELECT FreqCode, Epoch FROM tblRaw WHERE recID == '%s'"%(site)
-#    allData = pd.read_sql(sql,con = conn, coerce_float  = True)
-#    c.close()
-#    allData.sort_values(by = 'Epoch', inplace = True)
-#    allData.set_index('Epoch', drop = False, inplace = True)
-
     # calculate predictors
     histDF['Detection'] = np.repeat(trainee.plausible,len(histDF))
     histDF['lag'] = histDF.Epoch.diff().abs()                                      # calculate the difference in seconds until the next detection
@@ -816,7 +870,6 @@ def calc_train_params_map(trainee):                                             
     histDF.lagDiff.fillna(999999999,inplace = True)
     histDF = detHist(histDF,trainee.PulseRate,trainee.det,training = True)             # calculate detection history
     histDF['seriesHit'] = histDF['lag'].apply(lambda x: 1 if x in trainee.alive_factors else 0)
-    #histDF['FishCount'] = histDF.apply(fishCount, axis = 1, args = (trainee,allData))
     histDF.set_index('timeStamp',inplace = True, drop = True)
     histDF.drop(['recID1','RowSeconds'],axis = 1, inplace = True)
     histDF['Seconds'] = histDF.index.hour * 3600 + histDF.index.minute * 60 + histDF.index.second
@@ -840,7 +893,6 @@ def trainDatAppend(inputWS,projectDB):
     c = conn.cursor()
     for f in files:
         dat = pd.read_csv(os.path.join(inputWS,f),dtype = {"detHist":str, "detHist":str})
-        #dat.drop(['recID1'],axis = 1,inplace = True)
         dat.to_sql('tblTrain',con = conn,index = False, if_exists = 'append', chunksize = 1000)
         os.remove(os.path.join(inputWS,f))
         del dat
@@ -861,12 +913,12 @@ class classify_data():
         conn = sqlite3.connect(projectDB, timeout=30.0)
         c = conn.cursor()
         if reclass_iter == None:
-            sql = "SELECT FreqCode, Epoch, recID, timeStamp, Power, noiseRatio, ScanTime, Channels, RecType, fileName FROM tblRaw WHERE FreqCode == '%s' AND recID == '%s';"%(i,site)
+            sql = "SELECT FreqCode, Epoch, recID, timeStamp, Power, noiseRatio, ScanTime, Channels, RecType FROM tblRaw WHERE FreqCode == '%s' AND recID == '%s';"%(i,site)
             self.histDF = pd.read_sql(sql,con = conn,coerce_float  = True)
 
 
         else:
-            sql = "SELECT FreqCode, Epoch, recID, timeStamp, Power, noiseRatio, ScanTime, Channels, RecType, fileName FROM tblClassify_%s_%s WHERE FreqCode == '%s' AND test == '1';"%(site,reclass_iter-1,i)
+            sql = "SELECT FreqCode, Epoch, recID, timeStamp, Power, noiseRatio, ScanTime, Channels, RecType FROM tblClassify_%s_%s WHERE FreqCode == '%s' AND test == '1';"%(site,reclass_iter-1,i)
             self.histDF = pd.read_sql(sql,con = conn,coerce_float  = True)
 
         sql = 'SELECT PulseRate,MortRate FROM tblMasterTag WHERE FreqCode == "%s"'%(i)
@@ -913,88 +965,277 @@ class classify_data():
         else:
             self.trainingDB = projectDB
 
+def evidence(classify_object):
+    '''calculates evidence of observed data occuring while maintaining a-la carte
+    likelihood functionality'''
+    # get fields from classify object
+    fields = classify_object.fields
+    
+    # associate field to count with a couple of dictionaries
+    trueFields = {'conRecLength':'conRecLengthCountT',
+                  'consDet':'consDetCountT',
+                  'hitRatio':'hitRatioCountT',
+                  'noiseRatio':'noiseCount_T',
+                  'seriesHit':'seriesHitCountT',
+                  'power':'powerCount_T',
+                  'lagDiff':'lagDiffCount_T'}
+    
+    falseFields = {'conRecLength':'conRecLengthCountF',
+                   'consDet':'consDetCountF',
+                   'hitRatio':'hitRatioCountF',
+                   'noiseRatio':'noiseCount_F',
+                   'seriesHit':'seriesHitCountF',
+                   'power':'powerCount_F',
+                   'lagDiff':'lagDiffCount_F'}
+    
+    true_count = classify_object.testDat.priorCount_T.values[0]
+    false_count = classify_object.testDat.priorCount_F.values[0]
+    
+    total_count = true_count + false_count
+
+    if len(fields) == 1:
+        return (classify_object.testDat[trueFields[fields[0]]] + classify_object.testDat[falseFields[fields[0]]] + 1)/total_count
+    
+    elif len(fields) == 2:
+        return (classify_object.testDat[trueFields[fields[0]]] + classify_object.testDat[falseFields[fields[0]]] + 1)/total_count * \
+            (classify_object.testDat[trueFields[fields[1]]] + classify_object.testDat[falseFields[fields[1]]] + 1)/total_count
+            
+    elif len(fields) == 3:
+        return (classify_object.testDat[trueFields[fields[0]]] + classify_object.testDat[falseFields[fields[0]]] + 1)/total_count * \
+            (classify_object.testDat[trueFields[fields[1]]] + classify_object.testDat[falseFields[fields[1]]] + 1)/total_count * \
+            (classify_object.testDat[trueFields[fields[2]]] + classify_object.testDat[falseFields[fields[2]]] + 1)/total_count
+            
+    elif len(fields) == 4:
+        return (classify_object.testDat[trueFields[fields[0]]] + classify_object.testDat[falseFields[fields[0]]] + 1)/total_count * \
+            (classify_object.testDat[trueFields[fields[1]]] + classify_object.testDat[falseFields[fields[1]]] + 1)/total_count * \
+            (classify_object.testDat[trueFields[fields[2]]] + classify_object.testDat[falseFields[fields[2]]] + 1)/total_count * \
+            (classify_object.testDat[trueFields[fields[3]]] + classify_object.testDat[falseFields[fields[3]]] + 1)/total_count
+            
+    elif len(fields) == 5:
+        return (classify_object.testDat[trueFields[fields[0]]] + classify_object.testDat[falseFields[fields[0]]] + 1)/total_count * \
+            (classify_object.testDat[trueFields[fields[1]]] + classify_object.testDat[falseFields[fields[1]]] + 1)/total_count * \
+            (classify_object.testDat[trueFields[fields[2]]] + classify_object.testDat[falseFields[fields[2]]] + 1)/total_count * \
+            (classify_object.testDat[trueFields[fields[3]]] + classify_object.testDat[falseFields[fields[3]]] + 1)/total_count * \
+            (classify_object.testDat[trueFields[fields[4]]] + classify_object.testDat[falseFields[fields[4]]] + 1)/total_count 
+            
+    elif len(fields) == 6:
+        return (classify_object.testDat[trueFields[fields[0]]] + classify_object.testDat[falseFields[fields[0]]] + 1)/total_count * \
+            (classify_object.testDat[trueFields[fields[1]]] + classify_object.testDat[falseFields[fields[1]]] + 1)/total_count * \
+            (classify_object.testDat[trueFields[fields[2]]] + classify_object.testDat[falseFields[fields[2]]] + 1)/total_count * \
+            (classify_object.testDat[trueFields[fields[3]]] + classify_object.testDat[falseFields[fields[3]]] + 1)/total_count * \
+            (classify_object.testDat[trueFields[fields[4]]] + classify_object.testDat[falseFields[fields[4]]] + 1)/total_count * \
+            (classify_object.testDat[trueFields[fields[5]]] + classify_object.testDat[falseFields[fields[5]]] + 1)/total_count
+            
+    elif len(fields) == 7:
+        return (classify_object.testDat[trueFields[fields[0]]] + classify_object.testDat[falseFields[fields[0]]] + 1)/total_count * \
+            (classify_object.testDat[trueFields[fields[1]]] + classify_object.testDat[falseFields[fields[1]]] + 1)/total_count * \
+            (classify_object.testDat[trueFields[fields[2]]] + classify_object.testDat[falseFields[fields[2]]] + 1)/total_count * \
+            (classify_object.testDat[trueFields[fields[3]]] + classify_object.testDat[falseFields[fields[3]]] + 1)/total_count * \
+            (classify_object.testDat[trueFields[fields[4]]] + classify_object.testDat[falseFields[fields[4]]] + 1)/total_count * \
+            (classify_object.testDat[trueFields[fields[5]]] + classify_object.testDat[falseFields[fields[5]]] + 1)/total_count * \
+            (classify_object.testDat[trueFields[fields[6]]] + classify_object.testDat[falseFields[fields[6]]] + 1)/total_count
 
 
 def likelihood(assumption,classify_object,status = 'A'):
     '''calculates likelihood based on true or false assumption and fields provided to classify object'''
     fields = classify_object.fields
     if status == 'A':
-        trueFields = {'conRecLength':'LconRecT_A','consDet':'LconsDetT_A','hitRatio':'LHitRatioT_A','noiseRatio':'LnoiseT','seriesHit':'LseriesHitT_A','power':'LPowerT','lagDiff':'LlagT'}
-        falseFields = {'conRecLength':'LconRecF_A','consDet':'LconsDetF_A','hitRatio':'LHitRatioF_A','noiseRatio':'LnoiseF','seriesHit':'LseriesHitF_A','power':'LPowerF','lagDiff':'LlagF'}
+        trueFields = {'conRecLength':'LconRecT_A',
+                      'consDet':'LconsDetT_A',
+                      'hitRatio':'LHitRatioT_A',
+                      'noiseRatio':'LnoiseT',
+                      'seriesHit':'LseriesHitT_A',
+                      'power':'LPowerT',
+                      'lagDiff':'LlagT'}
+        falseFields = {'conRecLength':'LconRecF_A',
+                       'consDet':'LconsDetF_A',
+                       'hitRatio':'LHitRatioF_A',
+                       'noiseRatio':'LnoiseF',
+                       'seriesHit':'LseriesHitF_A',
+                       'power':'LPowerF',
+                       'lagDiff':'LlagF'}
     elif status == 'M':
-        trueFields = {'conRecLength':'LconRecT_M','consDet':'LconsDetT_M','hitRatio':'LHitRatioT_M','noiseRatio':'LnoiseT','seriesHit':'LseriesHitT_M','power':'LPowerT','lagDiff':'LlagT'}
-        falseFields = {'conRecLength':'LconRecF_M','consDet':'LconsDetF_M','hitRatio':'LHitRatioF_M','noiseRatio':'LnoiseF','seriesHit':'LseriesHitF_M','power':'LPowerF','lagDiff':'LlagF'}
+        trueFields = {'conRecLength':'LconRecT_M',
+                      'consDet':'LconsDetT_M',
+                      'hitRatio':'LHitRatioT_M',
+                      'noiseRatio':'LnoiseT',
+                      'seriesHit':'LseriesHitT_M',
+                      'power':'LPowerT',
+                      'lagDiff':'LlagT'}
+        falseFields = {'conRecLength':'LconRecF_M',
+                       'consDet':'LconsDetF_M',
+                       'hitRatio':'LHitRatioF_M',
+                       'noiseRatio':'LnoiseF',
+                       'seriesHit':'LseriesHitF_M',
+                       'power':'LPowerF',
+                       'lagDiff':'LlagF'}
     else:
-        trueFields = {'conRecLength':'LconRecT','consDet':'LconsDetT','hitRatio':'LHitRatioT','noiseRatio':'LnoiseT','seriesHit':'LseriesHitT','power':'LPowerT','lagDiff':'LlagT'}
-        falseFields = {'conRecLength':'LconRecF','consDet':'LconsDetF','hitRatio':'LHitRatioF','noiseRatio':'LnoiseF','seriesHit':'LseriesHitF','power':'LPowerF','lagDiff':'LlagF'}
+        trueFields = {'conRecLength':'LconRecT',
+                      'consDet':'LconsDetT',
+                      'hitRatio':'LHitRatioT',
+                      'noiseRatio':'LnoiseT',
+                      'seriesHit':'LseriesHitT',
+                      'power':'LPowerT',
+                      'lagDiff':'LlagT'}
+        falseFields = {'conRecLength':'LconRecF',
+                       'consDet':'LconsDetF',
+                       'hitRatio':'LHitRatioF',
+                       'noiseRatio':'LnoiseF',
+                       'seriesHit':'LseriesHitF',
+                       'power':'LPowerF',
+                       'lagDiff':'LlagF'}
 
     if status == 'cross':
         if assumption == True:
             if len(fields) == 1:
                 return classify_object.testDat[trueFields[fields[0]]]
             elif len(fields) == 2:
-                return classify_object.testDat[trueFields[fields[0]]] * classify_object.testDat[trueFields[fields[1]]]
+                return classify_object.testDat[trueFields[fields[0]]] * \
+                    classify_object.testDat[trueFields[fields[1]]]
             elif len(fields) == 3:
-                return classify_object.testDat[trueFields[fields[0]]] * classify_object.testDat[trueFields[fields[1]]] * classify_object.testDat[trueFields[fields[2]]]
+                return classify_object.testDat[trueFields[fields[0]]] * \
+                    classify_object.testDat[trueFields[fields[1]]] * \
+                        classify_object.testDat[trueFields[fields[2]]]
             elif len(fields) == 4:
-                return classify_object.testDat[trueFields[fields[0]]] * classify_object.testDat[trueFields[fields[1]]] * classify_object.testDat[trueFields[fields[2]]]  * classify_object.testDat[trueFields[fields[3]]]
+                return classify_object.testDat[trueFields[fields[0]]] * \
+                    classify_object.testDat[trueFields[fields[1]]] * \
+                        classify_object.testDat[trueFields[fields[2]]]  * \
+                            classify_object.testDat[trueFields[fields[3]]]
             elif len(fields) == 5:
-                return classify_object.testDat[trueFields[fields[0]]] * classify_object.testDat[trueFields[fields[1]]] * classify_object.testDat[trueFields[fields[2]]]  * classify_object.testDat[trueFields[fields[3]]]  * classify_object.testDat[trueFields[fields[4]]]
+                return classify_object.testDat[trueFields[fields[0]]] * \
+                    classify_object.testDat[trueFields[fields[1]]] * \
+                        classify_object.testDat[trueFields[fields[2]]] * \
+                            classify_object.testDat[trueFields[fields[3]]] * \
+                                classify_object.testDat[trueFields[fields[4]]]
             elif len(fields) == 6:
-                return classify_object.testDat[trueFields[fields[0]]] * classify_object.testDat[trueFields[fields[1]]] * classify_object.testDat[trueFields[fields[2]]]  * classify_object.testDat[trueFields[fields[3]]]  * classify_object.testDat[trueFields[fields[4]]]  * classify_object.testDat[trueFields[fields[5]]]
+                return classify_object.testDat[trueFields[fields[0]]] * \
+                    classify_object.testDat[trueFields[fields[1]]] * \
+                        classify_object.testDat[trueFields[fields[2]]] * \
+                            classify_object.testDat[trueFields[fields[3]]] * \
+                                classify_object.testDat[trueFields[fields[4]]] * \
+                                    classify_object.testDat[trueFields[fields[5]]]
             elif len(fields) == 7:
-                return classify_object.testDat[trueFields[fields[0]]] * classify_object.testDat[trueFields[fields[1]]] * classify_object.testDat[trueFields[fields[2]]]  * classify_object.testDat[trueFields[fields[3]]]  * classify_object.testDat[trueFields[fields[4]]]  * classify_object.testDat[trueFields[fields[5]]]  * classify_object.testDat[trueFields[fields[6]]]
+                return classify_object.testDat[trueFields[fields[0]]] * \
+                    classify_object.testDat[trueFields[fields[1]]] * \
+                        classify_object.testDat[trueFields[fields[2]]] * \
+                            classify_object.testDat[trueFields[fields[3]]] * \
+                                classify_object.testDat[trueFields[fields[4]]] * \
+                                    classify_object.testDat[trueFields[fields[5]]] * \
+                                        classify_object.testDat[trueFields[fields[6]]]
 
         elif assumption == False:
             if len(fields) == 1:
                 return classify_object.testDat[falseFields[fields[0]]]
             elif len(fields) == 2:
-                return classify_object.testDat[falseFields[fields[0]]] * classify_object.testDat[falseFields[fields[1]]]
+                return classify_object.testDat[falseFields[fields[0]]] * \
+                    classify_object.testDat[falseFields[fields[1]]]
             elif len(fields) == 3:
-                return classify_object.testDat[falseFields[fields[0]]] * classify_object.testDat[falseFields[fields[1]]] * classify_object.testDat[falseFields[fields[2]]]
+                return classify_object.testDat[falseFields[fields[0]]] * \
+                    classify_object.testDat[falseFields[fields[1]]] * \
+                        classify_object.testDat[falseFields[fields[2]]]
             elif len(fields) == 4:
-                return classify_object.testDat[falseFields[fields[0]]] * classify_object.testDat[falseFields[fields[1]]] * classify_object.testDat[falseFields[fields[2]]]  * classify_object.testDat[falseFields[fields[3]]]
+                return classify_object.testDat[falseFields[fields[0]]] * \
+                    classify_object.testDat[falseFields[fields[1]]] * \
+                        classify_object.testDat[falseFields[fields[2]]] * \
+                            classify_object.testDat[falseFields[fields[3]]]
             elif len(fields) == 5:
-                return classify_object.testDat[falseFields[fields[0]]] * classify_object.testDat[falseFields[fields[1]]] * classify_object.testDat[falseFields[fields[2]]]  * classify_object.testDat[falseFields[fields[3]]]  * classify_object.testDat[falseFields[fields[4]]]
+                return classify_object.testDat[falseFields[fields[0]]] * \
+                    classify_object.testDat[falseFields[fields[1]]] * \
+                        classify_object.testDat[falseFields[fields[2]]] * \
+                            classify_object.testDat[falseFields[fields[3]]] * \
+                                classify_object.testDat[falseFields[fields[4]]]
             elif len(fields) == 6:
-                return classify_object.testDat[falseFields[fields[0]]] * classify_object.testDat[falseFields[fields[1]]] * classify_object.testDat[falseFields[fields[2]]]  * classify_object.testDat[falseFields[fields[3]]]  * classify_object.testDat[falseFields[fields[4]]]  * classify_object.testDat[falseFields[fields[5]]]
+                return classify_object.testDat[falseFields[fields[0]]] * \
+                    classify_object.testDat[falseFields[fields[1]]] * \
+                        classify_object.testDat[falseFields[fields[2]]] * \
+                            classify_object.testDat[falseFields[fields[3]]] * \
+                                classify_object.testDat[falseFields[fields[4]]] * \
+                                    classify_object.testDat[falseFields[fields[5]]]
             elif len(fields) == 7:
-                return classify_object.testDat[falseFields[fields[0]]] * classify_object.testDat[falseFields[fields[1]]] * classify_object.testDat[falseFields[fields[2]]]  * classify_object.testDat[falseFields[fields[3]]]  * classify_object.testDat[falseFields[fields[4]]]  * classify_object.testDat[falseFields[fields[5]]]  * classify_object.testDat[falseFields[fields[6]]]
+                return classify_object.testDat[falseFields[fields[0]]] * \
+                    classify_object.testDat[falseFields[fields[1]]] * \
+                        classify_object.testDat[falseFields[fields[2]]] * \
+                            classify_object.testDat[falseFields[fields[3]]] * \
+                                classify_object.testDat[falseFields[fields[4]]] * \
+                                    classify_object.testDat[falseFields[fields[5]]] * \
+                                        classify_object.testDat[falseFields[fields[6]]]
 
     else:
         if assumption == True:
             if len(fields) == 1:
                 return classify_object.histDF[trueFields[fields[0]]]
             elif len(fields) == 2:
-                return classify_object.histDF[trueFields[fields[0]]] * classify_object.histDF[trueFields[fields[1]]]
+                return classify_object.histDF[trueFields[fields[0]]] * \
+                    classify_object.histDF[trueFields[fields[1]]]
             elif len(fields) == 3:
-                return classify_object.histDF[trueFields[fields[0]]] * classify_object.histDF[trueFields[fields[1]]] * classify_object.histDF[trueFields[fields[2]]]
+                return classify_object.histDF[trueFields[fields[0]]] * \
+                    classify_object.histDF[trueFields[fields[1]]] * \
+                        classify_object.histDF[trueFields[fields[2]]]
             elif len(fields) == 4:
-                return classify_object.histDF[trueFields[fields[0]]] * classify_object.histDF[trueFields[fields[1]]] * classify_object.histDF[trueFields[fields[2]]]  * classify_object.histDF[trueFields[fields[3]]]
+                return classify_object.histDF[trueFields[fields[0]]] * \
+                    classify_object.histDF[trueFields[fields[1]]] * \
+                        classify_object.histDF[trueFields[fields[2]]] * \
+                            classify_object.histDF[trueFields[fields[3]]]
             elif len(fields) == 5:
-                return classify_object.histDF[trueFields[fields[0]]] * classify_object.histDF[trueFields[fields[1]]] * classify_object.histDF[trueFields[fields[2]]]  * classify_object.histDF[trueFields[fields[3]]]  * classify_object.histDF[trueFields[fields[4]]]
+                return classify_object.histDF[trueFields[fields[0]]] * \
+                    classify_object.histDF[trueFields[fields[1]]] * \
+                        classify_object.histDF[trueFields[fields[2]]] * \
+                            classify_object.histDF[trueFields[fields[3]]] * \
+                                classify_object.histDF[trueFields[fields[4]]]
             elif len(fields) == 6:
-                return classify_object.histDF[trueFields[fields[0]]] * classify_object.histDF[trueFields[fields[1]]] * classify_object.histDF[trueFields[fields[2]]]  * classify_object.histDF[trueFields[fields[3]]]  * classify_object.histDF[trueFields[fields[4]]]  * classify_object.histDF[trueFields[fields[5]]]
+                return classify_object.histDF[trueFields[fields[0]]] * \
+                    classify_object.histDF[trueFields[fields[1]]] * \
+                        classify_object.histDF[trueFields[fields[2]]] * \
+                            classify_object.histDF[trueFields[fields[3]]] * \
+                                classify_object.histDF[trueFields[fields[4]]] * \
+                                    classify_object.histDF[trueFields[fields[5]]]
             elif len(fields) == 7:
-                return classify_object.histDF[trueFields[fields[0]]] * classify_object.histDF[trueFields[fields[1]]] * classify_object.histDF[trueFields[fields[2]]]  * classify_object.histDF[trueFields[fields[3]]]  * classify_object.histDF[trueFields[fields[4]]]  * classify_object.histDF[trueFields[fields[5]]]  * classify_object.histDF[trueFields[fields[6]]]
+                return classify_object.histDF[trueFields[fields[0]]] * \
+                    classify_object.histDF[trueFields[fields[1]]] * \
+                        classify_object.histDF[trueFields[fields[2]]] * \
+                            classify_object.histDF[trueFields[fields[3]]] * \
+                                classify_object.histDF[trueFields[fields[4]]] * \
+                                    classify_object.histDF[trueFields[fields[5]]] * \
+                                        classify_object.histDF[trueFields[fields[6]]]
 
         elif assumption == False:
             if len(fields) == 1:
                 return classify_object.histDF[falseFields[fields[0]]]
             elif len(fields) == 2:
-                return classify_object.histDF[falseFields[fields[0]]] * classify_object.histDF[falseFields[fields[1]]]
+                return classify_object.histDF[falseFields[fields[0]]] * \
+                    classify_object.histDF[falseFields[fields[1]]]
             elif len(fields) == 3:
-                return classify_object.histDF[falseFields[fields[0]]] * classify_object.histDF[falseFields[fields[1]]] * classify_object.histDF[falseFields[fields[2]]]
+                return classify_object.histDF[falseFields[fields[0]]] * \
+                    classify_object.histDF[falseFields[fields[1]]] * \
+                        classify_object.histDF[falseFields[fields[2]]]
             elif len(fields) == 4:
-                return classify_object.histDF[falseFields[fields[0]]] * classify_object.histDF[falseFields[fields[1]]] * classify_object.histDF[falseFields[fields[2]]]  * classify_object.histDF[falseFields[fields[3]]]
+                return classify_object.histDF[falseFields[fields[0]]] * \
+                    classify_object.histDF[falseFields[fields[1]]] * \
+                        classify_object.histDF[falseFields[fields[2]]] * \
+                            classify_object.histDF[falseFields[fields[3]]]
             elif len(fields) == 5:
-                return classify_object.histDF[falseFields[fields[0]]] * classify_object.histDF[falseFields[fields[1]]] * classify_object.histDF[falseFields[fields[2]]]  * classify_object.histDF[falseFields[fields[3]]]  * classify_object.histDF[falseFields[fields[4]]]
+                return classify_object.histDF[falseFields[fields[0]]] * \
+                    classify_object.histDF[falseFields[fields[1]]] * \
+                        classify_object.histDF[falseFields[fields[2]]] * \
+                            classify_object.histDF[falseFields[fields[3]]] * \
+                                classify_object.histDF[falseFields[fields[4]]]
             elif len(fields) == 6:
-                return classify_object.histDF[falseFields[fields[0]]] * classify_object.histDF[falseFields[fields[1]]] * classify_object.histDF[falseFields[fields[2]]]  * classify_object.histDF[falseFields[fields[3]]]  * classify_object.histDF[falseFields[fields[4]]]  * classify_object.histDF[falseFields[fields[5]]]
+                return classify_object.histDF[falseFields[fields[0]]] * \
+                    classify_object.histDF[falseFields[fields[1]]] * \
+                        classify_object.histDF[falseFields[fields[2]]] * \
+                            classify_object.histDF[falseFields[fields[3]]] * \
+                                classify_object.histDF[falseFields[fields[4]]] * \
+                                    classify_object.histDF[falseFields[fields[5]]]
             elif len(fields) == 7:
-                return classify_object.histDF[falseFields[fields[0]]] * classify_object.histDF[falseFields[fields[1]]] * classify_object.histDF[falseFields[fields[2]]]  * classify_object.histDF[falseFields[fields[3]]]  * classify_object.histDF[falseFields[fields[4]]]  * classify_object.histDF[falseFields[fields[5]]]  * classify_object.histDF[falseFields[fields[6]]]
+                return classify_object.histDF[falseFields[fields[0]]] * \
+                    classify_object.histDF[falseFields[fields[1]]] * \
+                        classify_object.histDF[falseFields[fields[2]]] * \
+                            classify_object.histDF[falseFields[fields[3]]] * \
+                                classify_object.histDF[falseFields[fields[4]]] * \
+                                    classify_object.histDF[falseFields[fields[5]]] * \
+                                        classify_object.histDF[falseFields[fields[6]]]
 
-def create_training_data(site,projectDB,reclass_iter = None):
+def create_training_data(site,projectDB,reclass_iter = None, rec_list = None):
     '''Function creates training dataset for current round of classification -
     if we only do this once, this time suck goes away'''
 
@@ -1008,13 +1249,23 @@ def create_training_data(site,projectDB,reclass_iter = None):
 
     c = conn.cursor()
     if reclass_iter == None:
-        sql = "SELECT * FROM tblTrain"# WHERE RecType == '%s'"%(classify_object.recType)
-        trainDF = pd.read_sql(sql,con = conn)
-        trainDF = trainDF[trainDF.recType == recType]
+        if rec_list == None:
+            sql = "SELECT * FROM tblTrain"#" WHERE RecType == '%s'"%(recType)
+            trainDF = pd.read_sql(sql,con = conn)
+            trainDF = trainDF[trainDF.recType == recType]
+        else:
+            trainDF = pd.DataFrame()
+            for i in rec_list:
+                sql = "SELECT * FROM tblTrain WHERE recID == '%s'"%(i)
+                trainDF = trainDF.append(pd.read_sql(sql,con = conn))              
     else:
-        trainDF = pd.read_sql("select * from tblTrain",con=conn)#This will read in tblTrain and create a pandas dataframe
-        trainDF = trainDF[trainDF.recType == recType]
-
+        if rec_list == None:
+            trainDF = pd.read_sql("select * from tblTrain",con=conn)#This will read in tblTrain and create a pandas dataframe
+            trainDF = trainDF[trainDF.recType == recType]
+        else:
+            trainDF = pd.DataFrame()
+            for i in rec_list:
+                trainDF = trainDF.append(pd.read_sql("select * from tblTrain WHERE recID == '%s'"%(i),con=conn))#This will read in tblTrain and create a pandas dataframe
 #            classDF = pd.read_sql("select test, FreqCode,Power,lag,lagDiff,fishCount,conRecLength,consDet,detHist,hitRatio,noiseRatio,seriesHit,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from tblClassify_%s_%s"%(site,classify_object.reclass_iter-1),con=conn)
         classDF = pd.read_sql("select test, FreqCode,Power,noiseRatio, lag,lagDiff,conRecLength_A,consDet_A,detHist_A,hitRatio_A,seriesHit_A,conRecLength_M,consDet_M,detHist_M,hitRatio_M,seriesHit_M,postTrue_A,postTrue_M,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from tblClassify_%s_%s"%(site,reclass_iter-1),con=conn)
        # classDF = classDF[classDF.postTrue_A >= classDF.postTrue_M]
@@ -1048,15 +1299,6 @@ def calc_class_params_map(classify_object):
     det = classify_object.det
     trainDF = classify_object.trainDF
     if len(classify_object.histDF) > 0:
-        # get data
-    #    conn = sqlite3.connect(projectDB, timeout=30.0)
-    #    c = conn.cursor()
-    #    sql = "SELECT FreqCode, Epoch FROM tblRaw WHERE recID == '%s'"%(site)
-    #    allData = pd.read_sql(sql,con = conn, coerce_float  = True)
-    #    c.close()
-
-    #    allData.sort_values(by = 'Epoch', inplace = True)
-    #    allData.set_index('Epoch', drop = False, inplace = True)
 
         # calculate parameters
         classify_object.histDF['lag'] = classify_object.histDF.Epoch.diff().abs()
@@ -1067,7 +1309,7 @@ def calc_class_params_map(classify_object):
         classify_object.histDF = detHist(classify_object.histDF,classify_object.MortRate,classify_object.det,'M')             # calculate detection history
         classify_object.histDF['powerBin'] = (classify_object.histDF.Power//5)*5
         classify_object.histDF['noiseBin'] = (classify_object.histDF.noiseRatio//.1)*.1
-        classify_object.histDF['lagDiffBin'] = (classify_object.histDF.lagDiff//10)*.10
+        classify_object.histDF['lagDiffBin'] = (classify_object.histDF.lagDiff//classify_object.PulseRate)*classify_object.PulseRate
 
         # Update Data Types - they've got to match or the merge doesn't work!!!!
         trainDF.Detection = trainDF.Detection.astype(int)
@@ -1080,7 +1322,7 @@ def calc_class_params_map(classify_object):
         trainDF['hitRatio'] = trainDF.hitRatio.astype(float).round(4)
         trainDF['powerBin'] = (trainDF.Power//5)*5
         trainDF['noiseBin'] = (trainDF.noiseRatio//.1)*.1
-        trainDF['lagDiffBin'] = (trainDF.lagDiff//10)*.10
+        trainDF['lagDiffBin'] = (trainDF.lagDiff//classify_object.PulseRate)*classify_object.PulseRate
 
         # making sure our classify object data types match
         classify_object.histDF.seriesHit_A = classify_object.histDF.seriesHit_A.astype(np.int64)
@@ -1099,48 +1341,92 @@ def calc_class_params_map(classify_object):
 
 
         # Make a Count of the predictor variables and join to training data frame - For ALIVE Strings
-        seriesHitCount = trainDF.groupby(['Detection','seriesHit'])['seriesHit'].count()
+        seriesHitCount = trainDF.groupby(['Detection','seriesHit'])['seriesHit'].\
+            count()
         seriesHitCount = pd.Series(seriesHitCount, name = 'seriesHitACountT')
-        seriesHitCount = pd.DataFrame(seriesHitCount).reset_index().rename(columns = {'Detection':'HT'})
-        classify_object.histDF = pd.merge(left = classify_object.histDF, right = seriesHitCount, how = u'left',left_on = ['HT','seriesHit_A'], right_on = ['HT','seriesHit'])
+        seriesHitCount = pd.DataFrame(seriesHitCount).\
+            reset_index().rename(columns = {'Detection':'HT'})
+        classify_object.histDF = pd.merge(left = classify_object.histDF, 
+                                          right = seriesHitCount, 
+                                          how = u'left',
+                                          left_on = ['HT','seriesHit_A'], 
+                                          right_on = ['HT','seriesHit'])
         seriesHitCount = seriesHitCount.rename(columns = {'HT':'HF','seriesHitACountT':'seriesHitACountF'})
-        classify_object.histDF = pd.merge(left = classify_object.histDF, right = seriesHitCount, how = u'left',left_on = ['HF','seriesHit_A'], right_on = ['HF','seriesHit'])
-        classify_object.histDF.drop(labels = ['seriesHit_x','seriesHit_y'], axis = 1, inplace = True)
+        classify_object.histDF = pd.merge(left = classify_object.histDF, 
+                                          right = seriesHitCount, 
+                                          how = u'left',
+                                          left_on = ['HF','seriesHit_A'], 
+                                          right_on = ['HF','seriesHit'])
+        classify_object.histDF.drop(labels = ['seriesHit_x','seriesHit_y'], 
+                                    axis = 1, 
+                                    inplace = True)
 
         # count the number of instances of consective detections by detection class and write to data frame
         consDetCount = trainDF.groupby(['Detection','consDet'])['consDet'].count()
         consDetCount = pd.Series(consDetCount, name = 'consDetACountT')
         consDetCount = pd.DataFrame(consDetCount).reset_index().rename(columns = {'Detection':'HT'})
-        classify_object.histDF = pd.merge(left = classify_object.histDF, right = consDetCount, how = u'left', left_on = ['HT','consDet_A'], right_on = ['HT','consDet'])
+        classify_object.histDF = pd.merge(left = classify_object.histDF, 
+                                          right = consDetCount, 
+                                          how = u'left', 
+                                          left_on = ['HT','consDet_A'], 
+                                          right_on = ['HT','consDet'])
         consDetCount = consDetCount.rename(columns = {'HT':'HF','consDetACountT':'consDetACountF'})
-        classify_object.histDF = pd.merge(left = classify_object.histDF, right = consDetCount, how = u'left', left_on = ['HF','consDet_A'], right_on = ['HF','consDet'])
+        classify_object.histDF = pd.merge(left = classify_object.histDF, 
+                                          right = consDetCount, 
+                                          how = u'left', 
+                                          left_on = ['HF','consDet_A'], 
+                                          right_on = ['HF','consDet'])
         classify_object.histDF.drop(labels = ['consDet_x','consDet_y'], axis = 1, inplace = True)
 
         # count the number of instances of certain detection histories by detection class and write to data frame
         detHistCount = trainDF.groupby(['Detection','detHist'])['detHist'].count()
         detHistCount = pd.Series(detHistCount, name = 'detHistACountT')
         detHistCount = pd.DataFrame(detHistCount).reset_index().rename(columns = {'Detection':'HT'})
-        classify_object.histDF = pd.merge(left = classify_object.histDF, right = detHistCount, how = u'left', left_on = ['HT','detHist_A'],right_on =['HT','detHist'])
+        classify_object.histDF = pd.merge(left = classify_object.histDF, 
+                                          right = detHistCount, 
+                                          how = u'left', 
+                                          left_on = ['HT','detHist_A'],
+                                          right_on =['HT','detHist'])
         detHistCount = detHistCount.rename(columns = {'HT':'HF','detHistACountT':'detHistACountF'})
-        classify_object.histDF = pd.merge(left = classify_object.histDF, right = detHistCount, how = u'left', left_on = ['HF','detHist_A'],right_on =['HF','detHist'])
+        classify_object.histDF = pd.merge(left = classify_object.histDF, 
+                                          right = detHistCount, 
+                                          how = u'left', 
+                                          left_on = ['HF','detHist_A'],
+                                          right_on =['HF','detHist'])
         classify_object.histDF.drop(labels = ['detHist_x','detHist_y'], axis = 1, inplace = True)
 
         # count the number of instances of consecutive record lengths by detection class and write to data frame
         conRecLengthCount = trainDF.groupby(['Detection','conRecLength'])['conRecLength'].count()
         conRecLengthCount = pd.Series(conRecLengthCount, name = 'conRecLengthACountT')
         conRecLengthCount = pd.DataFrame(conRecLengthCount).reset_index().rename(columns = {'Detection':'HT'})
-        classify_object.histDF = pd.merge(left = classify_object.histDF, right = conRecLengthCount, how = u'left', left_on = ['HT','conRecLength_A'], right_on = ['HT','conRecLength'])
+        classify_object.histDF = pd.merge(left = classify_object.histDF, 
+                                          right = conRecLengthCount, 
+                                          how = u'left', 
+                                          left_on = ['HT','conRecLength_A'], 
+                                          right_on = ['HT','conRecLength'])
         conRecLengthCount = conRecLengthCount.rename(columns = {'HT':'HF','conRecLengthACountT':'conRecLengthACountF'})
-        classify_object.histDF = pd.merge(left = classify_object.histDF, right = conRecLengthCount, how = u'left', left_on = ['HF','conRecLength_A'], right_on = ['HF','conRecLength'])
+        classify_object.histDF = pd.merge(left = classify_object.histDF, 
+                                          right = conRecLengthCount, 
+                                          how = u'left', 
+                                          left_on = ['HF','conRecLength_A'], 
+                                          right_on = ['HF','conRecLength'])
         classify_object.histDF.drop(labels = ['conRecLength_x','conRecLength_y'], axis = 1, inplace = True)
 
         # count the number of instances of hit ratios by detection class and write to data frame
         hitRatioCount = trainDF.groupby(['Detection','hitRatio'])['hitRatio'].count()
         hitRatioCount = pd.Series(hitRatioCount, name = 'hitRatioACountT')
         hitRatioCount = pd.DataFrame(hitRatioCount).reset_index().rename(columns = {'Detection':'HT'})
-        classify_object.histDF = pd.merge(left = classify_object.histDF, right = hitRatioCount, how = u'left', left_on = ['HT','hitRatio_A'], right_on = ['HT','hitRatio'])
+        classify_object.histDF = pd.merge(left = classify_object.histDF, 
+                                          right = hitRatioCount, 
+                                          how = u'left', 
+                                          left_on = ['HT','hitRatio_A'], 
+                                          right_on = ['HT','hitRatio'])
         hitRatioCount = hitRatioCount.rename(columns = {'HT':'HF','hitRatioACountT':'hitRatioACountF'})
-        classify_object.histDF = pd.merge(left = classify_object.histDF, right = hitRatioCount, how = u'left', left_on = ['HF','hitRatio_A'], right_on = ['HF','hitRatio'])
+        classify_object.histDF = pd.merge(left = classify_object.histDF, 
+                                          right = hitRatioCount, 
+                                          how = u'left', 
+                                          left_on = ['HF','hitRatio_A'], 
+                                          right_on = ['HF','hitRatio'])
         classify_object.histDF.drop(labels = ['hitRatio_x','hitRatio_y'], axis = 1, inplace = True)
 
         # Power
@@ -1357,51 +1643,75 @@ class cross_validated():
             c.close()
 
         else:
+            self.trainDF = pd.DataFrame()
             if rec_list == None:
-                sql = "select * from tblTrain WHERE recType == '%s'"%(recType)
-                # get receivers in study of this type
                 recs = pd.read_sql("select * from tblMasterReceiver WHERE recType == '%s'"%(recType),con=conn)['recID'].values
             else:
-                sql = "SELECT * FROM tblTrain  WHERE recID == '%s'"%(rec_list[0])
-                for i in rec_list[1:]:
-                    sql = sql + "OR recID == '%s'"%(i)
-                recs = rec_list
-            self.trainDF = pd.read_sql(sql,con=conn,coerce_float  = True)#This will read in tblTrain and create a pandas dataframe
-
+                recs = self.rec_list
+        
             c.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
             tbls = c.fetchall()
             # iterate over the receivers to find the final classification (aka the largest _n)
             max_iter_dict = {} # receiver:max iter
             curr_idx = 0
+            rec_iter_list = []
             for i in recs:
                 max_iter = 1
                 while curr_idx < len(tbls) - 1:
                     for j in tbls:
                         if i in j[0]:
+                            rec_iter_list.append(j[0])
                             if int(j[0][-1]) >= max_iter:
                                 max_iter = int(j[0][-1])
                                 max_iter_dict[i] = j[0]
                         curr_idx = curr_idx + 1
                 curr_idx = 0
             del i, j, curr_idx
+            
             # once we have a hash table of receiver to max classification, extract the classification dataset
-            self.classDF = pd.DataFrame()
+            trues = pd.DataFrame()
+            falses = pd.DataFrame()
             for i in max_iter_dict:
-                classDat = pd.read_sql("select test, FreqCode,Power,noiseRatio, lag,lagDiff,conRecLength_A,consDet_A,detHist_A,hitRatio_A,seriesHit_A,conRecLength_M,consDet_M,detHist_M,hitRatio_M,seriesHit_M,postTrue_A,postTrue_M,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from %s"%(max_iter_dict[i]),con=conn)
-                #classDat = classDat[classDat.postTrue_A >= classDat.postTrue_M]
-                classDat.drop(['conRecLength_M','consDet_M','detHist_M','hitRatio_M','seriesHit_M'], axis = 1, inplace = True)
-                classDat.rename(columns = {'conRecLength_A':'conRecLength','consDet_A':'consDet','detHist_A':'detHist','hitRatio_A':'hitRatio','seriesHit_A':'seriesHit'}, inplace = True)
-                self.classDF = self.classDF.append(classDat)
+                trues_i = pd.read_sql('''select test, FreqCode,Power,noiseRatio, 
+                                       lag,lagDiff,conRecLength_A,consDet_A,
+                                       detHist_A,hitRatio_A,seriesHit_A,postTrue_A,
+                                       timeStamp,Epoch,RowSeconds,recID,RecType,
+                                       ScanTime from %s'''%(max_iter_dict[i]),con=conn)
+                                                                             
+                trues_i.rename(columns = {'conRecLength_A':'conRecLength',
+                                          'consDet_A':'consDet',
+                                          'detHist_A':'detHist',
+                                          'hitRatio_A':'hitRatio',
+                                          'seriesHit_A':'seriesHit'},
+                               inplace = True)
+                
+                trues_i = trues_i[trues_i.test == 1]
+                trues = trues.append(trues_i)
+                del trues_i
+                print ("Imported Classified Valid from Table %s"%(i))
 
-            self.trainDF = self.trainDF[self.trainDF.Detection==0]
-            self.classDF = self.classDF[self.classDF.test==1]
-            self.classDF['Channels']=np.repeat(1,len(self.classDF))
-            self.classDF.rename(columns={"test":"Detection","RowSeconds":"Seconds","RecType":"recType"},inplace=True)#inplace tells it to replace the existing dataframe
-            self.trainDF = self.trainDF.append(self.classDF)
-            del self.classDF
+            # iterate over receivers, extract false positives from tblTrain.  
+            for i in self.rec_list:
+                falses_i = pd.read_sql("select * from tblTrain WHERE recID == '%s'"%(i),con=conn)#This will read in tblTrain and create a pandas dataframe
+                if len(falses_i) > 0:
+                    falses_i = falses_i[falses_i.Detection==0]
+                    falses = falses.append(falses_i) 
+                    del falses_i
+                    print ("Imported Known False Positive from tblTrain at Receiver %s"%(i))
+                
+            print ("Training data created")
+
+            trues['Channels']=np.repeat(1,len(trues))
+            trues.rename(columns={"test":"Detection","RowSeconds":"Seconds","RecType":"recType"},inplace=True)#inplace tells it to replace the existing dataframe
+            self.trainDF = self.trainDF.append(trues)
+            self.trainDF = self.trainDF.append(falses)
+            del trues, falses
             c.close()
 
         self.k = folds
+        
+        # force data types
+        self.trainDF.Detection = self.trainDF.Detection.fillna(0)
         self.trainDF.Detection = self.trainDF.Detection.astype(int)
         self.trainDF.FreqCode = self.trainDF.FreqCode.astype(str)
         self.trainDF.seriesHit = self.trainDF.seriesHit.astype(int)
@@ -1410,20 +1720,23 @@ class cross_validated():
         self.trainDF.noiseRatio = self.trainDF.noiseRatio.astype(float)
         self.trainDF.conRecLength = self.trainDF.conRecLength.astype(int)
         self.trainDF.hitRatio = self.trainDF.hitRatio.astype(float)
+        
         self.trainDF['powerBin'] = (self.trainDF.Power//5)*5
         self.trainDF['noiseBin'] = (self.trainDF.noiseRatio//.1)*.1
         self.trainDF['lagDiffBin'] = (self.trainDF.lagDiff//10)*.10
-        cols = ['priorF','LDetHistF','LPowerF','LHitRatioF','LnoiseF','LconRecF','postFalse','priorT','LDetHistT','LPowerT','LHitRatioT','LnoiseT','LconRecT','postTrue','test']
-        for i in self.trainDF.columns:
-            cols.append(i)
-        self.histDF = pd.DataFrame(columns = cols)                                                                           # number of folds                                                                        # set number of folds in cross validation
-        fSize = round(len(self.trainDF)/self.folds,0)+1
-        kList = np.arange(1,11,1)
-        kList = np.repeat(kList,fSize)
-        self.trainDF['fold'] = np.random.choice(kList,len(self.trainDF),False)
+        
+        
+        self.histDF = pd.DataFrame()                                                                                                                                                   # set number of folds in cross validation
+        
+        kList = np.arange(0,self.folds,1)
+
+        self.trainDF['fold'] = np.random.choice(kList,len(self.trainDF))
+        
         print ("Folds created for k fold cross validation")
         self.folds = np.arange(0,folds,1)
+        
         self.fields = likelihood_model
+          
 
     def fold(self,i):
         self.testDat = self.trainDF[self.trainDF.fold == i]
@@ -1552,60 +1865,40 @@ class cross_validated():
         self.testDat['postTrue'] = self.testDat['priorT'] * self.testDat['LikelihoodTrue']
         self.testDat['postFalse'] = self.testDat['priorF'] * self.testDat['LikelihoodFalse']
 
+        # calculate the evidence 
+        self.testDat['evidence'] = evidence(self) 
 
+        # calculate prob_a (to make this play nice with sklearn)
+        self.testDat['prob_a'] = (self.testDat.priorF * self.testDat.LikelihoodFalse) / self.testDat.evidence
+        
         self.testDat['T2F_ratio'] = self.testDat['postTrue'] / self.testDat['postFalse']
         # classify detection as true or false based on MAP hypothesis
 
         self.testDat['test'] = self.testDat.postTrue > self.testDat.postFalse
-        self.histDF = self.histDF.append(self.testDat)
+        self.testDat['test_inv'] = self.testDat.postFalse > self.testDat.postTrue
+        self.histDF = self.histDF.append(self.testDat.reset_index())
         del self.testDat, self.trainDat
 
     def summary(self):
-        metrics = pd.crosstab(self.histDF.Detection,self.histDF.test)
-        rowSum = metrics.sum(axis = 1)
-        colSum = metrics.sum(axis = 0)
-        self.corr_matrix = self.histDF[['conRecLength','consDet','hitRatio','noiseRatio','seriesHit','Power','lagDiff']].apply(pd.to_numeric).corr().round(4)
-
-        print ("k-Fold cross validation report for reciever type %s"%(self.recType))
-        print ("----------------------------------------------------------------")
-        print ("There are %s records in the training dataset "%(len(self.trainDF)))
-        print ("%s are known true positive detections and" %(len(self.trainDF[self.trainDF.Detection == 1])))
-        print ("%s are known false positive detections"%(len(self.trainDF[self.trainDF.Detection == 0])))
-        print ("The prior probability that a detection is true positive is: %s"%(round(float(len(self.trainDF[self.trainDF.Detection == 1]))/float(len(self.trainDF)),4)))
-        print ("The prior probability that a detection is false positive is: %s"%(round(float(len(self.trainDF[self.trainDF.Detection == 0]))/float(len(self.trainDF)),4)))
-        print ("----------------------------------------------------------------")
-        print ("number of folds: %s"%(self.k))
-        print ("----------------------------------------------------------------")
-        print (" Cross Validation Table:")
-        print ("          Classified     Classified")
-        print ("             False          True")
-        print ("      ______________________________")
-        print (" Known|              |              |")
-        print (" False| TN:%s  | FP:%s  |"%(format(metrics.iloc[0,0]," 8d"),format(metrics.iloc[0,1]," 8d")))
-        print ("      |______________|______________|")
-        print (" Known|              |              |")
-        print ("  True| FN:%s  | TP:%s  |"%(format(metrics.iloc[1,0]," 8d"),format(metrics.iloc[1,1]," 8d")))
-        print ("      |______________|______________|")
-        print ("")
-        print ("________________________________________________________________")
-        print ("Positive Predictive Value: %s"%(round(float(metrics.iloc[1,1])/float(colSum[1]),4)))
-        print ("PPV = TP/(TP + FP)")
-        print ("Probability of a record being correctly classified as true")
-        print ("----------------------------------------------------------------")
-        print ("Negative Predictive Value: %s"%(round(float(metrics.iloc[0,0])/float(colSum[0]),4)))
-        print ("NPV = TN/(TN + FN)")
-        print ("Probability of a record being correctly classified as false")
-        print ("----------------------------------------------------------------")
-        print ("The sensitivity of the classifier is: %s"%(round(float(metrics.iloc[1,1])/float(rowSum[1]),4)))
-        print ("sensitivity = TP /(TP + FN)")
-        print ("Probability of a record being classified true,")
-        print ("given that the record is in fact true")
-        print ("----------------------------------------------------------------")
-        print ("The specificity of the classifier is: %s"%(round(float(metrics.iloc[0,0])/float(rowSum[0]),4)))
-        print ("specificity = TN / (TN + FP)")
-        print ("Probability of a record being classified false,")
-        print ("given that the record is in fact false")
-        print ("________________________________________________________________")
+        # calculate evidence
+        
+        
+        # create contingency table
+        metrix = pd.crosstab(self.histDF.Detection,self.histDF.test)
+        rowSum = metrix.sum(axis = 1)
+        colSum = metrix.sum(axis = 0)
+        
+        # create correlation matrix
+        if 'power' in self.fields:
+            pow_index = self.fields.index('power')
+            self.fields[pow_index] = 'powerBin'
+        if 'noiseRatio' in self.fields:
+            noi_index = self.fields.index('noiseRatio')
+            self.fields[noi_index] = 'noiseBin'
+        if 'lagDiff' in self.fields:
+            lag_index = self.fields.index('lagDiff')
+            self.fields[lag_index] = 'lagDiffBin'  
+        self.corr_matrix = self.histDF[self.fields].apply(pd.to_numeric).corr().round(4)
         print ("The correlation matrix for all predictors variabes:             ")
         print (self.corr_matrix)
         # visualize the correlation matrix, closer to 1, the stronger the effect
@@ -1615,16 +1908,102 @@ class cross_validated():
         ax = fig.add_subplot(111)
         cax = ax.matshow(self.corr_matrix, vmin = -1, vmax = 1)
         fig.colorbar(cax)
-        ticks = np.arange(0,7,1)
+        ticks = np.arange(0,len(self.fields),1)
         ax.set_xticks(ticks)
         ax.set_yticks(ticks)
-        ax.set_xticklabels(['conRecLength','consDet','hitRatio','noiseRatio','seriesHit','Power','lagDiff'])
-        ax.set_yticklabels(['conRecLength','consDet','hitRatio','noiseRatio','seriesHit','Power','lagDiff'])
-        plt.show()
+        ax.set_xticklabels(self.fields)
+        ax.set_yticklabels(self.fields)
+        plt.show() 
+        try:
+            print ("----------------------------------------------------------------")     
+            print ("k-Fold cross validation report for reciever type %s"%(self.recType))
+            print ("----------------------------------------------------------------")
+            print ("There are %s records in the training dataset "%(len(self.trainDF)))
+            print ("%s are known true positive detections and" %(len(self.trainDF[self.trainDF.Detection == 1])))
+            print ("%s are known false positive detections"%(len(self.trainDF[self.trainDF.Detection == 0])))
+            print ("The prior probability that a detection is true positive is: %s"%(round(float(len(self.trainDF[self.trainDF.Detection == 1]))/float(len(self.trainDF)),4)))
+            print ("The prior probability that a detection is false positive is: %s"%(round(float(len(self.trainDF[self.trainDF.Detection == 0]))/float(len(self.trainDF)),4)))
+            print ("----------------------------------------------------------------")
+            print ("number of folds: %s"%(self.k))
+            print ("----------------------------------------------------------------")
+            print (" Cross Validation Table:")
+            print ("          Classified     Classified")
+            print ("             False          Valid")
+            print ("      ______________________________")
+            print (" Known|              |              |")
+            print (" False| TN:%s  | FP:%s  |"%(format(metrix.iloc[0,0]," 8d"),format(metrix.iloc[0,1]," 8d")))
+            print ("      |______________|______________|")
+            print (" Known|              |              |")
+            print ("  True| FN:%s  | TP:%s  |"%(format(metrix.iloc[1,0]," 8d"),format(metrix.iloc[1,1]," 8d")))
+            print ("      |______________|______________|")
+            print ("")
+            print ("________________________________________________________________")
+            print ("Positive Predictive Value: %s"%(round(float(metrix.iloc[1,1])/float(colSum[1]),4)))
+            print ("PPV = TP/(TP + FP)")
+            print ("Probability of a record being correctly classified as true")
+            print ("----------------------------------------------------------------")
+            print ("Negative Predictive Value: %s"%(round(float(metrix.iloc[0,0])/float(colSum[0]),4)))
+            print ("NPV = TN/(TN + FN)")
+            print ("Probability of a record being correctly classified as false")
+            print ("----------------------------------------------------------------")
+            print ("The sensitivity of the classifier is: %s"%(round(float(metrix.iloc[1,1])/float(rowSum[1]),4)))
+            print ("sensitivity = TP /(TP + FN)")
+            print ("Probability of a record being classified true,")
+            print ("given that the record is in fact true")
+            print ("----------------------------------------------------------------")
+            print ("The specificity of the classifier is: %s"%(round(float(metrix.iloc[0,0])/float(rowSum[0]),4)))
+            print ("specificity = TN / (TN + FP)")
+            print ("Probability of a record being classified false,")
+            print ("given that the record is in fact false")
+            print ("----------------------------------------------------------------")
+            fpr = round(float(metrix.iloc[0,1])/(float(metrix.iloc[0,1]) + float(metrix.iloc[0,0])),4)
+            print ("The false positive rate: %s"%(fpr))
+            print ("fpr = FP / (FP + TN)")
+            print ("The proportion of all records classified as false,")
+            print ("that are still classified as valid")
+        except IndexError:
+            print (metrix)
+        print ("----------------------------------------------------------------")
+        print ("Calculate Receiver Operating Curve and Precision Recall Curve")
+        
+        # calculate ROC curve and ROC-AUC score using sklearn
+        
+        fpr, tpr, thresholds = metrics.roc_curve(self.histDF.test_inv,self.histDF.prob_a,pos_label = 1)
+        prc, rc, thresholds = metrics.precision_recall_curve(self.histDF.test_inv,self.histDF.prob_a,pos_label = 1)
+        '''https://scikit-learn.org/stable/auto_examples/model_selection/plot_roc.html#sphx-glr-auto-examples-model-selection-plot-roc-py'''
+
+        roc_auc = round(metrics.auc(fpr, tpr),4)
+        print ("The ROC-AUC for this classifier is: %s"%(roc_auc))
+        
+        ap = round(metrics.average_precision_score(self.histDF.test, self.histDF.prob_a),4)
+        print ("The PRC-AUC for this classifier is: %s"%(ap))
+
+        # make a figure
+        figSize = (4,2)
+        plt.figure()
+        fig, axs = plt.subplots(1,2,tight_layout = True,figsize = figSize)
+        # ROC on the left
+        axs[0].plot(fpr, tpr, color='darkorange',lw=2)
+        axs[0].plot([0,1], [0,1], color='blue',lw=2,ls = '--')
+        axs[0].set_xlim([0.0, 1.05])
+        axs[0].set_ylim([0.0, 1.05])                    
+        axs[0].set_xlabel('False Positive Rate')
+        axs[0].set_ylabel('True Positive Rate')
+        axs[0].set_title('Receiver Operating Curve')
+        # PRC on the right
+        axs[1].plot(rc, prc, color='darkorange',lw=2)
+        axs[1].plot([0,1], [0,0], color='blue',lw=2,ls = '--')
+        axs[1].set_xlim([0.0, 1.05])
+        axs[1].set_ylim([0.0, 1.05])                    
+        axs[1].set_xlabel('Recall')
+        axs[1].set_ylabel('Precision')
+        axs[1].set_title('Precision-Recall Curve')
+        print ("________________________________________________________________")
+     
 
 class classification_results():
     '''Python class object to hold the results of false positive classification'''
-    def __init__(self,recType,projectDB,figureWS,rec_list = None, site = None, reclass_iter = 1):
+    def __init__(self,recType,projectDB,figureWS = None,rec_list = None, reclass_iter = None):
         self.recType = recType
         self.projectDB = projectDB
         self.figureWS = figureWS
@@ -1632,11 +2011,11 @@ class classification_results():
         c = conn.cursor()
         conn = sqlite3.connect(self.projectDB)                                              # connect to the database
         #self.class_stats_data = pd.DataFrame(columns = ['FreqCode','Epoch','recID','Power','hitRatio','postTrue','postFalse','test','lagDiff','conRecLength','noiseRatio','fishCount', 'logLikelihoodRatio'])                # set up an empty data frame
-        self.class_stats_data = pd.DataFrame(columns = ['FreqCode','Epoch','recID','Power','noiseRatio','hitRatio_A','hitRatio_M','postTrue_A','postTrue_M','postFalse_A','postFalse_M','test','lagDiff','consDet_A', 'consDet_M','conRecLength_A', 'conRecLength_M','logLikelihoodRatio_A', 'logLikelihoodRatio_M'])                # set up an empty data frame
-        self.initial_data = pd.DataFrame(columns = ['FreqCode','Epoch','recID','Power','noiseRatio','hitRatio_A','hitRatio_M','postTrue_A','postTrue_M','postFalse_A','postFalse_M','test','lagDiff','consDet_A', 'consDet_M','conRecLength_A', 'conRecLength_M','logLikelihoodRatio_A', 'logLikelihoodRatio_M'])
+        self.final_iter = pd.DataFrame(columns = ['FreqCode','Epoch','recID','Power','noiseRatio','hitRatio_A','hitRatio_M','postTrue_A','postTrue_M','postFalse_A','postFalse_M','test','lagDiff','consDet_A', 'consDet_M','conRecLength_A', 'conRecLength_M','logLikelihoodRatio_A', 'logLikelihoodRatio_M'])                # set up an empty data frame
+        self.init_iter = pd.DataFrame(columns = ['FreqCode','Epoch','recID','Power','noiseRatio','hitRatio_A','hitRatio_M','postTrue_A','postTrue_M','postFalse_A','postFalse_M','test','lagDiff','consDet_A', 'consDet_M','conRecLength_A', 'conRecLength_M','logLikelihoodRatio_A', 'logLikelihoodRatio_M'])
         self.reclass_iter = reclass_iter
         self.rec_list = rec_list
-        self.site = site
+
         if rec_list == None:
             recSQL = "SELECT * FROM tblMasterReceiver WHERE RecType = '%s'"%(self.recType) # SQL code to import data from this node
             receivers = pd.read_sql(recSQL,con = conn)                         # import data
@@ -1644,30 +2023,120 @@ class classification_results():
             for i in receivers:                                                # for every receiver
                 print ("Start selecting and merging data for receiver %s"%(i))
 
-                sql = "SELECT FreqCode,Epoch,recID,Power,noiseRatio,hitRatio_A,hitRatio_M,postTrue_A,postTrue_M,postFalse_A,postFalse_M,test,lagDiff,consDet_A, consDet_M, conRecLength_A, conRecLength_M,logLikelihoodRatio_A, logLikelihoodRatio_M FROM tblClassify_%s_%s "%(i, reclass_iter)
+                sql = '''SELECT FreqCode,Epoch,recID,Power,noiseRatio,hitRatio_A,
+                hitRatio_M,postTrue_A,postTrue_M,postFalse_A,postFalse_M,test,
+                lagDiff,consDet_A, consDet_M, conRecLength_A, conRecLength_M,
+                logLikelihoodRatio_A, logLikelihoodRatio_M 
+                FROM tblClassify_%s_%s '''%(i, reclass_iter)
                 dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver
-                self.class_stats_data = self.class_stats_data.append(dat)
+                self.final_iter = self.final_iter.append(dat)
                 del dat
 
-                sql = "SELECT FreqCode,Epoch,recID,Power,noiseRatio,hitRatio_A,hitRatio_M,postTrue_A,postTrue_M,postFalse_A,postFalse_M,test,lagDiff,consDet_A, consDet_M,conRecLength_A, conRecLength_M,logLikelihoodRatio_A, logLikelihoodRatio_M FROM tblClassify_%s_%s "%(i, 1)
+                sql = '''SELECT FreqCode,Epoch,recID,Power,noiseRatio,hitRatio_A,
+                hitRatio_M,postTrue_A,postTrue_M,postFalse_A,postFalse_M,test,
+                lagDiff,consDet_A, consDet_M,conRecLength_A, conRecLength_M,
+                logLikelihoodRatio_A, logLikelihoodRatio_M 
+                FROM tblClassify_%s_%s '''%(i, 1)
                 dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver
-                self.initial_data = self.initial_data.append(dat)
+                self.init_iter = self.init_iter.append(dat)
                 del dat
 
         else:
+            c.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
+            tbls = c.fetchall()
+            # iterate over the receivers to find the final classification (aka the largest _n)
+            max_iter_dict = {} # receiver:max iter
+            curr_idx = 0
+            rec_iter_list = []
             for i in rec_list:
-                print ("Start selecting and merging data for receiver %s"%(i))
-
-                sql = "SELECT FreqCode,Epoch,recID,Power,noiseRatio,hitRatio_A,hitRatio_M,postTrue_A,postTrue_M,postFalse_A,postFalse_M,test,lagDiff,consDet_A, consDet_M,conRecLength_A, conRecLength_M,logLikelihoodRatio_A, logLikelihoodRatio_M FROM tblClassify_%s_%s"%(i, reclass_iter)
+                max_iter = 1
+                while curr_idx < len(tbls) - 1:
+                    for j in tbls:
+                        if i in j[0]:
+                            rec_iter_list.append(j[0])
+                            if int(j[0][-1]) >= max_iter:
+                                max_iter = int(j[0][-1])
+                                max_iter_dict[i] = j[0]
+                        curr_idx = curr_idx + 1
+                curr_idx = 0
+            print (max_iter_dict)
+            del i, j, curr_idx
+            # once we have a hash table of receiver to max classification, extract the classification dataset
+            self.classDF = pd.DataFrame()
+            for i in rec_list:
+                if reclass_iter == None:
+                    print ("Start selecting and merging data for receiver %s"%(i))
+    
+                    sql = '''SELECT FreqCode,Epoch,recID,Power,noiseRatio,hitRatio_A,
+                    hitRatio_M,postTrue_A,postTrue_M,postFalse_A,postFalse_M,test,
+                    lagDiff,consDet_A, consDet_M,conRecLength_A, conRecLength_M,
+                    logLikelihoodRatio_A, logLikelihoodRatio_M 
+                    FROM %s'''%(max_iter_dict[i])
+                    
+                    dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver
+                    self.final_iter = self.final_iter.append(dat)
+                    del dat
+    
+                    sql = '''SELECT FreqCode,Epoch,recID,Power,noiseRatio,hitRatio_A,
+                    hitRatio_M,postTrue_A,postTrue_M,postFalse_A,postFalse_M,test,
+                    lagDiff,consDet_A, consDet_M,conRecLength_A, conRecLength_M,
+                    logLikelihoodRatio_A, logLikelihoodRatio_M 
+                    FROM tblClassify_%s_1 '''%(i)
+                    
+                    dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver
+                    self.init_iter = self.init_iter.append(dat)
+                    del dat
+                else:
+                    
+                    print ("Start selecting and merging data for receiver %s"%(i))
+    
+                    sql = '''SELECT FreqCode,Epoch,recID,Power,noiseRatio,hitRatio_A,
+                    hitRatio_M,postTrue_A,postTrue_M,postFalse_A,postFalse_M,test,
+                    lagDiff,consDet_A, consDet_M,conRecLength_A, conRecLength_M,
+                    logLikelihoodRatio_A, logLikelihoodRatio_M 
+                    FROM tblClassify_%s_%s '''%(i,reclass_iter)
+                    
+                    dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver
+                    self.final_iter = self.final_iter.append(dat)
+                    del dat
+    
+                    sql = '''SELECT FreqCode,Epoch,recID,Power,noiseRatio,hitRatio_A,
+                    hitRatio_M,postTrue_A,postTrue_M,postFalse_A,postFalse_M,test,
+                    lagDiff,consDet_A, consDet_M,conRecLength_A, conRecLength_M,
+                    logLikelihoodRatio_A, logLikelihoodRatio_M 
+                    FROM tblClassify_%s_1 '''%(i)
+                    
+                    dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver
+                    self.init_iter = self.init_iter.append(dat)
+                    del dat
+            trues = self.final_iter[self.final_iter.test == 1]
+            falses = pd.DataFrame()
+            
+            for i in rec_iter_list:
+                sql = '''SELECT FreqCode,Epoch,recID,Power,noiseRatio,hitRatio_A,
+                hitRatio_M,postTrue_A,postTrue_M,postFalse_A,postFalse_M,test,
+                lagDiff,consDet_A, consDet_M,conRecLength_A, conRecLength_M,
+                logLikelihoodRatio_A, logLikelihoodRatio_M 
+                FROM %s'''%(i)
+                
                 dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver
-                self.class_stats_data = self.class_stats_data.append(dat)
-                del dat
+                dat = dat[dat.test == 0]
+                falses = falses.append(dat)
 
-                sql = "SELECT FreqCode,Epoch,recID,Power,noiseRatio,hitRatio_A,hitRatio_M,postTrue_A,postTrue_M,postFalse_A,postFalse_M,test,lagDiff,consDet_A, consDet_M,conRecLength_A, conRecLength_M,logLikelihoodRatio_A, logLikelihoodRatio_M FROM tblClassify_%s_%s "%(i, 1)
-                dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver
-                self.initial_data = self.initial_data.append(dat)
                 del dat
+                
+            self.final_iter = trues.append(falses)
+            del trues, falses
         c.close()
+        
+        trues = self.final_iter[self.final_iter.test == 1][['FreqCode','Epoch','test']]
+        trues.rename(columns = {'test':'final_test'},inplace = True)
+        print (len(trues))
+        # join true detections to initial data
+        self.init_iter = self.init_iter.merge(trues,how = 'left',left_on = ['FreqCode','Epoch'], right_on = ['FreqCode','Epoch'])
+        self.init_iter = cons_det_filter(self.init_iter)
+        self.init_iter.final_test.fillna(0,inplace = True)
+        self.init_iter.drop_duplicates(keep = 'first', inplace = True)
 
     def classify_stats(self):
         '''function reads all classified data, generates summary statistics by receiver type,
@@ -1679,16 +2148,16 @@ class classification_results():
         else:
             print ("Classification summary statistics report")
         print ("----------------------------------------------------------------------------------")
-        det_class_count = self.class_stats_data.groupby('test')['test'].count().to_frame()
+        det_class_count = self.init_iter.groupby('final_test')['final_test'].count().to_frame()
         if len(det_class_count)>1:
             print ("")
             print ("%s detection class statistics:"%(self.recType))
-            print ("The probability that a detection was classified as true was %s"%((round(float(det_class_count.at[1,'test'])/float(det_class_count.sum()),3))))
-            print ("The probability that a detection was classified as fasle positive was %s"%((round(float(det_class_count.at[0,'test'])/float(det_class_count.sum()),3))))
+            print ("The probability that a detection was classified as true was %s"%((round(float(det_class_count.at[1,'final_test'])/float(det_class_count.sum()),3))))
+            print ("The probability that a detection was classified as fasle positive was %s"%((round(float(det_class_count.at[0,'final_test'])/float(det_class_count.sum()),3))))
             print ("")
             print ("----------------------------------------------------------------------------------")
             print ("")
-            self.sta_class_count = self.class_stats_data.groupby(['recID','test'])['test'].count().to_frame()#.reset_index(drop = False)
+            self.sta_class_count = self.final_iter.groupby(['recID','test'])['test'].count().to_frame()#.reset_index(drop = False)
             self.recs = list(set(self.sta_class_count.index.levels[0]))
             print ("Detection Class Counts Across Stations")
             print ("          Classified     Classified")
@@ -1715,26 +2184,19 @@ class classification_results():
             # calculate Cohen's Kappa (concordance)
             # step 1, join the final trues to the initial classification dataset
             # get true detections
-            trues = self.class_stats_data[self.class_stats_data.test == 1][['FreqCode','Epoch','test']]
-            trues.rename(columns = {'test':'final_test'},inplace = True)
-            print (len(trues))
-            # join true detections to initial data
-            self.initial_data = self.initial_data.merge(trues,how = 'left',left_on = ['FreqCode','Epoch'], right_on = ['FreqCode','Epoch'])
-            self.initial_data = cons_det_filter(self.initial_data)
-            self.initial_data.final_test.fillna(0,inplace = True)
-            self.initial_data.drop_duplicates(keep = 'first', inplace = True)
 
-            n11 = len(self.initial_data[(self.initial_data.final_test == 1) & (self.initial_data.cons_det_filter == 1)])
+
+            n11 = len(self.init_iter[(self.init_iter.final_test == 1) & (self.init_iter.consDet_A == 1)])
             print ("The algorithm and Beeman and Perry classified the same %s recoreds as true "%(n11))
-            n10 = len(self.initial_data[(self.initial_data.final_test == 1) & (self.initial_data.cons_det_filter == 0)])
+            n10 = len(self.init_iter[(self.init_iter.final_test == 1) & (self.init_iter.consDet_A == 0)])
             print ("The algorithm classified %s records as true while Beeman and Perry classified them as false"%(n10))
-            n01 = len(self.initial_data[(self.initial_data.final_test == 0) & (self.initial_data.cons_det_filter == 1)])
+            n01 = len(self.init_iter[(self.init_iter.final_test == 0) & (self.init_iter.consDet_A == 1)])
             print ("The algorithm classified %s records as false while Beeman and Perry classified them as true"%(n01))
-            n00 = len(self.initial_data[(self.initial_data.final_test == 0) & (self.initial_data.cons_det_filter == 0)])
+            n00 = len(self.init_iter[(self.init_iter.final_test == 0) & (self.init_iter.consDet_A == 0)])
             print ("The algorithm and Beeman and Perry classified the same %s records as false positive"%(n00))
             I_o = (n11 + n00)/(n11 + n10 + n01 + n00)
             print ("The observed propotion of agreement was %s"%(I_o))
-            I_e = ((n11 + n01)*(n11 + n10) + (n10 + n00)*(n01 + n00))/(n11 + n10 + n01 + n00)**2
+            I_e = (((n11 + n01)*(n11 + n10)/(n11 + n10 + n01 + n00)) + ((n10 + n00)*(n01 + n00)/(n11 + n10 + n01 + n00)))/(n11 + n10 + n01 + n00)
             print ("The expected agreement due to chance alone was %s"%(I_e))
 
             self.kappa = (I_o - I_e)/(1.- I_e)
@@ -1743,188 +2205,54 @@ class classification_results():
             print ("----------------------------------------------------------------------------------")
             print ("Compiling Figures")
             # get data by detection class for side by side histograms
-            self.class_stats_data['Power'] = self.class_stats_data.Power.astype(float)
-            self.class_stats_data['lagDiff'] = self.class_stats_data.lagDiff.astype(float)
-            self.class_stats_data['conRecLength_A'] = self.class_stats_data.conRecLength_A.astype(float)
-            self.class_stats_data['noiseRatio'] = self.class_stats_data.noiseRatio.astype(float)
+            self.final_iter['Power'] = self.final_iter.Power.astype(float)
+            self.final_iter['lagDiff'] = self.final_iter.lagDiff.astype(float)
+            self.final_iter['conRecLength_A'] = self.final_iter.conRecLength_A.astype(float)
+            self.final_iter['noiseRatio'] = self.final_iter.noiseRatio.astype(float)
             #self.class_stats_data['fishCount'] = self.class_stats_data.fishCount.astype(float)
-            self.class_stats_data['logPostRatio_A'] =np.log10(self.class_stats_data.postTrue_A.values/self.class_stats_data.postFalse_A.values)
-            self.class_stats_data['logPostRatio_M'] =np.log10(self.class_stats_data.postTrue_M.values/self.class_stats_data.postFalse_M.values)
+            self.final_iter['logPostRatio_A'] =np.log10(self.final_iter.postTrue_A.values/self.final_iter.postFalse_A.values)
+            self.final_iter['logPostRatio_M'] =np.log10(self.final_iter.postTrue_M.values/self.final_iter.postFalse_M.values)
 
             '''Currently these figures only return data for hypothesized alive fish - but we can have dead fish in here and
             their inlcusion in the histograms may be biasing the results - find the max hit ratio, consecutive record length, and likelihood ratio
             '''
-            self.class_stats_data['hitRatio_max'] = self.class_stats_data[['hitRatio_A','hitRatio_M']].max(axis = 1)
-            self.class_stats_data['conRecLength_max'] = self.class_stats_data[['conRecLength_A','conRecLength_M']].max(axis = 1)
-            self.class_stats_data['logLikelihoodRatio_max'] = self.class_stats_data[['logLikelihoodRatio_A','logLikelihoodRatio_M']].max(axis = 1)
-            self.class_stats_data['logPostRatio_max'] = self.class_stats_data[['logPostRatio_A','logPostRatio_M']].max(axis = 1)
-
-            trues = self.class_stats_data[self.class_stats_data.test == 1]
-            falses = self.class_stats_data[self.class_stats_data.test == 0]
+            self.final_iter['hitRatio_max'] = self.final_iter[['hitRatio_A','hitRatio_M']].max(axis = 1)
+            self.final_iter['conRecLength_max'] = self.final_iter[['conRecLength_A','conRecLength_M']].max(axis = 1)
+            self.final_iter['logLikelihoodRatio_max'] = self.final_iter[['logLikelihoodRatio_A','logLikelihoodRatio_M']].max(axis = 1)
+            self.final_iter['logPostRatio_max'] = self.final_iter[['logPostRatio_A','logPostRatio_M']].max(axis = 1)
+            
+            trues = self.final_iter[self.final_iter.test == 1]
+            falses = self.final_iter[self.final_iter.test == 0]
             self.trues = trues
             self.falses = falses
 
             # plot hit ratio histograms by detection class
             hitRatioBins =np.linspace(0,1.0,11)
 
-    #        plt.figure(figsize = (3,2))
-    #        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-    #        axs[0].hist(trues.hitRatio_max.values, hitRatioBins, density = True)
-    #        axs[1].hist(falses.hitRatio_max.values, hitRatioBins, density = True)
-    #        axs[0].set_xlabel('Hit Ratio')
-    #        axs[0].set_title('True')
-    #        axs[1].set_xlabel('Hit Ratio')
-    #        axs[1].set_title('False Positive')
-    #        axs[0].set_ylabel('Probability Density')
-    #        if self.site != None:
-    #            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_hitRatioCompare_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
-    #
-    #        else:
-    #            plt.savefig(os.path.join(self.figureWS,"%s_hitRatioCompare_class.png"%(self.recType)),bbox_inches = 'tight')
-    #
-    #        print ("Hit Ratio figure created, check your output workspace")
-
             # plot signal power histograms by detection class
-            minPower = self.class_stats_data.Power.min()//5 * 5
-            maxPower = self.class_stats_data.Power.max()//5 * 5
+            minPower = self.final_iter.Power.min()//5 * 5
+            maxPower = self.final_iter.Power.max()//5 * 5
             powerBins =np.arange(minPower,maxPower+20,10)
-
-    #        plt.figure(figsize = (3,2))
-    #        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-    #        axs[0].hist(trues.Power.values, powerBins, density = True)
-    #        axs[1].hist(falses.Power.values, powerBins, density = True)
-    #        axs[0].set_xlabel('%s Signal Power'%(self.recType))
-    #        axs[0].set_title('True')
-    #        axs[1].set_xlabel('%s Signal Power'%(self.recType))
-    #        axs[1].set_title('False Positive')
-    #        axs[0].set_ylabel('Frequency')
-    #        if self.site != None:
-    #            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_powerCompare_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
-    #        else:
-    #            plt.savefig(os.path.join(self.figureWS,"%s_powerCompare_class.png"%(self.recType)),bbox_inches = 'tight')
-    #        print ("Signal Power figure created, check your output Workspace")
 
             # Lag Back Differences - how stdy are detection lags?
             lagBins =np.arange(-100,110,20)
 
-    #        plt.figure(figsize = (3,2))
-    #        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-    #        axs[0].hist(trues.lagDiff.values, lagBins, density = True)
-    #        axs[1].hist(falses.lagDiff.values, lagBins, density = True)
-    #        axs[0].set_xlabel('Lag Differences')
-    #        axs[0].set_title('True')
-    #        axs[1].set_xlabel('Lag Differences')
-    #        axs[1].set_title('False Positive')
-    #        axs[0].set_ylabel('Frequency')
-    #        if self.site != None:
-    #            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_lagDifferences_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
-    #        else:
-    #            plt.savefig(os.path.join(self.figureWS,"%s_lagDifferences_class.png"%(self.recType)),bbox_inches = 'tight')
-    #        print ("Lag differences figure created, check your output Workspace")
-
             # Consecutive Record Length ?
             conBins =np.arange(1,12,1)
-
-    #        plt.figure(figsize = (3,2))
-    #        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-    #        axs[0].hist(trues.conRecLength_max.values, conBins, density = True)
-    #        axs[1].hist(falses.conRecLength_max.values, conBins, density = True)
-    #        axs[0].set_xlabel('Consecutive Hit Length')
-    #        axs[0].set_title('True')
-    #        axs[1].set_xlabel('Consecutive Hit Length')
-    #        axs[1].set_title('False Positive')
-    #        axs[0].set_ylabel('Frequency')
-    #        if self.site != None:
-    #            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_conRecLength_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
-    #        else:
-    #            plt.savefig(os.path.join(self.figureWS,"%s_conRecLength_class.png"%(self.recType)),bbox_inches = 'tight')
-    #        print ("Consecutive Hit Length figure created, check your output Workspace")
 
             # Noise Ratio
             noiseBins =np.arange(0,1.1,0.1)
 
-    #        plt.figure(figsize = (3,2))
-    #        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-    #        axs[0].hist(trues.noiseRatio.values, noiseBins, density = True)
-    #        axs[1].hist(falses.noiseRatio.values, noiseBins, density = True)
-    #        axs[0].set_xlabel('Noise Ratio')
-    #        axs[0].set_title('True')
-    #        axs[1].set_xlabel('Noise Ratio')
-    #        axs[1].set_title('False Positive')
-    #        axs[0].set_ylabel('Frequency')
-    #        if self.site != None:
-    #            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_noiseRatio_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
-    #
-    #        else:
-    #           plt.savefig(os.path.join(self.figureWS,"%s_noiseRatio_class.png"%(self.recType)),bbox_inches = 'tight')
-    #
-    #        print ("Noise Ratio figure created, check your output Workspace" )
-
-    #        # plot fish present
-    #        minCount = self.class_stats_data.fishCount.min()//10 * 10
-    #        maxCount = self.class_stats_data.fishCount.max()//10 * 10
-    #        countBins =np.arange(minCount,maxCount+20,10)
-    #
-    #        plt.figure(figsize = (6,3))
-    #        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-    #        axs[0].hist(trues.fishCount.values, countBins)
-    #        axs[1].hist(falses.fishCount.values, countBins)
-    #        axs[0].set_xlabel('Fish Present')
-    #        axs[0].set_title('True')
-    #        axs[1].set_xlabel('Fish Present')
-    #        axs[1].set_title('False Positive')
-    #        axs[0].set_ylabel('Probability Density')
-    #        if self.site != None:
-    #           plt.savefig(os.path.join(self.figureWS,"%s_%s_fishPresentCompare_class.png"%(self.recType,self.site)),bbox_inches = 'tight')
-    #        else:
-    #           plt.savefig(os.path.join(self.figureWS,"%s_fishPresentCompare_class.png"%(self.recType)),bbox_inches = 'tight')
-
-    #        print ("Fish Present Figure Created, check output workspace")
-
             # plot the log likelihood ratio
-            minLogRatio = self.class_stats_data.logLikelihoodRatio_max.min()//1 * 1
-            maxLogRatio = self.class_stats_data.logLikelihoodRatio_max.max()//1 * 1
+            minLogRatio = self.final_iter.logLikelihoodRatio_max.min()//1 * 1
+            maxLogRatio = self.final_iter.logLikelihoodRatio_max.max()//1 * 1
             ratioBins =np.arange(minLogRatio,maxLogRatio+1,2)
 
-    #        plt.figure(figsize = (3,2))
-    #        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-    #        axs[0].hist(trues.logLikelihoodRatio_max.values, ratioBins, density = True)
-    #        axs[1].hist(falses.logLikelihoodRatio_max.values, ratioBins, density = True)
-    #        axs[0].set_xlabel('Log Likelihood Ratio')
-    #        axs[0].set_title('True')
-    #        axs[1].set_xlabel('Log Likelihood Ratio')
-    #        axs[1].set_title('False Positive')
-    #        axs[0].set_ylabel('Frequency')
-    #        if self.site != None:
-    #            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_logLikeRatio_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
-    #
-    #        else:
-    #            plt.savefig(os.path.join(self.figureWS,"%s_logLikeRatio_class.png"%(self.recType)),bbox_inches = 'tight')
-    #
-    #        print ("Log Likelihood Figure Created, check output workspace")
 
             # plot the log of the posterior ratio
-            minPostRatio = self.class_stats_data.logPostRatio_max.min()
-            maxPostRatio = self.class_stats_data.logPostRatio_max.max()
+            minPostRatio = self.final_iter.logPostRatio_max.min()
+            maxPostRatio = self.final_iter.logPostRatio_max.max()
             postRatioBins = np.linspace(minPostRatio,maxPostRatio,10)
-
-
-    #        plt.figure(figsize = (3,2))
-    #        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True)
-    #        axs[0].hist(trues.logPostRatio_max.values, postRatioBins, density = True)
-    #        axs[1].hist(falses.logPostRatio_max.values, postRatioBins, density = True)
-    #        axs[0].set_xlabel('Log Posterior Ratio')
-    #        axs[0].set_title('True')
-    #        axs[1].set_xlabel('Log Posterior Ratio')
-    #        axs[1].set_title('False Positive')
-    #        axs[0].set_ylabel('Frequency')
-    #        if self.site != None:
-    #            plt.savefig(os.path.join(self.figureWS,"%s_%s_%s_logPostRatio_class.png"%(self.recType,self.site,self.reclass_iter)),bbox_inches = 'tight')
-    #
-    #        else:
-    #            plt.savefig(os.path.join(self.figureWS,"%s_logPostRatio_class.png"%(self.recType)),bbox_inches = 'tight')
-    #
-    #        print ("Log Posterior Ratio Figure Created, check output workspace")
 
             # make lattice plot for pubs
             figSize = (6,4)
@@ -1934,7 +2262,7 @@ class classification_results():
             axs[0,1].hist(trues.hitRatio_max.values, hitRatioBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
             axs[0,0].hist(falses.hitRatio_max.values, hitRatioBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
             axs[0,0].set_xlabel('Hit Ratio')
-            axs[0,1].set_title('True')
+            axs[0,1].set_title('Valid')
             axs[0,1].set_xlabel('Hit Ratio')
             axs[0,0].set_title('False Positive')
             axs[0,0].set_title('A',loc = 'left')
@@ -1943,7 +2271,7 @@ class classification_results():
             axs[0,3].hist(trues.conRecLength_max.values, conBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
             axs[0,2].hist(falses.conRecLength_max.values, conBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
             axs[0,2].set_xlabel('Consecutive Hit Length')
-            axs[0,3].set_title('True')
+            axs[0,3].set_title('Valid')
             axs[0,3].set_xlabel('Consecutive Hit Length')
             axs[0,2].set_title('False Positive')
             axs[0,2].set_title('B',loc = 'left')
@@ -1971,15 +2299,17 @@ class classification_results():
             axs[2,0].set_title('E',loc = 'left')
 
             # log posterior ratio
-            axs[2,3].hist(trues.logPostRatio_max.values, postRatioBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
-            axs[2,2].hist(falses.logPostRatio_max.values, postRatioBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
-            axs[2,2].set_xlabel('Log Posterior Ratio')
-            axs[2,3].set_xlabel('Log Posterior Ratio')
+            axs[2,3].hist(trues.logLikelihoodRatio_max.values, postRatioBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
+            axs[2,2].hist(falses.logLikelihoodRatio_max.values, postRatioBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
+            axs[2,2].set_xlabel('Log Likelihood Ratio')
+            axs[2,3].set_xlabel('Log Likelihood Ratio')
             axs[2,2].set_title('F',loc = 'left')
-            if self.rec_list != None:
-               plt.savefig(os.path.join(self.figureWS,"%s_lattice_class.png"%(self.recType)),bbox_inches = 'tight', dpi = 900)
-            else:
-               plt.savefig(os.path.join(self.figureWS,"%s_%s_lattice_class.png"%(self.recType,self.site)),bbox_inches = 'tight', dpi = 900)
+            
+            if self.figureWS != None:
+                if self.rec_list != None:
+                   plt.savefig(os.path.join(self.figureWS,"%s_lattice_class.png"%(self.recType)),bbox_inches = 'tight', dpi = 900)
+                else:
+                   plt.savefig(os.path.join(self.figureWS,"%s_%s_lattice_class.png"%(self.recType,self.site)),bbox_inches = 'tight', dpi = 900)
         else:
            print("There were insufficient data to quantify summary statistics or histogram plots, either because there were no false positives or because there were no valid detections")
 
@@ -2043,15 +2373,29 @@ class training_results():
         '''function reads all classified data, generates summary statistics by receiver type,
         fish, site, classification status and other metrics, as well as generates a number of graphics
         for use in reporting.'''
+        det_class_count = self.train_stats_data.groupby('Detection')['Detection'].count().to_frame()
+
+
+        
+        
+        
         print ("")
         print ("Training summary statistics report")
         print ("The algorithm collected %s detections from %s %s receivers"%(len(self.train_stats_data),len(self.train_stats_data.recID.unique()),self.recType))
         print ("----------------------------------------------------------------------------------")
-        det_class_count = self.train_stats_data.groupby('Detection')['Detection'].count().to_frame()
         print ("")
         print ("%s detection clas statistics:"%(self.recType) )
-        print ("The prior probability that a detection was true was %s"%((round(float(det_class_count.at[1,'Detection'])/float(det_class_count.sum()),3))))
-        print ("The prior probability that a detection was false positive was %s"%((round(float(det_class_count.at[0,'Detection'])/float(det_class_count.sum()),3))))
+        try:
+            print ("The prior probability that a detection was true was %s"%((round(float(det_class_count.at[1,'Detection'])/float(det_class_count.sum()),3))))
+        except KeyError:
+            print ("No known true detections found at %s"%(self.site))
+            pass
+        try:
+            print ("The prior probability that a detection was false positive was %s"%((round(float(det_class_count.at[0,'Detection'])/float(det_class_count.sum()),3))))
+        except KeyError:
+            print ("No known true detections found at %s"%(self.site))
+            pass        
+        
         print ("")
         print ("----------------------------------------------------------------------------------")
         print ("")
@@ -2089,100 +2433,19 @@ class training_results():
         # plot hit ratio histograms by detection class
         hitRatioBins =np.linspace(0,1.0,11)
 
-#        figSize = (3,2)
-#        plt.figure()
-#        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True,figsize = figSize)
-#        axs[0].hist(trues.hitRatio.values, hitRatioBins, density = True)
-#        axs[1].hist(falses.hitRatio.values, hitRatioBins, density = True)
-#        axs[0].set_xlabel('Hit Ratio')
-#        axs[0].set_title('True')
-#        axs[1].set_xlabel('Hit Ratio')
-#        axs[1].set_title('False Positive')
-#        axs[0].set_ylabel('Probability Density')
-#        if self.site != None:
-#            plt.savefig(os.path.join(self.figureWS,"%s_%s_hitRatioCompare_train.png"%(self.recType,self.site)),bbox_inches = 'tight')
-#        else:
-#            plt.savefig(os.path.join(self.figureWS,"%s_hitRatioCompare_train.png"%(self.recType)),bbox_inches = 'tight')
-#
-#        print ("Hit Ratio figure created, check your output workspace")
-
         # plot signal power histograms by detection class
         minPower = self.train_stats_data.Power.min()//5 * 5
         maxPower = self.train_stats_data.Power.max()//5 * 5
         powerBins =np.arange(minPower,maxPower+20,10)
 
-#        plt.figure()
-#        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True,figsize = figSize)
-#        axs[0].hist(trues.Power.values, powerBins, density = True)
-#        axs[1].hist(falses.Power.values, powerBins, density = True)
-#        axs[0].set_xlabel('%s Signal Power'%(self.recType))
-#        axs[0].set_title('True')
-#        axs[1].set_xlabel('%s Signal Power'%(self.recType))
-#        axs[1].set_title('False Positive')
-#        axs[0].set_ylabel('Probability Density')
-#        if self.site != None:
-#            plt.savefig(os.path.join(self.figureWS,"%s_%s_powerCompare_train.png"%(self.recType,self.site)),bbox_inches = 'tight')
-#        else:
-#            plt.savefig(os.path.join(self.figureWS,"%s_powerCompare_train.png"%(self.recType)),bbox_inches = 'tight')
-#
-#        print ("Signal Power figure created, check your output Workspace")
-
         # Lag Back Differences - how stdy are detection lags?
-        lagBins =np.arange(-100,110,20)
-
-#        plt.figure()
-#        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True,figsize = figSize)
-#        axs[0].hist(trues.lagDiff.values, lagBins, density = True)
-#        axs[1].hist(falses.lagDiff.values, lagBins, density = True)
-#        axs[0].set_xlabel('Lag Differences')
-#        axs[0].set_title('True')
-#        axs[1].set_xlabel('Lag Differences')
-#        axs[1].set_title('False Positive')
-#        axs[0].set_ylabel('Probability Density')
-#        if self.site != None:
-#            plt.savefig(os.path.join(self.figureWS,"%s_%s_lagDifferences_train.png"%(self.recType,self.site)),bbox_inches = 'tight')
-#        else:
-#            plt.savefig(os.path.join(self.figureWS,"%s_lagDifferences_train.png"%(self.recType)),bbox_inches = 'tight')
-#
-        print ("Lag differences figure created, check your output Workspace")
+        lagBins =np.arange(-100,110,6)
 
         # Consecutive Record Length ?
         conBins =np.arange(1,12,1)
 
-#        plt.figure()
-#        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True,figsize = figSize)
-#        axs[0].hist(trues.conRecLength.values, conBins, density = True)
-#        axs[1].hist(falses.conRecLength.values, conBins, density = True)
-#        axs[0].set_xlabel('Consecutive Hit Length')
-#        axs[0].set_title('True')
-#        axs[1].set_xlabel('Consecutive Hit Length')
-#        axs[1].set_title('False Positive')
-#        axs[0].set_ylabel('Probability Density')
-#        if self.site != None:
-#            plt.savefig(os.path.join(self.figureWS,"%s_%s_conRecLength_train.png"%(self.recType,self.site)),bbox_inches = 'tight')
-#        else:
-#            plt.savefig(os.path.join(self.figureWS,"%s_conRecLength_train.png"%(self.recType)),bbox_inches = 'tight')
-#
-#        print ("Consecutive Hit Length figure created, check your output Workspace")
-
         # Noise Ratio
         noiseBins =np.arange(0,1.1,0.1)
-
-#        plt.figure()
-#        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True,figsize = figSize)
-#        axs[0].hist(trues.noiseRatio.values, noiseBins, density = True)
-#        axs[1].hist(falses.noiseRatio.values, noiseBins, density = True)
-#        axs[0].set_xlabel('Noise Ratio')
-#        axs[0].set_title('True')
-#        axs[1].set_xlabel('Noise Ratio')
-#        axs[1].set_title('False Positive')
-#        axs[0].set_ylabel('Probability Density')
-#        if self.site != None:
-#           plt.savefig(os.path.join(self.figureWS,"%s_%s_noiseRatio_train.png"%(self.recType,self.site)),bbox_inches = 'tight')
-#        else:
-#           plt.savefig(os.path.join(self.figureWS,"%s_noiseRatio_train.png"%(self.recType)),bbox_inches = 'tight')
-#
-#        print ("Noise Ratio figure created, check your output Workspace")
 
         # make lattice plot for pubs
         figSize = (3,7)
@@ -2267,7 +2530,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
         counting process style
         bucket_length = covariate time interval, default 15 minutes
     '''
-    def __init__(self,receiver_list,node_to_state,dbDir, input_type = 'query', initial_state_release = False, last_presence_time0 = False, cap_loc = None, rel_loc = None):
+    def __init__(self,receiver_list,node_to_state,dbDir, input_type = 'query', initial_state_release = False, last_presence_time0 = False, cap_loc = None, rel_loc = None, species = None):
         # Import Data using sql
         '''the default input type for this function is query, however
 
@@ -2276,7 +2539,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
         self.dbDir = dbDir
         conn = sqlite3.connect(dbDir)
         c = conn.cursor()
-        sql = 'SELECT tblRecaptures.FreqCode, Epoch, timeStamp, Node, TagType, presence_number, overlapping, CapLoc, RelLoc, test FROM tblRecaptures LEFT JOIN tblMasterReceiver ON tblRecaptures.recID = tblMasterReceiver.recID LEFT JOIN tblMasterTag ON tblRecaptures.FreqCode = tblMasterTag.FreqCode WHERE tblRecaptures.recID = "%s"'%(receiver_list[0])
+        sql = 'SELECT tblRecaptures.FreqCode, Epoch, timeStamp, Node, TagType, presence_number, overlapping, CapLoc, RelLoc, Species, test FROM tblRecaptures LEFT JOIN tblMasterReceiver ON tblRecaptures.recID = tblMasterReceiver.recID LEFT JOIN tblMasterTag ON tblRecaptures.FreqCode = tblMasterTag.FreqCode WHERE tblRecaptures.recID = "%s"'%(receiver_list[0])
         for i in receiver_list[1:]:
             sql = sql + ' OR tblRecaptures.recID = "%s"'%(i)
         self.data = pd.read_sql_query(sql,con = conn)
@@ -2288,13 +2551,15 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
             self.data = self.data[self.data.RelLoc == rel_loc]
         if cap_loc is not None:
             self.data = self.data[self.data.CapLoc == cap_loc]
+        if species is not None:
+            self.data = self.data[self.data.Species == species]
         self.cap_loc = cap_loc
         self.rel_loc = rel_loc
 
         c.close()
         print ("Finished sql")
         print ("Starting node to state classification, with %s records this takes time"%(len(self.data)))
-
+        print ("Unique Nodes in Returned Data:%s"%(self.data.Node.unique()))
         # Classify state
         def node_class(row,node_to_state):
             currNode = row['Node']
@@ -2302,7 +2567,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
             state = node_to_state[currNode]
             return state
         self.data['State'] = self.data.apply(node_class,axis = 1, args = (node_to_state,))
-
+        print ("Unique states in Returned data:%s"%(self.data.State.unique()))
 
         if initial_state_release == True:
             '''we are modeling movement from the initial release location rather
@@ -2357,9 +2622,14 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
             and modeling movement from that point.'''
 
             # identify the last presence at the initial state
+            self.data['presence_number'] = pd.to_numeric(self.data['presence_number'], errors='coerce')# make sure State is an integer
+            self.data.dropna(axis = 0, how = 'any',subset = ['presence_number'], inplace = True)
+            self.data['presence_number'] = self.data.presence_number.astype(np.int32)
             last_presence = self.data.groupby(['FreqCode','State'])['presence_number'].max().to_frame().reset_index()
             last_presence.rename(columns = {'presence_number':'max_presence'},inplace = True)
             last_presence = last_presence[last_presence.State == 1]
+            fish_at_start = last_presence.FreqCode.unique()
+            all_fish = self.data.FreqCode.unique()
 
             # now that we have the last presence, iterate over fish
             for i in last_presence.iterrows():
@@ -2371,6 +2641,10 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
 
                 # drop rows using boolean indexing
                 self.data.drop(self.data[(self.data.FreqCode == fish) & (self.data.Epoch < min_epoch)].index, inplace = True)
+            for i in all_fish:
+                if i not in fish_at_start:
+                    self.data.drop(self.data[self.data.FreqCode == i].index, inplace = True)
+            
 
         # Identify first recapture times
         self.startTimes = self.data[self.data.State == 1].groupby(['FreqCode'])['Epoch'].min().to_frame()
@@ -2385,7 +2659,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
         # identify unique fish
         self.fish = self.data.FreqCode.unique()                                # identify unique fish to loop through
 
-    def data_prep(self,outputFile,time_dependent_covariates = False, unknown_state = None, bucket_length_min = 15):
+    def data_prep(self,outputFile,time_dependent_covariates = False, unknown_state = None, bucket_length_min = 15, adjacency_filter = None):
         if unknown_state != None:
             '''It may be beneficial to allow fish to enter into an unknown state
             rather than become censored at their last recapture in the initial state.
@@ -2452,14 +2726,16 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
                 stateTable['transition'] = trans
                 stateTable['startState'] = from_rec
                 stateTable['endState'] = to_rec
-                stateTable['t0'] = stateTable['time0']
+                stateTable['t0'] = np.zeros(len(stateTable))
                 stateTable['time0'] = pd.to_numeric(stateTable['time0'], errors='coerce')
+                stateTable['t0'] = pd.to_numeric(stateTable['t0'], errors='coerce')
                 #stateTable['time1'] = pd.to_numeric(stateTable['time1'], errors='coerce')
                 stateTable['Epoch'] = pd.to_numeric(stateTable['Epoch'], errors = 'coerce')
                 stateTable.time0 = stateTable.time0.astype(np.int32)
                 stateTable.Epoch = stateTable.Epoch.astype(np.int32)
                 stateTable['t1'] = stateTable['Epoch'] - stateTable['time0']
                 self.master_stateTable = self.master_stateTable.append(stateTable)
+                #self.master_stateTable['t0'] = self.master_stateTable.t0 - self.master_stateTable.time0
             del i,j
         else:
             columns = ['FreqCode','startState','endState','presence','timeStamp','firstObs','t0','t1']    # create columns
@@ -2528,8 +2804,22 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
                         intervals['timeStamp'] = row[1]['timeStamp']
                         intervals['FreqCode'] = row[1]['FreqCode']
                         intervals['presence'] = row[1]['presence']
-                        newRowArr = np.array([row[1]['FreqCode'],row[1]['startState'],row[1]['endState'],row[1]['timeStamp'],row[1]['flowPeriod'],row[1]['t0'],row[1]['t1'],row[1]['presence']])
-                        newRow = pd.DataFrame(np.array([newRowArr]),columns = ['FreqCode','startState','endState','timeStamp','flowPeriod','t0','t1','presence']) # add first, non expanded row to new state table
+                        newRowArr = np.array([row[1]['FreqCode'],
+                                              row[1]['startState'],
+                                              row[1]['endState'],
+                                              row[1]['timeStamp'],
+                                              row[1]['flowPeriod'],
+                                              row[1]['t0'],
+                                              row[1]['t1'],
+                                              row[1]['presence']])
+                        newRow = pd.DataFrame(np.array([newRowArr]),columns = ['FreqCode',
+                                                                               'startState',
+                                                                               'endState',
+                                                                               'timeStamp',
+                                                                               'flowPeriod',
+                                                                               't0',
+                                                                               't1',
+                                                                               'presence']) # add first, non expanded row to new state table
                         newRow = newRow.append(intervals)                      # add filled and expanded data
                         newRow['nextFlowPeriod'] = newRow['flowPeriod'].shift(-1) # identify the next flow period
                         newRow['idx'] = np.arange(0,len(newRow),1)             # add a count index field, but don't index it yet
@@ -2543,8 +2833,22 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
                         exp_stateTable = exp_stateTable.append(newRow)         # now add all that stuff to the state table dataframe
                         del newRow, intervals, newRowArr, expand
                     else:
-                        newRowArr = np.array([row[1]['FreqCode'],row[1]['startState'],row[1]['endState'],row[1]['timeStamp'],row[1]['flowPeriod'],row[1]['t0'],row[1]['t1'],row[1]['presence']])
-                        newRow = pd.DataFrame(np.array([newRowArr]),columns = ['FreqCode','startState','endState','timeStamp','flowPeriod','t0','t1','presence']) # add first, non expanded row to new state table
+                        newRowArr = np.array([row[1]['FreqCode'],
+                                              row[1]['startState'],
+                                              row[1]['endState'],
+                                              row[1]['timeStamp'],
+                                              row[1]['flowPeriod'],
+                                              row[1]['t0'],
+                                              row[1]['t1'],
+                                              row[1]['presence']])
+                        newRow = pd.DataFrame(np.array([newRowArr]),columns = ['FreqCode',
+                                                                               'startState',
+                                                                               'endState',
+                                                                               'timeStamp',
+                                                                               'flowPeriod',
+                                                                               't0',
+                                                                               't1',
+                                                                               'presence']) # add first, non expanded row to new state table
                         exp_stateTable = exp_stateTable.append(newRow)
                         del newRow, newRowArr
                 exp_stateTable.sort_values(by = 't0', ascending = True, inplace = True)     # sort by exposure time
@@ -2571,7 +2875,106 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
                 stateTable['transition'] = tuple(zip(stateTable.startState.values.astype(int),stateTable.endState.values.astype(int))) # create transition variable, this is helpful in R
                 self.master_stateTable = self.master_stateTable.append(stateTable)
                 # export
-            self.master_stateTable.drop(labels = ['nextFlowPeriod','timeStamp'],axis = 1, inplace = True)
+            self.master_stateTable.drop(labels = ['nextFlowPeriod'],axis = 1, inplace = True)
+            
+
+        if adjacency_filter is not None:
+            '''When the truth value of a detection is assessed, a detection 
+            may be valid for a fish that is not present.
+            
+            In some instances, especially when using Yagi antennas, back-lobes 
+            may develop where a fish in the tailrace of a powerhouse is 
+            detected in the forebay antenna.  In these instances, a downstream
+            migrating fish would not have migrated up through the powerhouse.
+            
+            From a false positive perspective, these records are valid detections.
+            However, from a movement perspective, these series of detections 
+            could not occur and should be removed.
+            
+            This function repeatedly removes rows with 'illegal' movements
+            until there are none left.  Rows with 'illegal' transitions are 
+            identified with a list that is passed to the function.  
+            
+            input = list of illegal transitions stored as (from, to) tuples
+            '''
+            fish = self.master_stateTable.FreqCode.unique()
+            
+            for i in fish:
+                fishDat =  self.master_stateTable[self.master_stateTable.FreqCode == i]
+                self.master_stateTable = self.master_stateTable[self.master_stateTable.FreqCode != i]
+            
+                # create a condition, we're running this filter because we know illogical movements are present
+                bad_moves_present = True
+                
+                # while there are illogical movements, keep filtering
+                while bad_moves_present == True:
+                    # let's keep count of the number of rows we are filtering
+                    filtered_rows = 0.0
+                    
+                    # for every known bad movement
+                    for j in adjacency_filter:
+                        print ("Starting %s filter"%(i))
+                        # find those rows where this movement exists
+                        fishDat['transition_filter'] = np.where(fishDat.transition == j,1,0)
+                        fishDat.set_index(['time0'], inplace = True)
+                        
+                        if fishDat.transition_filter.sum() > 0:
+                            # add up those rows
+                            filtered_rows = filtered_rows + fishDat.transition_filter.sum()
+                            print ('%s rows found with %s movements'%(fishDat.transition_filter.sum(),j))
+                            
+                            # do some data management, we need to take the start state and t0 of the affected rows and place them on the subsequent row
+                            idx = fishDat.index[fishDat['transition_filter']==1]
+                            
+                            for k in idx:
+                                idx_int = fishDat.index.get_loc(k)
+                                t0_col = fishDat.columns.get_loc('t0')
+                                start_col = fishDat.columns.get_loc('startState')
+                                
+                                # get start time and start state
+                                start = fishDat.iloc[idx_int]['startState']
+                                t0 = fishDat.iloc[idx_int]['t0']
+
+                                
+                                # write it to next row
+                                try:
+                                    idx1 = idx_int + 1
+                                except:
+                                    start = fishDat.iloc[idx_int].index[0]
+                                    idx1 = start + 1
+                                #print (fishDat.iloc[idx1])
+                                try:
+                                    fishDat.iloc[idx1, start_col] = start
+                                    fishDat.iloc[idx1, t0_col] = t0
+                                    #print (fishDat.iloc[idx1])
+                                except IndexError:
+                                    # when this occurs, there is no extra row - this last row will be deleted
+                                    continue
+    
+                            # remove those rows
+                            fishDat = fishDat[fishDat.transition_filter != 1]
+                            
+                            # create a new transition field
+                            fishDat['transition'] = tuple(zip(fishDat.startState.values.astype(int),fishDat.endState.values.astype(int))) # create transition variable, this is helpful in R
+                            
+                            fishDat.reset_index(inplace = True)
+                        else:
+                            print ("No illegal movements identified")
+                            fishDat.reset_index(inplace = True)
+
+                    if filtered_rows == 0.0:
+                        print ("All illegal movements for fish %s removed"%(i))
+                        # stop that loop
+                        bad_moves_present = False
+                        
+                    else:
+                        # i feel bad for you son
+                        print ("%s illegal movements present in iteration, go again"%(filtered_rows))
+                    
+                fishDat.drop(labels = ['transition_filter'], axis = 1, inplace = True)
+                self.master_stateTable = self.master_stateTable.append(fishDat)    
+        
+        #self.master_stateTable = self.master_stateTable[self.master_stateTable.firstObs == 0]            
         self.master_stateTable.to_csv(outputFile)
 
     # generate summary statistics
@@ -2593,6 +2996,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
         print (msm_stateTable)
         print ("The table should read movement from a row to a column")
         print ("")
+        self.master_stateTable['transition'] = self.master_stateTable.transition.astype(str)
         self.countTable = self.master_stateTable.groupby(['startState','endState'])['FreqCode'].nunique().to_frame()
         self.countTable.reset_index(inplace = True)
         countPerTrans = pd.crosstab(self.countTable.startState,self.countTable.endState,values = self.countTable.FreqCode, aggfunc = 'sum')
@@ -2614,9 +3018,15 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
         med_transCount = self.fishTransCount.groupby(['transition'])['transCount'].median()
         print (med_transCount)
         print ("")
-        print ("The maximum number of times each transition was made:")
-        max_transCount = self.fishTransCount.groupby(['transition'])['transCount'].max()
+        print ("The maximum number of times each transition was made by each fish:")
+        max_transCount = self.fishTransCount.groupby(['FreqCode','transition'])['transCount'].max()
+        #max_transCount.to_csv(os.path.join(r'C:\Users\Kevin Nebiolo\Desktop','maxCountByFreqCode.csv'))
         print (max_transCount)
+        print ("")
+        print ("Movement summaries")
+        self.master_stateTable['dur'] = (self.master_stateTable.t1 - self.master_stateTable.t0)/3600.0
+        move_summ = self.master_stateTable.groupby('transition')['dur'].describe().round(decimals = 2)
+        print (move_summ)
 
 
 class fish_history():
@@ -2767,7 +3177,7 @@ class bout():
                         max_iter_dict[i] = j
                     curr_idx = curr_idx + 1
             curr_idx = 0
-
+            print (max_iter_dict)
             # once we have a hash table of receiver to max classification, extract the classification dataset
             for j in max_iter_dict:
                 sql = "SELECT FreqCode, Epoch, recID, test FROM %s"%(max_iter_dict[j])
@@ -2892,7 +3302,7 @@ class bout():
                         max_iter_dict[i] = j
                     curr_idx = curr_idx + 1
             curr_idx = 0
-            del j
+            #del j
 
             # once we have a hash table of receiver to max classification, extract the classification dataset
             for j in max_iter_dict:
@@ -3103,10 +3513,10 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
     receivers = receivers.recID.unique()                                       # get the unique receivers associated with this node
     recapdata = pd.DataFrame(columns = ['FreqCode','Epoch','recID','timeStamp','fileName'])                # set up an empty data frame
     c = conn.cursor()
-    c.close()
+
+    bouts = False
     for i in receivers:                                                            # for every receiver
-        conn = sqlite3.connect(projectDB)                                              # connect to the database
-        c = conn.cursor()
+
         print ("Start selecting and merging data for receiver %s"%(i))
         c.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
         tbls = c.fetchall()
@@ -3114,6 +3524,8 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
         for j in tbls:
             if i in j[0]:
                 tblList.append(j[0])
+            if j[0] == 'tblPresence' or j[0]== 'tblOverlap':
+                bouts = True
         del j
         # iterate over the receivers to find the final classification (aka the largest _n)
         max_iter_dict = {} # receiver:max iter
@@ -3133,34 +3545,33 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
             cursor = conn.execute('select * from %s'%(max_iter_dict[j]))
             names = [description[0] for description in cursor.description]
 
-
-            try:
+            if bouts == True:
                 if 'hitRatio_A' in names:
-                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp,presence_number, overlapping, hitRatio_A, hitRatio_M, detHist_A, detHist_M, conRecLength_A, conRecLength_M, lag, lagDiff, test, RelDate, fileName
+                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp,presence_number, overlapping, hitRatio_A, hitRatio_M, detHist_A, detHist_M, conRecLength_A, conRecLength_M, lag, lagDiff, test, RelDate
                     FROM %s
                     LEFT JOIN tblMasterTag ON %s.FreqCode = tblMasterTag.FreqCode
                     LEFT JOIN tblOverlap ON %s.FreqCode = tblOverlap.FreqCode AND %s.Epoch = tblOverlap.Epoch AND %s.recID = tblOverlap.recID
                     LEFT JOIN tblPresence ON %s.FreqCode = tblPresence.FreqCode AND %s.Epoch = tblPresence.Epoch AND %s.recID = tblPresence.recID'''%(max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j])
                 else:
-                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp,presence_number, overlapping,test, RelDate, fileName
+                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp,presence_number, overlapping,test, RelDate
                     FROM %s
                     LEFT JOIN tblMasterTag ON %s.FreqCode = tblMasterTag.FreqCode
                     LEFT JOIN tblOverlap ON %s.FreqCode = tblOverlap.FreqCode AND %s.Epoch = tblOverlap.Epoch AND %s.recID = tblOverlap.recID
                     LEFT JOIN tblPresence ON %s.FreqCode = tblPresence.FreqCode AND %s.Epoch = tblPresence.Epoch AND %s.recID = tblPresence.recID'''%(max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j])
                 dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver
                 dat['overlapping'].fillna(0,inplace = True)
-                dat = dat[dat.overlapping == 0]
+                #dat = dat[dat.overlapping == 0]
 
 
-            except:
+            else:
 
                 if 'hitRatio_A' in names:
-                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp, hitRatio_A, hitRatio_M, detHist_A, detHist_M, conRecLength_A, conRecLength_M, lag, lagDiff, test, RelDate, fileName
+                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp, hitRatio_A, hitRatio_M, detHist_A, detHist_M, conRecLength_A, conRecLength_M, lag, lagDiff, test, RelDate
                     FROM %s
                     LEFT JOIN tblMasterTag ON %s.FreqCode = tblMasterTag.FreqCode'''%(max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j])
 
                 else:
-                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp, test, RelDate, fileName
+                    sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp, test, RelDate
                     FROM %s
                     LEFT JOIN tblMasterTag ON %s.FreqCode = tblMasterTag.FreqCode'''%(max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j])
                 dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver
@@ -3171,8 +3582,8 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
             dat['timeStamp'] = pd.to_datetime(dat.timeStamp)
             if hitRatio_Filter == True:
                 dat = dat[(dat.hitRatio_A > 0.10)]# | (dat.hitRatio_M > 0.10)]
-            if con_rec_filter != None:
-                dat = dat[(dat.conRecLength_A >= con_rec_filter) | (dat.conRecLength_M >= con_rec_filter)]
+            if con_rec_filter == True:
+                dat = dat[dat.conRecLength_A >= 2]
             if pre_release_Filter == True:
                 dat = dat[(dat.timeStamp >= dat.RelDate)]
             recapdata = recapdata.append(dat)
@@ -3181,7 +3592,6 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
 
     recapdata.drop_duplicates(keep = 'first', inplace = True)
     return recapdata
-
 
 class cjs_data_prep():
     '''Class creates input files for Cormack Jolly Seber modeling in MARK'''
@@ -3241,8 +3651,9 @@ class cjs_data_prep():
         # Identify first recapture times
         self.startTimes = self.data[self.data.RecapOccasion == "R00"].groupby(['FreqCode'])['Epoch'].min().to_frame()
         self.startTimes.reset_index(drop = False, inplace = True)
-        self.startTimes.Epoch = self.startTimes.Epoch.astype(np.int32)
+        #self.startTimes.Epoch = self.startTimes.Epoch.astype(np.int32)
         self.startTimes.rename(columns = {'Epoch':'FirstRecapture'},inplace = True)
+        print(self.startTimes.FirstRecapture)
         for fish in self.data.FreqCode.unique():
             if fish not in self.startTimes.FreqCode.unique():                  # fish never made it to the initial state, remove - we only care about movements from the initial sstate - this is a competing risks model
                 self.data = self.data[self.data.FreqCode != fish]

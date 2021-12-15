@@ -7,18 +7,21 @@ our brute force method in current use'''
 # import modules
 import os
 import warnings
-import biotas
+import biotas.biotas as biotas
 warnings.filterwarnings('ignore')
 # set up script parameters
-proj_dir = r'C:\a\Projects\BCHydro\Data'             # what is the project directory?
-dbName = 'SiteC_2020.db'                                                       # whad did you call the database?
-
+proj_dir = r'D:\Manuscript\CT_River_2015'                                      # what is the project directory?
+dbName = 'ctr_2015_v2.db'                                                         # whad did you call the database?
+ 
 inputWS = os.path.join(proj_dir,'Data')                             
 scratchWS = os.path.join(proj_dir,'Output','Scratch')
 figureWS = os.path.join(proj_dir,'Output','Figures')
 projectDB = os.path.join(inputWS,dbName)
 # which node do you care about?
-nodes = ['1']#,'F34','F35','F36','F37','F38','F39','F40']
+#nodes = ['T08','T09','T05','T06','T07','T19','T24','T25','T23']
+#nodes = ['T02','T03','T07','T11','T12E','T12W','T13','T14','T15','T17','T18',
+#         'T20','T21','T26','T27','T30','T33']
+nodes = ['T16']
 #nodes = ['S13']
 bout_len_dict = dict()
 for i in nodes:   
