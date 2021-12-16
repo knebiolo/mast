@@ -85,8 +85,9 @@ class cjs_data_prep():
         # Identify first recapture times
         self.startTimes = self.data[self.data.RecapOccasion == "R00"].groupby(['FreqCode'])['Epoch'].min().to_frame()
         self.startTimes.reset_index(drop = False, inplace = True)
-        self.startTimes.Epoch = self.startTimes.Epoch.astype(np.int32)
+        #self.startTimes.Epoch = self.startTimes.Epoch.astype(np.int32)
         self.startTimes.rename(columns = {'Epoch':'FirstRecapture'},inplace = True)
+        print(self.startTimes.FirstRecapture)
         for fish in self.data.FreqCode.unique():
             if fish not in self.startTimes.FreqCode.unique():                  # fish never made it to the initial state, remove - we only care about movements from the initial sstate - this is a competing risks model
                 self.data = self.data[self.data.FreqCode != fish]
@@ -258,6 +259,7 @@ class lrdr_data_prep():
         print (self.inp.head())
 
         # perform that LDLD logic - no alive fish after recovered dead
+
         # create dictionary describing inp input column and index
         inp_cols = list(self.inp.columns)
         idx = 0
@@ -278,6 +280,7 @@ class lrdr_data_prep():
             mkey_idx_dict[i] = idx
             idx = idx + 1
 
+
         # loop through mobile reaches to find dead fish
         for i in sorted(list(self.mobile_to_recap.keys())):
             occ = self.mobile_to_recap[i]
@@ -291,6 +294,9 @@ class lrdr_data_prep():
                             self.inp.at[index,col_inp_dict[j]] = 0
                             row.iloc[j] = 0
                         print (row)
+
+
+
 
         print (self.inp.head())
         # Check your work
@@ -309,7 +315,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
         counting process style
         bucket_length = covariate time interval, default 15 minutes
     '''
-    def __init__(self,receiver_list,node_to_state,dbDir, input_type = 'query', initial_state_release = False, last_presence_time0 = False, cap_loc = None, rel_loc = None):
+    def __init__(self,receiver_list,node_to_state,dbDir, input_type = 'query', initial_state_release = False, last_presence_time0 = False, cap_loc = None, rel_loc = None, species = None):
         # Import Data using sql
         '''the default input type for this function is query, however
 
@@ -318,29 +324,47 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
         self.dbDir = dbDir
         conn = sqlite3.connect(dbDir)
         c = conn.cursor()
-        sql = 'SELECT * FROM tblRecaptures WHERE tblRecaptures.recID = "%s"'%(receiver_list[0])
+        sql = '''SELECT tblRecaptures.FreqCode, 
+                        Epoch, 
+                        timeStamp, 
+                        Node, 
+                        TagType, 
+                        presence_number, 
+                        overlapping, 
+                        CapLoc, 
+                        RelLoc, 
+                        Species, 
+                        test 
+                FROM tblRecaptures 
+                LEFT JOIN tblMasterReceiver ON tblRecaptures.recID = tblMasterReceiver.recID 
+                LEFT JOIN tblMasterTag ON tblRecaptures.FreqCode = tblMasterTag.FreqCode 
+                WHERE tblRecaptures.recID = "%s"'''%(receiver_list[0])
+
         for i in receiver_list[1:]:
             sql = sql + ' OR tblRecaptures.recID = "%s"'%(i)
+
+    	# get data and filter
         self.data = pd.read_sql_query(sql,con = conn)
-        rec_dat = pd.read_sql_query('SELECT recID, Node FROM tblMasterReceiver', con = conn)
-        tag_dat = pd.read_sql_query('SELECT FreqCode, TagType, CapLoc, RelLoc FROM tblMasterTag', con = conn)
-        self.data = self.data.merge(rec_dat,how = 'left', on = 'recID')
-        self.data = self.data.merge(tag_dat,how = 'left', on = 'FreqCode')
         self.data['timeStamp'] = pd.to_datetime(self.data.timeStamp)
         self.data = self.data[self.data.TagType == 'Study']
         self.data = self.data[self.data.test == 1]
         self.data = self.data[self.data.overlapping == 0]
+
+        # more filters if they are passed
         if rel_loc is not None:
             self.data = self.data[self.data.RelLoc == rel_loc]
         if cap_loc is not None:
             self.data = self.data[self.data.CapLoc == cap_loc]
+        if species is not None:
+            self.data = self.data[self.data.Species == species]
         self.cap_loc = cap_loc
         self.rel_loc = rel_loc
 
         c.close()
         print ("Finished sql")
         print ("Starting node to state classification, with %s records this takes time"%(len(self.data)))
-
+        print ("Unique Nodes in Returned Data:%s"%(self.data.Node.unique()))
+        
         # Classify state
         def node_class(row,node_to_state):
             currNode = row['Node']
@@ -348,7 +372,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
             state = node_to_state[currNode]
             return state
         self.data['State'] = self.data.apply(node_class,axis = 1, args = (node_to_state,))
-
+        print ("Unique states in Returned data:%s"%(self.data.State.unique()))
 
         if initial_state_release == True:
             '''we are modeling movement from the initial release location rather
@@ -360,17 +384,25 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
             release times of each fish, morph data into a recaptures file and
             merge it to self.data'''
 
-            sql = "SELECT FreqCode, TagType, RelDate, RelLoc, CapLoc FROM tblMasterTag WHERE TagType = 'Study'"
+            sql = '''SELECT FreqCode, 
+                            TagType, 
+                            RelDate, 
+                            RelLoc, 
+                            CapLoc 
+                            FROM tblMasterTag 
+                            WHERE TagType = 'Study' '''
+            # connect to database and grab data
             conn = sqlite3.connect(self.dbDir)
             c = conn.cursor()
-
-
-
             relDat = pd.read_sql_query(sql,con = conn, parse_dates = 'RelDate')
+
+    	    # if filters were passed, apply them
             if self.rel_loc is not None:
                 relDat = relDat[relDat.RelLoc == rel_loc]
             if self.cap_loc is not None:
                 relDat = relDat[relDat.CapLoc == cap_loc]
+
+    	    # do some data management
             relDat['RelDate'] = pd.to_datetime(relDat.RelDate)
             relDat['Epoch'] = (relDat['RelDate'] - datetime.datetime(1970,1,1)).dt.total_seconds()
             relDat.rename(columns = {'RelDate':'timeStamp'}, inplace = True)
@@ -385,6 +417,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
 
         self.data['State'] = pd.to_numeric(self.data['State'], errors='coerce')# make sure State is an integer
         self.data['State'] = self.data.State.astype(np.int32)
+        
         if last_presence_time0 == True:
             ''' sometimes when we are modeling downstream movement, it would be
             beneficial to start enumerating movement from the last presence at
@@ -403,35 +436,46 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
             and modeling movement from that point.'''
 
             # identify the last presence at the initial state
+            self.data['presence_number'] = pd.to_numeric(self.data['presence_number'], errors='coerce')
+            self.data.dropna(axis = 0, how = 'any',subset = ['presence_number'], inplace = True)
+            self.data['presence_number'] = self.data.presence_number.astype(np.int32)
             last_presence = self.data.groupby(['FreqCode','State'])['presence_number'].max().to_frame().reset_index()
             last_presence.rename(columns = {'presence_number':'max_presence'},inplace = True)
             last_presence = last_presence[last_presence.State == 1]
+            fish_at_start = last_presence.FreqCode.unique()
+            all_fish = self.data.FreqCode.unique()
 
             # now that we have the last presence, iterate over fish
             for i in last_presence.iterrows():
                 fish = i[1]['FreqCode']
                 max_pres = i[1]['max_presence']
+
                 # get the first recapture at the last presence in the initial state for this fish
                 recaps = self.data[(self.data.FreqCode == fish) & (self.data.State == 1) & (self.data.presence_number == max_pres)]
                 min_epoch = recaps.Epoch.min()
 
                 # drop rows using boolean indexing
                 self.data.drop(self.data[(self.data.FreqCode == fish) & (self.data.Epoch < min_epoch)].index, inplace = True)
+            for i in all_fish:
+                if i not in fish_at_start:
+                    self.data.drop(self.data[self.data.FreqCode == i].index, inplace = True)
 
         # Identify first recapture times
         self.startTimes = self.data[self.data.State == 1].groupby(['FreqCode'])['Epoch'].min().to_frame()
-        #print(self.startTimes.head())
-
         self.startTimes.reset_index(drop = False, inplace = True)
         self.startTimes.Epoch = self.startTimes.Epoch.astype(np.int32)
         self.startTimes.rename(columns = {'Epoch':'FirstRecapture'},inplace = True)
-        for fish in self.data.FreqCode.unique():
-            if fish not in self.startTimes.FreqCode.unique():                  # fish never made it to the initial state, remove - we only care about movements from the initial sstate - this is a competing risks model
-                self.data = self.data[self.data.FreqCode != fish]
-        # identify unique fish
-        self.fish = self.data.FreqCode.unique()                                # identify unique fish to loop through
 
-    def data_prep(self,outputFile,time_dependent_covariates = False, unknown_state = None, bucket_length_min = 15):
+    	# Clean Up stuff that doesn't make sense
+        for fish in self.data.FreqCode.unique():
+	    # fish never made it to the initial state, remove - we only care about movements from the initial sstate - this is a competing risks model
+            if fish not in self.startTimes.FreqCode.unique():                  
+                self.data = self.data[self.data.FreqCode != fish]
+        
+        # identify unique fish to loop through
+        self.fish = self.data.FreqCode.unique()                                
+
+    def data_prep(self,outputFile,time_dependent_covariates = False, unknown_state = None, bucket_length_min = 15, adjacency_filter = None):
         if unknown_state != None:
             '''It may be beneficial to allow fish to enter into an unknown state
             rather than become censored at their last recapture in the initial state.
@@ -441,6 +485,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
             them we still have informative data.  For this to work, we only need to
             know the last recapture of any fish in the initial state.  We will
             assess absorbption into the unknown state with a Boolean statement later on.'''
+
             last_epoch = self.data[self.data.State == 1].Epoch.max()
 
         if time_dependent_covariates == False:
@@ -455,19 +500,22 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
             columns = ['FreqCode','state','presence','Epoch','timeDelta','time0','firstObs']    # create columns
             self.master_stateTable = pd.DataFrame()
             for i in self.fish:
-                fishDat = self.data[self.data.FreqCode == i]                   # get data for this fish
-                # get first recapture in state 1
-                fishDat.sort_values(by = 'Epoch', ascending = True, inplace = True)  # sort by exposure time
+                # get data for this fish
+                fishDat = self.data[self.data.FreqCode == i]                   
+                # get first recapture in state 
+                fishDat.sort_values(by = 'Epoch', ascending = True, inplace = True) # sort by exposure time  
                 fishDat['prevState'] = fishDat['State'].shift(1)               # get previous state
-                fishDat['prevState'].fillna(fishDat.State.values[0], inplace = True)  # fill NaN states with current state - for first record in data frame
+                fishDat['prevState'].fillna(fishDat.State.values[0], inplace = True) # fill NaN states with current state - for first record in data frame 
                 presence = 1
                 firstObs = 1
-                stateTable = pd.DataFrame(columns = columns)                                # create empty data frame
-                time0 = self.startTimes[self.startTimes.FreqCode == i].FirstRecapture.iloc[0]  # get initial time - need to calculate seconds between current record and time of release
+                # create empty data frame
+                stateTable = pd.DataFrame(columns = columns) 
+                # get initial time - need to calculate seconds between current record and time of release                               
+                time0 = self.startTimes[self.startTimes.FreqCode == i].FirstRecapture.iloc[0]  
                 fishDat = fishDat[fishDat.Epoch >= time0]
                 time1 = fishDat.Epoch.iloc[0]
-                timeDelta = time1 - time0                                      # seconds between observation and release
-                rowArr = [i,fishDat.State.values[0],presence,time1,timeDelta,time0,firstObs]  # create initial row for state table
+                timeDelta = time1 - time0                                     # seconds between observation and release
+                rowArr = [i,fishDat.State.values[0],presence,time1,timeDelta,time0,firstObs] # create initial row for state table  
                 row = pd.DataFrame(np.array([rowArr]),columns = columns)       # now it's officially a pandas row
                 stateTable = stateTable.append(row)                            # now append that row
                 firstObs = 0
@@ -498,14 +546,16 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
                 stateTable['transition'] = trans
                 stateTable['startState'] = from_rec
                 stateTable['endState'] = to_rec
-                stateTable['t0'] = stateTable['time0']
+                stateTable['t0'] = np.zeros(len(stateTable))
                 stateTable['time0'] = pd.to_numeric(stateTable['time0'], errors='coerce')
+                stateTable['t0'] = pd.to_numeric(stateTable['t0'], errors='coerce')
                 #stateTable['time1'] = pd.to_numeric(stateTable['time1'], errors='coerce')
                 stateTable['Epoch'] = pd.to_numeric(stateTable['Epoch'], errors = 'coerce')
                 stateTable.time0 = stateTable.time0.astype(np.int32)
                 stateTable.Epoch = stateTable.Epoch.astype(np.int32)
                 stateTable['t1'] = stateTable['Epoch'] - stateTable['time0']
                 self.master_stateTable = self.master_stateTable.append(stateTable)
+                #self.master_stateTable['t0'] = self.master_stateTable.t0 - self.master_stateTable.time0
             del i,j
         else:
             columns = ['FreqCode','startState','endState','presence','timeStamp','firstObs','t0','t1']    # create columns
@@ -574,8 +624,22 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
                         intervals['timeStamp'] = row[1]['timeStamp']
                         intervals['FreqCode'] = row[1]['FreqCode']
                         intervals['presence'] = row[1]['presence']
-                        newRowArr = np.array([row[1]['FreqCode'],row[1]['startState'],row[1]['endState'],row[1]['timeStamp'],row[1]['flowPeriod'],row[1]['t0'],row[1]['t1'],row[1]['presence']])
-                        newRow = pd.DataFrame(np.array([newRowArr]),columns = ['FreqCode','startState','endState','timeStamp','flowPeriod','t0','t1','presence']) # add first, non expanded row to new state table
+                        newRowArr = np.array([row[1]['FreqCode'],
+                                              row[1]['startState'],
+                                              row[1]['endState'],
+                                              row[1]['timeStamp'],
+                                              row[1]['flowPeriod'],
+                                              row[1]['t0'],
+                                              row[1]['t1'],
+                                              row[1]['presence']])
+                        newRow = pd.DataFrame(np.array([newRowArr]),columns = ['FreqCode',
+                                                                               'startState',
+                                                                               'endState',
+                                                                               'timeStamp',
+                                                                               'flowPeriod',
+                                                                               't0',
+                                                                               't1',
+                                                                               'presence']) # add first, non expanded row to new state table
                         newRow = newRow.append(intervals)                      # add filled and expanded data
                         newRow['nextFlowPeriod'] = newRow['flowPeriod'].shift(-1) # identify the next flow period
                         newRow['idx'] = np.arange(0,len(newRow),1)             # add a count index field, but don't index it yet
@@ -589,8 +653,22 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
                         exp_stateTable = exp_stateTable.append(newRow)         # now add all that stuff to the state table dataframe
                         del newRow, intervals, newRowArr, expand
                     else:
-                        newRowArr = np.array([row[1]['FreqCode'],row[1]['startState'],row[1]['endState'],row[1]['timeStamp'],row[1]['flowPeriod'],row[1]['t0'],row[1]['t1'],row[1]['presence']])
-                        newRow = pd.DataFrame(np.array([newRowArr]),columns = ['FreqCode','startState','endState','timeStamp','flowPeriod','t0','t1','presence']) # add first, non expanded row to new state table
+                        newRowArr = np.array([row[1]['FreqCode'],
+                                              row[1]['startState'],
+                                              row[1]['endState'],
+                                              row[1]['timeStamp'],
+                                              row[1]['flowPeriod'],
+                                              row[1]['t0'],
+                                              row[1]['t1'],
+                                              row[1]['presence']])
+                        newRow = pd.DataFrame(np.array([newRowArr]),columns = ['FreqCode',
+                                                                               'startState',
+                                                                               'endState',
+                                                                               'timeStamp',
+                                                                               'flowPeriod',
+                                                                               't0',
+                                                                               't1',
+                                                                               'presence']) # add first, non expanded row to new state table
                         exp_stateTable = exp_stateTable.append(newRow)
                         del newRow, newRowArr
                 exp_stateTable.sort_values(by = 't0', ascending = True, inplace = True)     # sort by exposure time
@@ -617,7 +695,104 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
                 stateTable['transition'] = tuple(zip(stateTable.startState.values.astype(int),stateTable.endState.values.astype(int))) # create transition variable, this is helpful in R
                 self.master_stateTable = self.master_stateTable.append(stateTable)
                 # export
-            self.master_stateTable.drop(labels = ['nextFlowPeriod','timeStamp'],axis = 1, inplace = True)
+            self.master_stateTable.drop(labels = ['nextFlowPeriod'],axis = 1, inplace = True)
+            
+
+        if adjacency_filter is not None:
+            '''When the truth value of a detection is assessed, a detection 
+            may be valid for a fish that is not present.
+            
+            In some instances, especially when using Yagi antennas, back-lobes 
+            may develop where a fish in the tailrace of a powerhouse is 
+            detected in the forebay antenna.  In these instances, a downstream
+            migrating fish would not have migrated up through the powerhouse.
+            
+            From a false positive perspective, these records are valid detections.
+            However, from a movement perspective, these series of detections 
+            could not occur and should be removed.
+            
+            This function repeatedly removes rows with 'illegal' movements
+            until there are none left.  Rows with 'illegal' transitions are 
+            identified with a list that is passed to the function.  
+            
+            input = list of illegal transitions stored as (from, to) tuples
+            '''
+            fish = self.master_stateTable.FreqCode.unique()
+            
+            for i in fish:
+                fishDat =  self.master_stateTable[self.master_stateTable.FreqCode == i]
+                self.master_stateTable = self.master_stateTable[self.master_stateTable.FreqCode != i]
+            
+                # create a condition, we're running this filter because we know illogical movements are present
+                bad_moves_present = True
+                
+                # while there are illogical movements, keep filtering
+                while bad_moves_present == True:
+                    # let's keep count of the number of rows we are filtering
+                    filtered_rows = 0.0
+                    
+                    # for every known bad movement
+                    for j in adjacency_filter:
+                        print ("Starting %s filter"%(i))
+                        # find those rows where this movement exists
+                        fishDat['transition_filter'] = np.where(fishDat.transition == j,1,0)
+                        fishDat.set_index(['time0'], inplace = True)
+                        
+                        if fishDat.transition_filter.sum() > 0:
+                            # add up those rows
+                            filtered_rows = filtered_rows + fishDat.transition_filter.sum()
+                            print ('%s rows found with %s movements'%(fishDat.transition_filter.sum(),j))
+                            
+                            # do some data management, we need to take the start state and t0 of the affected rows and place them on the subsequent row
+                            idx = fishDat.index[fishDat['transition_filter']==1]
+                            
+                            for k in idx:
+                                idx_int = fishDat.index.get_loc(k)
+                                t0_col = fishDat.columns.get_loc('t0')
+                                start_col = fishDat.columns.get_loc('startState')
+                                
+                                # get start time and start state
+                                start = fishDat.iloc[idx_int]['startState']
+                                t0 = fishDat.iloc[idx_int]['t0']
+
+                                # write it to next row
+                                try:
+                                    idx1 = idx_int + 1
+                                except:
+                                    start = fishDat.iloc[idx_int].index[0]
+                                    idx1 = start + 1
+                                try:
+                                    fishDat.iloc[idx1, start_col] = start
+                                    fishDat.iloc[idx1, t0_col] = t0
+                                except IndexError:
+                                    # when this occurs, there is no extra row - this last row will be deleted
+                                    continue
+    
+                            # remove those rows
+                            fishDat = fishDat[fishDat.transition_filter != 1]
+                            
+                            # create a new transition field
+                            fishDat['transition'] = tuple(zip(fishDat.startState.values.astype(int),
+                                                              fishDat.endState.values.astype(int))) 
+                            
+                            fishDat.reset_index(inplace = True)
+                        else:
+                            print ("No illegal movements identified")
+                            fishDat.reset_index(inplace = True)
+
+                    if filtered_rows == 0.0:
+                        print ("All illegal movements for fish %s removed"%(i))
+                        # stop that loop
+                        bad_moves_present = False
+                        
+                    else:
+                        # i feel bad for you son
+                        print ("%s illegal movements present in iteration, go again"%(filtered_rows))
+                    
+                fishDat.drop(labels = ['transition_filter'], axis = 1, inplace = True)
+                self.master_stateTable = self.master_stateTable.append(fishDat)    
+        
+        #self.master_stateTable = self.master_stateTable[self.master_stateTable.firstObs == 0]            
         self.master_stateTable.to_csv(outputFile)
 
     # generate summary statistics
@@ -639,6 +814,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
         print (msm_stateTable)
         print ("The table should read movement from a row to a column")
         print ("")
+        self.master_stateTable['transition'] = self.master_stateTable.transition.astype(str)
         self.countTable = self.master_stateTable.groupby(['startState','endState'])['FreqCode'].nunique().to_frame()
         self.countTable.reset_index(inplace = True)
         countPerTrans = pd.crosstab(self.countTable.startState,self.countTable.endState,values = self.countTable.FreqCode, aggfunc = 'sum')
@@ -660,6 +836,12 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
         med_transCount = self.fishTransCount.groupby(['transition'])['transCount'].median()
         print (med_transCount)
         print ("")
-        print ("The maximum number of times each transition was made:")
-        max_transCount = self.fishTransCount.groupby(['transition'])['transCount'].max()
+        print ("The maximum number of times each transition was made by each fish:")
+        max_transCount = self.fishTransCount.groupby(['FreqCode','transition'])['transCount'].max()
+        #max_transCount.to_csv(os.path.join(r'C:\Users\Kevin Nebiolo\Desktop','maxCountByFreqCode.csv'))
         print (max_transCount)
+        print ("")
+        print ("Movement summaries")
+        self.master_stateTable['dur'] = (self.master_stateTable.t1 - self.master_stateTable.t0)/3600.0
+        move_summ = self.master_stateTable.groupby('transition')['dur'].describe().round(decimals = 2)
+        print (move_summ)

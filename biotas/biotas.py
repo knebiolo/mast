@@ -444,7 +444,7 @@ def orionImport(fileName,rxfile,dbName,recName, scanTime = 1, channels = 1, ant_
 
 
 
-def lotek_import(fileName,rxfile,dbName,recName):
+def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict = None):
     ''' function imports raw lotek data, reads header data to find receiver parameters
     and automatically locates raw telemetry data.  Import procedure works with
     standardized project database. Database must be created before function can be run'''
@@ -562,35 +562,58 @@ def lotek_import(fileName,rxfile,dbName,recName):
         study_tags = pd.read_sql('SELECT FreqCode, TagType FROM tblMasterTag',con = conn)
         study_tags = study_tags[study_tags.TagType == 'Study'].FreqCode.values
         # with our data row, extract information using pandas fwf import procedure
-        telemDat = pd.read_fwf(fileName,colspecs = [(0,8),(8,18),(18,28),(28,36),(36,51),(51,59)],
-                               names = ['Date','Time','ChannelID','TagID','Antenna','Power'],
-                               skiprows = dataRow)
-        # remove last two rows, Lotek adds garbage at the end
-        telemDat = telemDat.iloc[:-2]                                                   
-        # Adding the filename into the dataset...drop the path
-        ''' (note this may cause confusion because above we use filename with path.  
-        Decide what to do and fix)'''
-        telemDat['fileName'] = np.repeat(rxfile,len(telemDat))                   
+        # with our data row, extract information using pandas fwf import procedure
+
+        #Depending on firmware the data structure will change.  This is for xxx firmware.  See below for additional firmware configs
+
+#       telemDat = pd.read_fwf(fileName,colspecs = [(0,8),(8,18),(18,28),(28,36),(36,51),(51,59)],names = ['Date','Time','ChannelID','TagID','Antenna','Power'],skiprows = dataRow)
+#       telemDat = telemDat.iloc[:-2]                                                   # remove last two rows, Lotek adds garbage at the end
+
+        #Master Firmware: Version 9.12.5
+        telemDat = pd.read_fwf(fileName,colspecs = [(0,8),(8,23),(23,33),(33,41),(41,56),(56,64)],names = ['Date','Time','ChannelID','TagID','Antenna','Power'],skiprows = dataRow)
+        telemDat = telemDat.iloc[:-2]                                                   # remove last two
+
+        telemDat['Antenna'] = telemDat['Antenna'].astype(str)                   #TCS Added this to get dict to line up with data
+
+        telemDat['fileName'] = np.repeat(rxfile,len(telemDat))                   # Adding the filename into the dataset...drop the path (note this may cause confusion because above we use filename with path.  Decide what to do and fix)
         def id_to_freq(row,channelDict):
             if row[2] in channelDict:
                 return channelDict[row[2]]
             else:
                 return '888'
         if len(telemDat) > 0:
-            telemDat['Frequency'] = telemDat.apply(id_to_freq, axis = 1, args = (channelDict,))
-            telemDat = telemDat[telemDat.Frequency != '888']
-            telemDat = telemDat[telemDat.TagID != 999]
-            telemDat['FreqCode'] = telemDat['Frequency'].astype(str) + ' ' + telemDat['TagID'].astype(int).astype(str)
-            telemDat['timeStamp'] = pd.to_datetime(telemDat['Date'] + ' ' + telemDat['Time'])# create timestamp field from date and time and apply to index
-            telemDat['Epoch'] = (telemDat['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()
-            telemDat = noiseRatio(5.0,telemDat,study_tags)
-            telemDat.drop (['Date','Time','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
-            telemDat['ScanTime'] = np.repeat(scanTime,len(telemDat))
-            telemDat['Channels'] = np.repeat(channels,len(telemDat))
-            telemDat['RecType'] = np.repeat(recType,len(telemDat))
-            telemDat['recID'] = np.repeat(recName,len(telemDat))
-            telemDat.to_sql('tblRaw',con = conn,index = False, if_exists = 'append')
-        c.close()
+            if ant_to_rec_dict == None:
+                telemDat['Frequency'] = telemDat.apply(id_to_freq, axis = 1, args = (channelDict,))
+                telemDat = telemDat[telemDat.Frequency != '888']
+                telemDat = telemDat[telemDat.TagID != 999]
+                telemDat['FreqCode'] = telemDat['Frequency'].astype(str) + ' ' + telemDat['TagID'].astype(int).astype(str)
+                telemDat['timeStamp'] = pd.to_datetime(telemDat['Date'] + ' ' + telemDat['Time'])# create timestamp field from date and time and apply to index
+                telemDat['Epoch'] = (telemDat['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()
+                telemDat = noiseRatio(5.0,telemDat,study_tags)
+                telemDat.drop (['Date','Time','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
+                telemDat['ScanTime'] = np.repeat(scanTime,len(telemDat))
+                telemDat['Channels'] = np.repeat(channels,len(telemDat))
+                telemDat['RecType'] = np.repeat(recType,len(telemDat))
+                telemDat['recID'] = np.repeat(recName,len(telemDat))
+                telemDat.to_sql('tblRaw',con = conn,index = False, if_exists = 'append')
+            else:
+                for ant in ant_to_rec_dict:
+                    site = ant_to_rec_dict[ant]
+                    telemDat_sub = telemDat[telemDat.Antenna == str(ant)]
+                    telemDat_sub['Frequency'] = telemDat_sub.apply(id_to_freq, axis = 1, args = (channelDict,))
+                    telemDat_sub = telemDat_sub[telemDat_sub.Frequency != '888']
+                    telemDat_sub = telemDat_sub[telemDat_sub.TagID != 999]
+                    telemDat_sub['FreqCode'] = telemDat_sub['Frequency'].astype(str) + ' ' + telemDat_sub['TagID'].astype(int).astype(str)
+                    telemDat_sub['timeStamp'] = pd.to_datetime(telemDat_sub['Date'] + ' ' + telemDat_sub['Time'])# create timestamp field from date and time and apply to index
+                    telemDat_sub['Epoch'] = (telemDat_sub['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()
+                    telemDat_sub = noiseRatio(5.0,telemDat_sub,study_tags)
+                    telemDat_sub.drop (['Date','Time','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
+                    telemDat_sub['ScanTime'] = np.repeat(scanTime,len(telemDat_sub))
+                    telemDat_sub['Channels'] = np.repeat(channels,len(telemDat_sub))
+                    telemDat_sub['RecType'] = np.repeat(recType,len(telemDat_sub))
+                    telemDat_sub['recID'] = np.repeat(site,len(telemDat_sub))
+                    telemDat_sub.to_sql('tblRaw',con = conn,index = False, if_exists = 'append')       
+                    c.close()
         
     else:
         lotek400 = False
@@ -1611,7 +1634,7 @@ def calc_class_params_map(classify_object):
 
         # calculation of the probability of a false positive given the data assuming fish is alive
         
-	# calculate the prior probability of a false detection from the training dataset
+        # caalculate the prior probability of a false detection from the training dataset
         classify_object.histDF['priorF'] = round(priorCountF/float(len(trainDF)),5)                    
         # calculate the likelihood of this row's particular consecutive record length given that the detection is a false positive
         classify_object.histDF['LconRecF_A'] = (classify_object.histDF['conRecLengthACountF'] + 1)\
@@ -1637,83 +1660,82 @@ def calc_class_params_map(classify_object):
 
         # calculation of the probability of a true detection given the data assuming fish is alive
         
-	# calculate the prior probability of a true detection from the training dataset
-	classify_object.histDF['priorT'] = round(priorCountT/float(len(trainDF)),5)                    
+        # calculate the prior probability of a true detection from the training dataset
+        classify_object.histDF['priorT'] = round(priorCountT/float(len(trainDF)),5)                    
         # calculate the likelihood of this row's particular consecutive record length given that the detection is a false positive
-	classify_object.histDF['LconRecT_A'] = (classify_object.histDF['conRecLengthACountT'] + 1)\
-	   /classify_object.histDF['LDenomCount_T']                           
+        classify_object.histDF['LconRecT_A'] = (classify_object.histDF['conRecLengthACountT'] + 1)\
+            /classify_object.histDF['LDenomCount_T']                           
         # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-	classify_object.histDF['LseriesHitT_A'] = (classify_object.histDF['seriesHitACountT'] + 1)\
-	   /classify_object.histDF['LDenomCount_T']
+        classify_object.histDF['LseriesHitT_A'] = (classify_object.histDF['seriesHitACountT'] + 1)\
+            /classify_object.histDF['LDenomCount_T']
         # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-	classify_object.histDF['LconsDetT_A'] = (classify_object.histDF['consDetACountT'] + 1)\
-	   /classify_object.histDF['LDenomCount_T']    
+        classify_object.histDF['LconsDetT_A'] = (classify_object.histDF['consDetACountT'] + 1)\
+            /classify_object.histDF['LDenomCount_T']    
         # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-	classify_object.histDF['LHitRatioT_A'] = (classify_object.histDF['hitRatioACountT'] + 1)\
-	   /classify_object.histDF['LDenomCount_T']    
+        classify_object.histDF['LHitRatioT_A'] = (classify_object.histDF['hitRatioACountT'] + 1)\
+            /classify_object.histDF['LDenomCount_T']    
         # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-	classify_object.histDF['LPowerT'] = (classify_object.histDF['powerCount_T'] + 1)\
-	   /classify_object.histDF['LDenomCount_T']    
-	# calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-	classify_object.histDF['LnoiseT'] = (classify_object.histDF['noiseCount_T'] + 1)\
-	   /classify_object.histDF['LDenomCount_T']    
+        classify_object.histDF['LPowerT'] = (classify_object.histDF['powerCount_T'] + 1)\
+            /classify_object.histDF['LDenomCount_T']    
         # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-	classify_object.histDF['LlagT'] = (classify_object.histDF['lagDiffCount_T'] + 1)\
-	   /classify_object.histDF['LDenomCount_T']     
+        classify_object.histDF['LnoiseT'] = (classify_object.histDF['noiseCount_T'] + 1)\
+            /classify_object.histDF['LDenomCount_T']    
+        # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+        classify_object.histDF['LlagT'] = (classify_object.histDF['lagDiffCount_T'] + 1)\
+            /classify_object.histDF['LDenomCount_T']     
 
         # calculation of the probability of a false positive given the data assuming fish is dead
         
-	# calculate the prior probability of a false detection from the training dataset
-	classify_object.histDF['priorF'] = round(priorCountF/float(len(trainDF)),5)
-	# calculate the likelihood of this row's particular consecutive record length given that the detection is a false positive                    
+        # calculate the prior probability of a false detection from the training dataset
+        classify_object.histDF['priorF'] = round(priorCountF/float(len(trainDF)),5)
+        # calculate the likelihood of this row's particular consecutive record length given that the detection is a false positive                    
         classify_object.histDF['LconRecF_M'] = (classify_object.histDF['conRecLengthMCountF'] + 1)\
-	   /classify_object.histDF['LDenomCount_F']
-	# calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+            /classify_object.histDF['LDenomCount_F']
+        # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
         classify_object.histDF['LseriesHitF_M'] = (classify_object.histDF['seriesHitMCountF'] + 1)\
-	   /classify_object.histDF['LDenomCount_F']
+            /classify_object.histDF['LDenomCount_F']
         # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-	classify_object.histDF['LconsDetF_M'] = (classify_object.histDF['consDetMCountF'] + 1)\
-	   /classify_object.histDF['LDenomCount_F']    
+        classify_object.histDF['LconsDetF_M'] = (classify_object.histDF['consDetMCountF'] + 1)\
+            /classify_object.histDF['LDenomCount_F']    
         # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-	classify_object.histDF['LHitRatioF_M'] = (classify_object.histDF['hitRatioMCountF'] + 1)\
-	   /classify_object.histDF['LDenomCount_F']
-	# calculate the likelihood of this row's particular seriesHit given the detection is a false positive   
+        classify_object.histDF['LHitRatioF_M'] = (classify_object.histDF['hitRatioMCountF'] + 1)\
+            /classify_object.histDF['LDenomCount_F']
+        # calculate the likelihood of this row's particular seriesHit given the detection is a false positive   
         classify_object.histDF['LPowerF'] = (classify_object.histDF['powerCount_F'] + 1)\
-	   /classify_object.histDF['LDenomCount_F']     
-	# calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+            /classify_object.histDF['LDenomCount_F']     
+        # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
         classify_object.histDF['LnoiseF'] = (classify_object.histDF['noiseCount_F'] + 1)\
-	   /classify_object.histDF['LDenomCount_F']  
-	# calculate the likelihood of this row's particular seriesHit given the detection is a false positive   
+            /classify_object.histDF['LDenomCount_F']  
+        # calculate the likelihood of this row's particular seriesHit given the detection is a false positive   
         classify_object.histDF['LlagF'] = (classify_object.histDF['lagDiffCount_F'] + 1)\
-	   /classify_object.histDF['LDenomCount_F']     
+            /classify_object.histDF['LDenomCount_F']     
 
         # calculation of the probability of a true detection given the data assuming fish is dead
 
-	# calculate the prior probability of a true detection from the training dataset
+    	# calculate the prior probability of a true detection from the training dataset
         classify_object.histDF['priorT'] = round(priorCountT/float(len(trainDF)),5)
-	# calculate the likelihood of this row's particular consecutive record length given that the detection is a false positive                    
+        # calculate the likelihood of this row's particular consecutive record length given that the detection is a false positive                    
         classify_object.histDF['LconRecT_M'] = (classify_object.histDF['conRecLengthMCountT'] + 1)\
-	   /classify_object.histDF['LDenomCount_T']         
-	# calculate the likelihood of this row's particular seriesHit given the detection is a false positive                 
+            /classify_object.histDF['LDenomCount_T']         
+        # calculate the likelihood of this row's particular seriesHit given the detection is a false positive                 
         classify_object.histDF['LseriesHitT_M'] = (classify_object.histDF['seriesHitMCountT'] + 1)\
-	   /classify_object.histDF['LDenomCount_T']
-	# calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+            /classify_object.histDF['LDenomCount_T']
+        # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
         classify_object.histDF['LconsDetT_M'] = (classify_object.histDF['consDetMCountT'] + 1)\
-	   /classify_object.histDF['LDenomCount_T']   
-	# calculate the likelihood of this row's particular seriesHit given the detection is a false positive 
+            /classify_object.histDF['LDenomCount_T']   
+        # calculate the likelihood of this row's particular seriesHit given the detection is a false positive 
         classify_object.histDF['LHitRatioT_M'] = (classify_object.histDF['hitRatioMCountT'] + 1)\
-	   /classify_object.histDF['LDenomCount_T'] 
-	# calculate the likelihood of this row's particular seriesHit given the detection is a false positive   
+            /classify_object.histDF['LDenomCount_T'] 
+        # calculate the likelihood of this row's particular seriesHit given the detection is a false positive   
         classify_object.histDF['LPowerT'] = (classify_object.histDF['powerCount_T'] + 1)\
-	   /classify_object.histDF['LDenomCount_T']
-	# calculate the likelihood of this row's particular seriesHit given the detection is a false positive     
+            /classify_object.histDF['LDenomCount_T']
+        # calculate the likelihood of this row's particular seriesHit given the detection is a false positive     
         classify_object.histDF['LnoiseT'] = (classify_object.histDF['noiseCount_T'] + 1)\
-	   /classify_object.histDF['LDenomCount_T']     
-	# calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+            /classify_object.histDF['LDenomCount_T']     
+        # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
         classify_object.histDF['LlagT'] = (classify_object.histDF['lagDiffCount_T'] + 1)\
-	   /classify_object.histDF['LDenomCount_T']     
-
-
+            /classify_object.histDF['LDenomCount_T']     
+            
         # Calculate the likelihood of each hypothesis being true
         classify_object.histDF['LikelihoodTrue_A'] = likelihood(True,classify_object, status = 'A')
         classify_object.histDF['LikelihoodFalse_A'] = likelihood(False,classify_object, status = 'A')
@@ -2018,10 +2040,10 @@ class cross_validated():
 				left_on = ['HF','lagDiffBin'], 
 				right_on = ['HF','lagDiffBin'])
 	
-	# Nan gives us heartburn, fill them with zeros
+    	# Nan gives us heartburn, fill them with zeros
         self.testDat = self.testDat.fillna(0)                                                
         
-	# Calculate Number of True and False Positive Detections in Training Dataset
+        # Calculate Number of True and False Positive Detections in Training Dataset
         try:
             priorCountT = float(len(self.trainDat[self.trainDat.Detection == 1]))
         except KeyError:
@@ -2065,7 +2087,7 @@ class cross_validated():
         # calculate the likelihood of this row's particular consecutive record length given that the detection is a false positive
         self.testDat['LconRecT'] = (self.testDat['conRecLengthCountT'] + 1)/(self.testDat['LDenomCount_T'] + 1)                            
 	    # calculate the likelihood of this row's particular seriesHit given the detection is a false positive       
-	    self.testDat['LseriesHitT'] = (self.testDat['seriesHitCountT'] + 1)/(self.testDat['LDenomCount_T'] + 1)
+        self.testDat['LseriesHitT'] = (self.testDat['seriesHitCountT'] + 1)/(self.testDat['LDenomCount_T'] + 1)
 	    # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
         self.testDat['LconsDetT'] = (self.testDat['consDetCountT'] + 1)/(self.testDat['LDenomCount_T'] + 1)  
 	    # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
@@ -2223,11 +2245,11 @@ class classification_results():
     '''Python class object to hold the results of false positive classification'''
     def __init__(self,recType,projectDB,figureWS = None,rec_list = None, reclass_iter = None):
         # initialize some variables
-	self.recType = recType
+        self.recType = recType
         self.projectDB = projectDB
         self.figureWS = figureWS
 	
-	# connect to the project database and get some data
+    	# connect to the project database and get some data
         conn = sqlite3.connect(projectDB)
         c = conn.cursor()
         conn = sqlite3.connect(self.projectDB)                                              
@@ -2236,7 +2258,7 @@ class classification_results():
         self.reclass_iter = reclass_iter
         self.rec_list = rec_list
 
-	# if there is no receiver list we want it all
+	    # if there is no receiver list we want it all
         if rec_list == None:
             recSQL = "SELECT * FROM tblMasterReceiver WHERE RecType = '%s'"%(self.recType) # SQL code to import data from this node
             receivers = pd.read_sql(recSQL,con = conn)                         # import data
@@ -2369,7 +2391,7 @@ class classification_results():
                                     logLikelihoodRatio_M 
                             FROM tblClassify_%s_1 '''%(i)
 		    
-		    # get data for this receiver                    
+        		    # get data for this receiver                    
                     dat = pd.read_sql(sql, con = conn, coerce_float = True)                     
                     self.init_iter = self.init_iter.append(dat)
                     del dat
@@ -2967,7 +2989,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
                             RelLoc, 
                             CapLoc 
                             FROM tblMasterTag 
-                            WHERE TagType = 'Study''''
+                            WHERE TagType = 'Study' '''
             # connect to database and grab data
             conn = sqlite3.connect(self.dbDir)
             c = conn.cursor()
@@ -3860,7 +3882,6 @@ def russian_doll(overlap):
     fishes = nodeDat.FreqCode.unique()
     for i in fishes:
         overlap.fish = i
-        #print "Let's start sifting through fish %s at node %s"%(i, overlap.curr_node)
         children = overlap.G.succ[overlap.curr_node]
         fishDat = nodeDat[nodeDat.FreqCode == i]
         fishDat['overlapping'] = np.zeros(len(fishDat))

@@ -54,7 +54,7 @@ class bout():
                         max_iter_dict[i] = j
                     curr_idx = curr_idx + 1
             curr_idx = 0
-
+            print (max_iter_dict)
             # once we have a hash table of receiver to max classification, extract the classification dataset
             for j in max_iter_dict:
                 sql = "SELECT FreqCode, Epoch, recID, test FROM %s"%(max_iter_dict[j])
@@ -179,7 +179,7 @@ class bout():
                         max_iter_dict[i] = j
                     curr_idx = curr_idx + 1
             curr_idx = 0
-            del j
+            #del j
 
             # once we have a hash table of receiver to max classification, extract the classification dataset
             for j in max_iter_dict:
@@ -335,7 +335,6 @@ class overlap_reduction():
 def russian_doll(overlap):
     '''Function iterates through matching recap data from successors to see if
     current recapture row at predeccesor overlaps with successor presence.'''
-    #print "Starting Russing Doll algorithm for node %s, hope you aren't busy, you will be watching this process for hours"%(overlap.curr_node)
     # create function that we can vectorize over list of epochs (i)
     def overlap_check(i, min_epoch, max_epoch):
         return np.logical_and(min_epoch >= i, max_epoch < i).any()
@@ -343,7 +342,6 @@ def russian_doll(overlap):
     fishes = nodeDat.FreqCode.unique()
     for i in fishes:
         overlap.fish = i
-        #print "Let's start sifting through fish %s at node %s"%(i, overlap.curr_node)
         children = overlap.G.succ[overlap.curr_node]
         fishDat = nodeDat[nodeDat.FreqCode == i]
         fishDat['overlapping'] = np.zeros(len(fishDat))
