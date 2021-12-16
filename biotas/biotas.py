@@ -1266,16 +1266,45 @@ def create_training_data(site,projectDB,reclass_iter = None, rec_list = None):
             trainDF = pd.DataFrame()
             for i in rec_list:
                 trainDF = trainDF.append(pd.read_sql("select * from tblTrain WHERE recID == '%s'"%(i),con=conn))#This will read in tblTrain and create a pandas dataframe
-#            classDF = pd.read_sql("select test, FreqCode,Power,lag,lagDiff,fishCount,conRecLength,consDet,detHist,hitRatio,noiseRatio,seriesHit,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from tblClassify_%s_%s"%(site,classify_object.reclass_iter-1),con=conn)
-        classDF = pd.read_sql("select test, FreqCode,Power,noiseRatio, lag,lagDiff,conRecLength_A,consDet_A,detHist_A,hitRatio_A,seriesHit_A,conRecLength_M,consDet_M,detHist_M,hitRatio_M,seriesHit_M,postTrue_A,postTrue_M,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from tblClassify_%s_%s"%(site,reclass_iter-1),con=conn)
-       # classDF = classDF[classDF.postTrue_A >= classDF.postTrue_M]
-        classDF.drop(['conRecLength_M','consDet_M','detHist_M','hitRatio_M','seriesHit_M'], axis = 1, inplace = True)
-        classDF.rename(columns = {'conRecLength_A':'conRecLength','consDet_A':'consDet','detHist_A':'detHist','hitRatio_A':'hitRatio','seriesHit_A':'seriesHit'}, inplace = True)
+        
+        classDF = pd.read_sql('''SELECT test, 
+                              FreqCode,
+                              Power,
+                              noiseRatio, 
+                              lag,
+                              lagDiff,
+                              conRecLength_A,
+                              consDet_A,
+                              detHist_A,
+                              hitRatio_A,
+                              seriesHit_A,
+                              conRecLength_M,
+                              consDet_M,
+                              detHist_M,
+                              hitRatio_M,
+                              seriesHit_M,
+                              postTrue_A,
+                              postTrue_M,
+                              timeStamp,
+                              Epoch,
+                              RowSeconds,
+                              recID,
+                              RecType,
+                              ScanTime FROM tblClassify_%s_%s'''%(site,reclass_iter-1),
+                              con=conn)
+        classDF.drop(['conRecLength_M','consDet_M','detHist_M','hitRatio_M','seriesHit_M'], 
+                     axis = 1, 
+                     inplace = True)
+        classDF.rename(columns = {'conRecLength_A':'conRecLength',
+                                  'consDet_A':'consDet',
+                                  'detHist_A':'detHist',
+                                  'hitRatio_A':'hitRatio',
+                                  'seriesHit_A':'seriesHit'}, 
+                       inplace = True)
 
         trainDF = trainDF[trainDF.Detection==0]
         classDF = classDF[classDF.test==1]
         classDF['Channels']=np.repeat(1,len(classDF))
-#       classDF.rename(columns={"test":"Detection","fishCount":"FishCount","RowSeconds":"Seconds","RecType":"recType"},inplace=True)#inplace tells it to replace the existing dataframe
         classDF.rename(columns={"test":"Detection","RowSeconds":"Seconds","RecType":"recType"},inplace=True)#inplace tells it to replace the existing dataframe
         #Next we append the classdf to the traindf
         trainDF = trainDF.append(classDF)
@@ -1305,8 +1334,8 @@ def calc_class_params_map(classify_object):
         classify_object.histDF['lagDiff'] = classify_object.histDF.lag.diff()
         classify_object.histDF['seriesHit_A'] = classify_object.histDF['lag'].apply(lambda x: 1 if x in classify_object.alive_factors else 0)
         classify_object.histDF['seriesHit_M'] = classify_object.histDF['lag'].apply(lambda x: 1 if x in classify_object.dead_factors else 0)
-        classify_object.histDF = detHist(classify_object.histDF,classify_object.PulseRate,classify_object.det)             # calculate detection history
-        classify_object.histDF = detHist(classify_object.histDF,classify_object.MortRate,classify_object.det,'M')             # calculate detection history
+        classify_object.histDF = detHist(classify_object.histDF,classify_object.PulseRate,classify_object.det)             
+        classify_object.histDF = detHist(classify_object.histDF,classify_object.MortRate,classify_object.det,'M')             
         classify_object.histDF['powerBin'] = (classify_object.histDF.Power//5)*5
         classify_object.histDF['noiseBin'] = (classify_object.histDF.noiseRatio//.1)*.1
         classify_object.histDF['lagDiffBin'] = (classify_object.histDF.lagDiff//classify_object.PulseRate)*classify_object.PulseRate
@@ -1433,70 +1462,134 @@ def calc_class_params_map(classify_object):
         powerCount = trainDF.groupby(['Detection','powerBin'])['powerBin'].count()
         powerCount = pd.Series(powerCount, name = 'powerCount_T')
         powerCount = pd.DataFrame(powerCount).reset_index().rename(columns = {'Detection':'HT'})
-        classify_object.histDF = pd.merge(left = classify_object.histDF, right = powerCount, how = u'left', left_on = ['HT','powerBin'], right_on = ['HT','powerBin'])
+        classify_object.histDF = pd.merge(left = classify_object.histDF, 
+                                          right = powerCount, 
+                                          how = u'left', 
+                                          left_on = ['HT','powerBin'], 
+                                          right_on = ['HT','powerBin'])
         powerCount = powerCount.rename(columns = {'HT':'HF','powerCount_T':'powerCount_F'})
-        classify_object.histDF = pd.merge(left = classify_object.histDF, right = powerCount, how = u'left', left_on = ['HF','powerBin'], right_on = ['HF','powerBin'])
+        classify_object.histDF = pd.merge(left = classify_object.histDF, 
+                                          right = powerCount, 
+                                          how = u'left', 
+                                          left_on = ['HF','powerBin'], 
+                                          right_on = ['HF','powerBin'])
 
-        # Make a Count of the predictor variables and join to training data frame - For ALIVE Strings
+        # Make a Count of the predictor variables and join to training data frame 
         seriesHitCount = trainDF.groupby(['Detection','seriesHit'])['seriesHit'].count()
         seriesHitCount = pd.Series(seriesHitCount, name = 'seriesHitMCountT')
         seriesHitCount = pd.DataFrame(seriesHitCount).reset_index().rename(columns = {'Detection':'HT'})
-        classify_object.histDF = pd.merge(left = classify_object.histDF, right = seriesHitCount, how = u'left',left_on = ['HT','seriesHit_M'], right_on = ['HT','seriesHit'])
+        classify_object.histDF = pd.merge(left = classify_object.histDF, 
+                                          right = seriesHitCount,
+                                          how = u'left',
+                                          left_on = ['HT','seriesHit_M'], 
+                                          right_on = ['HT','seriesHit'])
         seriesHitCount = seriesHitCount.rename(columns = {'HT':'HF','seriesHitMCountT':'seriesHitMCountF'})
-        classify_object.histDF = pd.merge(left = classify_object.histDF, right = seriesHitCount, how = u'left',left_on = ['HF','seriesHit_M'], right_on = ['HF','seriesHit'])
+        classify_object.histDF = pd.merge(left = classify_object.histDF, 
+                                          right = seriesHitCount, 
+                                          how = u'left',
+                                          left_on = ['HF','seriesHit_M'], 
+                                          right_on = ['HF','seriesHit'])
         classify_object.histDF.drop(labels = ['seriesHit_x','seriesHit_y'], axis = 1, inplace = True)
 
         # count the number of instances of consective detections by detection class and write to data frame
         consDetCount = trainDF.groupby(['Detection','consDet'])['consDet'].count()
         consDetCount = pd.Series(consDetCount, name = 'consDetMCountT')
         consDetCount = pd.DataFrame(consDetCount).reset_index().rename(columns = {'Detection':'HT'})
-        classify_object.histDF = pd.merge(left = classify_object.histDF, right = consDetCount, how = u'left', left_on = ['HT','consDet_M'], right_on = ['HT','consDet'])
+        classify_object.histDF = pd.merge(left = classify_object.histDF, 
+                                          right = consDetCount, 
+                                          how = u'left', 
+                                          left_on = ['HT','consDet_M'], 
+                                          right_on = ['HT','consDet'])
         consDetCount = consDetCount.rename(columns = {'HT':'HF','consDetMCountT':'consDetMCountF'})
-        classify_object.histDF = pd.merge(left = classify_object.histDF, right = consDetCount, how = u'left', left_on = ['HF','consDet_M'], right_on = ['HF','consDet'])
+        classify_object.histDF = pd.merge(left = classify_object.histDF, 
+                                          right = consDetCount, 
+                                          how = u'left', 
+                                          left_on = ['HF','consDet_M'], 
+                                          right_on = ['HF','consDet'])
         classify_object.histDF.drop(labels = ['consDet_x','consDet_y'], axis = 1, inplace = True)
 
         # count the number of instances of certain detection histories by detection class and write to data frame
         detHistCount = trainDF.groupby(['Detection','detHist'])['detHist'].count()
         detHistCount = pd.Series(detHistCount, name = 'detHistMCountT')
         detHistCount = pd.DataFrame(detHistCount).reset_index().rename(columns = {'Detection':'HT'})
-        classify_object.histDF = pd.merge(left = classify_object.histDF, right = detHistCount, how = u'left', left_on = ['HT','detHist_M'],right_on =['HT','detHist'])
+        classify_object.histDF = pd.merge(left = classify_object.histDF, 
+                                          right = detHistCount, 
+                                          how = u'left', 
+                                          left_on = ['HT','detHist_M'],
+                                          right_on =['HT','detHist'])
         detHistCount = detHistCount.rename(columns = {'HT':'HF','detHistMCountT':'detHistMCountF'})
-        classify_object.histDF = pd.merge(left = classify_object.histDF, right = detHistCount, how = u'left', left_on = ['HF','detHist_M'],right_on =['HF','detHist'])
+        classify_object.histDF = pd.merge(left = classify_object.histDF, 
+                                          right = detHistCount, 
+                                          how = u'left', 
+                                          left_on = ['HF','detHist_M'],
+                                          right_on =['HF','detHist'])
         classify_object.histDF.drop(labels = ['detHist_x','detHist_y'], axis = 1, inplace = True)
 
         # count the number of instances of consecutive record lengths by detection class and write to data frame
         conRecLengthCount = trainDF.groupby(['Detection','conRecLength'])['conRecLength'].count()
         conRecLengthCount = pd.Series(conRecLengthCount, name = 'conRecLengthMCountT')
         conRecLengthCount = pd.DataFrame(conRecLengthCount).reset_index().rename(columns = {'Detection':'HT'})
-        classify_object.histDF = pd.merge(left = classify_object.histDF, right = conRecLengthCount, how = u'left', left_on = ['HT','conRecLength_M'], right_on = ['HT','conRecLength'])
+        classify_object.histDF = pd.merge(left = classify_object.histDF, 
+                                          right = conRecLengthCount, 
+                                          how = u'left', 
+                                          left_on = ['HT','conRecLength_M'], 
+                                          right_on = ['HT','conRecLength'])
         conRecLengthCount = conRecLengthCount.rename(columns = {'HT':'HF','conRecLengthMCountT':'conRecLengthMCountF'})
-        classify_object.histDF = pd.merge(left = classify_object.histDF, right = conRecLengthCount, how = u'left', left_on = ['HF','conRecLength_M'], right_on = ['HF','conRecLength'])
+        classify_object.histDF = pd.merge(left = classify_object.histDF, 
+                                          right = conRecLengthCount, 
+                                          how = u'left', 
+                                          left_on = ['HF','conRecLength_M'], 
+                                          right_on = ['HF','conRecLength'])
         classify_object.histDF.drop(labels = ['conRecLength_x','conRecLength_y'], axis = 1, inplace = True)
 
         # count the number of instances of hit ratios by detection class and write to data frame
         hitRatioCount = trainDF.groupby(['Detection','hitRatio'])['hitRatio'].count()
         hitRatioCount = pd.Series(hitRatioCount, name = 'hitRatioMCountT')
         hitRatioCount = pd.DataFrame(hitRatioCount).reset_index().rename(columns = {'Detection':'HT'})
-        classify_object.histDF = pd.merge(left = classify_object.histDF, right = hitRatioCount, how = u'left', left_on = ['HT','hitRatio_M'], right_on = ['HT','hitRatio'])
+        classify_object.histDF = pd.merge(left = classify_object.histDF, 
+                                          right = hitRatioCount, 
+                                          how = u'left', 
+                                          left_on = ['HT','hitRatio_M'], 
+                                          right_on = ['HT','hitRatio'])
         hitRatioCount = hitRatioCount.rename(columns = {'HT':'HF','hitRatioMCountT':'hitRatioMCountF'})
-        classify_object.histDF = pd.merge(left = classify_object.histDF, right = hitRatioCount, how = u'left', left_on = ['HF','hitRatio_M'], right_on = ['HF','hitRatio'])
+        classify_object.histDF = pd.merge(left = classify_object.histDF, 
+                                          right = hitRatioCount, 
+                                          how = u'left', 
+                                          left_on = ['HF','hitRatio_M'], 
+                                          right_on = ['HF','hitRatio'])
         classify_object.histDF.drop(labels = ['hitRatio_x','hitRatio_y'], axis = 1, inplace = True)
 
-        # NoiseR$atio
+        # NoiseRatio
         noiseCount = trainDF.groupby(['Detection','noiseBin'])['noiseBin'].count()
         noiseCount = pd.Series(noiseCount, name = 'noiseCount_T')
         noiseCount = pd.DataFrame(noiseCount).reset_index().rename(columns = {'Detection':'HT'})
-        classify_object.histDF = pd.merge(left = classify_object.histDF, right = noiseCount, how = u'left', left_on = ['HT','noiseBin'], right_on = ['HT','noiseBin'])
+        classify_object.histDF = pd.merge(left = classify_object.histDF, 
+                                          right = noiseCount, 
+                                          how = u'left', 
+                                          left_on = ['HT','noiseBin'], 
+                                          right_on = ['HT','noiseBin'])
         noiseCount = noiseCount.rename(columns = {'HT':'HF','noiseCount_T':'noiseCount_F'})
-        classify_object.histDF = pd.merge(left = classify_object.histDF, right = noiseCount, how = u'left', left_on = ['HF','noiseBin'], right_on = ['HF','noiseBin'])
+        classify_object.histDF = pd.merge(left = classify_object.histDF, 
+                                          right = noiseCount, 
+                                          how = u'left', 
+                                          left_on = ['HF','noiseBin'], 
+                                          right_on = ['HF','noiseBin'])
 
         # Lag Bin
         lagCount = trainDF.groupby(['Detection','lagDiffBin'])['lagDiffBin'].count()
         lagCount = pd.Series(lagCount, name = 'lagDiffCount_T')
         lagCount = pd.DataFrame(lagCount).reset_index().rename(columns = {'Detection':'HT'})
-        classify_object.histDF = pd.merge(left = classify_object.histDF, right = lagCount, how = u'left', left_on = ['HT','lagDiffBin'], right_on = ['HT','lagDiffBin'])
+        classify_object.histDF = pd.merge(left = classify_object.histDF, 
+                                          right = lagCount, 
+                                          how = u'left', 
+                                          left_on = ['HT','lagDiffBin'], 
+                                          right_on = ['HT','lagDiffBin'])
         lagCount = lagCount.rename(columns = {'HT':'HF','lagDiffCount_T':'lagDiffCount_F'})
-        classify_object.histDF = pd.merge(left = classify_object.histDF, right = lagCount, how = u'left', left_on = ['HF','lagDiffBin'], right_on = ['HF','lagDiffBin'])
+        classify_object.histDF = pd.merge(left = classify_object.histDF, 
+                                          right = lagCount, 
+                                          how = u'left', 
+                                          left_on = ['HF','lagDiffBin'], 
+                                          right_on = ['HF','lagDiffBin'])
 
         classify_object.histDF.fillna(0.0000001,inplace = True)
         # Calculate Number of True and False Positive Detections in Training Dataset
@@ -1516,47 +1609,109 @@ def calc_class_params_map(classify_object):
         classify_object.histDF['LDenomCount_F'] = np.repeat(falseCount,len(classify_object.histDF))
 
 
-        # calculation of the probability of a false positive given the data
-        classify_object.histDF['priorF'] = round(priorCountF/float(len(trainDF)),5)                    # calculate the prior probability of a false detection from the training dataset
-        classify_object.histDF['LconRecF_A'] = (classify_object.histDF['conRecLengthACountF'] + 1)/classify_object.histDF['LDenomCount_F']# calculate the likelihood of this row's particular consecutive record length given that the detection is a false positive
-        classify_object.histDF['LseriesHitF_A'] = (classify_object.histDF['seriesHitACountF'] + 1)/classify_object.histDF['LDenomCount_F']# calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-        classify_object.histDF['LconsDetF_A'] = (classify_object.histDF['consDetACountF'] + 1)/classify_object.histDF['LDenomCount_F']    # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-        classify_object.histDF['LHitRatioF_A'] = (classify_object.histDF['hitRatioACountF'] + 1)/classify_object.histDF['LDenomCount_F']    # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-        classify_object.histDF['LPowerF'] = (classify_object.histDF['powerCount_F'] + 1)/classify_object.histDF['LDenomCount_F']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-        classify_object.histDF['LnoiseF'] = (classify_object.histDF['noiseCount_F'] + 1)/classify_object.histDF['LDenomCount_F']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-        classify_object.histDF['LlagF'] = (classify_object.histDF['lagDiffCount_F'] + 1)/classify_object.histDF['LDenomCount_F']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+        # calculation of the probability of a false positive given the data assuming fish is alive
+        
+	# calculate the prior probability of a false detection from the training dataset
+        classify_object.histDF['priorF'] = round(priorCountF/float(len(trainDF)),5)                    
+        # calculate the likelihood of this row's particular consecutive record length given that the detection is a false positive
+        classify_object.histDF['LconRecF_A'] = (classify_object.histDF['conRecLengthACountF'] + 1)\
+            /classify_object.histDF['LDenomCount_F']
+        # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+        classify_object.histDF['LseriesHitF_A'] = (classify_object.histDF['seriesHitACountF'] + 1)\
+            /classify_object.histDF['LDenomCount_F']
+        # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+        classify_object.histDF['LconsDetF_A'] = (classify_object.histDF['consDetACountF'] + 1)\
+            /classify_object.histDF['LDenomCount_F']    
+        # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+        classify_object.histDF['LHitRatioF_A'] = (classify_object.histDF['hitRatioACountF'] + 1)\
+            /classify_object.histDF['LDenomCount_F']   
+        # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+        classify_object.histDF['LPowerF'] = (classify_object.histDF['powerCount_F'] + 1)\
+            /classify_object.histDF['LDenomCount_F']     
+        # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+        classify_object.histDF['LnoiseF'] = (classify_object.histDF['noiseCount_F'] + 1)\
+            /classify_object.histDF['LDenomCount_F']    
+        # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+        classify_object.histDF['LlagF'] = (classify_object.histDF['lagDiffCount_F'] + 1)\
+           /classify_object.histDF['LDenomCount_F']     
 
+        # calculation of the probability of a true detection given the data assuming fish is alive
+        
+	# calculate the prior probability of a true detection from the training dataset
+	classify_object.histDF['priorT'] = round(priorCountT/float(len(trainDF)),5)                    
+        # calculate the likelihood of this row's particular consecutive record length given that the detection is a false positive
+	classify_object.histDF['LconRecT_A'] = (classify_object.histDF['conRecLengthACountT'] + 1)\
+	   /classify_object.histDF['LDenomCount_T']                           
+        # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+	classify_object.histDF['LseriesHitT_A'] = (classify_object.histDF['seriesHitACountT'] + 1)\
+	   /classify_object.histDF['LDenomCount_T']
+        # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+	classify_object.histDF['LconsDetT_A'] = (classify_object.histDF['consDetACountT'] + 1)\
+	   /classify_object.histDF['LDenomCount_T']    
+        # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+	classify_object.histDF['LHitRatioT_A'] = (classify_object.histDF['hitRatioACountT'] + 1)\
+	   /classify_object.histDF['LDenomCount_T']    
+        # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+	classify_object.histDF['LPowerT'] = (classify_object.histDF['powerCount_T'] + 1)\
+	   /classify_object.histDF['LDenomCount_T']    
+	# calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+	classify_object.histDF['LnoiseT'] = (classify_object.histDF['noiseCount_T'] + 1)\
+	   /classify_object.histDF['LDenomCount_T']    
+        # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+	classify_object.histDF['LlagT'] = (classify_object.histDF['lagDiffCount_T'] + 1)\
+	   /classify_object.histDF['LDenomCount_T']     
 
-        # calculation of the probability of a true detection given the data
-        classify_object.histDF['priorT'] = round(priorCountT/float(len(trainDF)),5)                    # calculate the prior probability of a true detection from the training dataset
-        classify_object.histDF['LconRecT_A'] = (classify_object.histDF['conRecLengthACountT'] + 1)/classify_object.histDF['LDenomCount_T']# calculate the likelihood of this row's particular consecutive record length given that the detection is a false positive                           # calculate the posterior probability of a false positive detection given this row's detection history, power bin and noise ratio
-        classify_object.histDF['LseriesHitT_A'] = (classify_object.histDF['seriesHitACountT'] + 1)/classify_object.histDF['LDenomCount_T']# calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-        classify_object.histDF['LconsDetT_A'] = (classify_object.histDF['consDetACountT'] + 1)/classify_object.histDF['LDenomCount_T']    # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-        classify_object.histDF['LHitRatioT_A'] = (classify_object.histDF['hitRatioACountT'] + 1)/classify_object.histDF['LDenomCount_T']    # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-        classify_object.histDF['LPowerT'] = (classify_object.histDF['powerCount_T'] + 1)/classify_object.histDF['LDenomCount_T']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-        classify_object.histDF['LnoiseT'] = (classify_object.histDF['noiseCount_T'] + 1)/classify_object.histDF['LDenomCount_T']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-        classify_object.histDF['LlagT'] = (classify_object.histDF['lagDiffCount_T'] + 1)/classify_object.histDF['LDenomCount_T']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+        # calculation of the probability of a false positive given the data assuming fish is dead
+        
+	# calculate the prior probability of a false detection from the training dataset
+	classify_object.histDF['priorF'] = round(priorCountF/float(len(trainDF)),5)
+	# calculate the likelihood of this row's particular consecutive record length given that the detection is a false positive                    
+        classify_object.histDF['LconRecF_M'] = (classify_object.histDF['conRecLengthMCountF'] + 1)\
+	   /classify_object.histDF['LDenomCount_F']
+	# calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+        classify_object.histDF['LseriesHitF_M'] = (classify_object.histDF['seriesHitMCountF'] + 1)\
+	   /classify_object.histDF['LDenomCount_F']
+        # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+	classify_object.histDF['LconsDetF_M'] = (classify_object.histDF['consDetMCountF'] + 1)\
+	   /classify_object.histDF['LDenomCount_F']    
+        # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+	classify_object.histDF['LHitRatioF_M'] = (classify_object.histDF['hitRatioMCountF'] + 1)\
+	   /classify_object.histDF['LDenomCount_F']
+	# calculate the likelihood of this row's particular seriesHit given the detection is a false positive   
+        classify_object.histDF['LPowerF'] = (classify_object.histDF['powerCount_F'] + 1)\
+	   /classify_object.histDF['LDenomCount_F']     
+	# calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+        classify_object.histDF['LnoiseF'] = (classify_object.histDF['noiseCount_F'] + 1)\
+	   /classify_object.histDF['LDenomCount_F']  
+	# calculate the likelihood of this row's particular seriesHit given the detection is a false positive   
+        classify_object.histDF['LlagF'] = (classify_object.histDF['lagDiffCount_F'] + 1)\
+	   /classify_object.histDF['LDenomCount_F']     
 
-        # calculation of the probability of a false positive given the data
-        classify_object.histDF['priorF'] = round(priorCountF/float(len(trainDF)),5)                    # calculate the prior probability of a false detection from the training dataset
-        classify_object.histDF['LconRecF_M'] = (classify_object.histDF['conRecLengthMCountF'] + 1)/classify_object.histDF['LDenomCount_F']# calculate the likelihood of this row's particular consecutive record length given that the detection is a false positive
-        classify_object.histDF['LseriesHitF_M'] = (classify_object.histDF['seriesHitMCountF'] + 1)/classify_object.histDF['LDenomCount_F']# calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-        classify_object.histDF['LconsDetF_M'] = (classify_object.histDF['consDetMCountF'] + 1)/classify_object.histDF['LDenomCount_F']    # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-        classify_object.histDF['LHitRatioF_M'] = (classify_object.histDF['hitRatioMCountF'] + 1)/classify_object.histDF['LDenomCount_F']    # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-        classify_object.histDF['LPowerF'] = (classify_object.histDF['powerCount_F'] + 1)/classify_object.histDF['LDenomCount_F']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-        classify_object.histDF['LnoiseF'] = (classify_object.histDF['noiseCount_F'] + 1)/classify_object.histDF['LDenomCount_F']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-        classify_object.histDF['LlagF'] = (classify_object.histDF['lagDiffCount_F'] + 1)/classify_object.histDF['LDenomCount_F']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+        # calculation of the probability of a true detection given the data assuming fish is dead
 
-
-        # calculation of the probability of a true detection given the data
-        classify_object.histDF['priorT'] = round(priorCountT/float(len(trainDF)),5)                    # calculate the prior probability of a true detection from the training dataset
-        classify_object.histDF['LconRecT_M'] = (classify_object.histDF['conRecLengthMCountT'] + 1)/classify_object.histDF['LDenomCount_T']# calculate the likelihood of this row's particular consecutive record length given that the detection is a false positive                           # calculate the posterior probability of a false positive detection given this row's detection history, power bin and noise ratio
-        classify_object.histDF['LseriesHitT_M'] = (classify_object.histDF['seriesHitMCountT'] + 1)/classify_object.histDF['LDenomCount_T']# calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-        classify_object.histDF['LconsDetT_M'] = (classify_object.histDF['consDetMCountT'] + 1)/classify_object.histDF['LDenomCount_T']    # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-        classify_object.histDF['LHitRatioT_M'] = (classify_object.histDF['hitRatioMCountT'] + 1)/classify_object.histDF['LDenomCount_T']    # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-        classify_object.histDF['LPowerT'] = (classify_object.histDF['powerCount_T'] + 1)/classify_object.histDF['LDenomCount_T']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-        classify_object.histDF['LnoiseT'] = (classify_object.histDF['noiseCount_T'] + 1)/classify_object.histDF['LDenomCount_T']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-        classify_object.histDF['LlagT'] = (classify_object.histDF['lagDiffCount_T'] + 1)/classify_object.histDF['LDenomCount_T']     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+	# calculate the prior probability of a true detection from the training dataset
+        classify_object.histDF['priorT'] = round(priorCountT/float(len(trainDF)),5)
+	# calculate the likelihood of this row's particular consecutive record length given that the detection is a false positive                    
+        classify_object.histDF['LconRecT_M'] = (classify_object.histDF['conRecLengthMCountT'] + 1)\
+	   /classify_object.histDF['LDenomCount_T']         
+	# calculate the likelihood of this row's particular seriesHit given the detection is a false positive                 
+        classify_object.histDF['LseriesHitT_M'] = (classify_object.histDF['seriesHitMCountT'] + 1)\
+	   /classify_object.histDF['LDenomCount_T']
+	# calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+        classify_object.histDF['LconsDetT_M'] = (classify_object.histDF['consDetMCountT'] + 1)\
+	   /classify_object.histDF['LDenomCount_T']   
+	# calculate the likelihood of this row's particular seriesHit given the detection is a false positive 
+        classify_object.histDF['LHitRatioT_M'] = (classify_object.histDF['hitRatioMCountT'] + 1)\
+	   /classify_object.histDF['LDenomCount_T'] 
+	# calculate the likelihood of this row's particular seriesHit given the detection is a false positive   
+        classify_object.histDF['LPowerT'] = (classify_object.histDF['powerCount_T'] + 1)\
+	   /classify_object.histDF['LDenomCount_T']
+	# calculate the likelihood of this row's particular seriesHit given the detection is a false positive     
+        classify_object.histDF['LnoiseT'] = (classify_object.histDF['noiseCount_T'] + 1)\
+	   /classify_object.histDF['LDenomCount_T']     
+	# calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+        classify_object.histDF['LlagT'] = (classify_object.histDF['lagDiffCount_T'] + 1)\
+	   /classify_object.histDF['LDenomCount_T']     
 
 
         # Calculate the likelihood of each hypothesis being true
@@ -1692,7 +1847,7 @@ class cross_validated():
 
             # iterate over receivers, extract false positives from tblTrain.  
             for i in self.rec_list:
-                falses_i = pd.read_sql("select * from tblTrain WHERE recID == '%s'"%(i),con=conn)#This will read in tblTrain and create a pandas dataframe
+                falses_i = pd.read_sql("select * from tblTrain WHERE recID == '%s'"%(i),con=conn)
                 if len(falses_i) > 0:
                     falses_i = falses_i[falses_i.Detection==0]
                     falses = falses.append(falses_i) 
@@ -1702,7 +1857,7 @@ class cross_validated():
             print ("Training data created")
 
             trues['Channels']=np.repeat(1,len(trues))
-            trues.rename(columns={"test":"Detection","RowSeconds":"Seconds","RecType":"recType"},inplace=True)#inplace tells it to replace the existing dataframe
+            trues.rename(columns={"test":"Detection","RowSeconds":"Seconds","RecType":"recType"},inplace=True)
             self.trainDF = self.trainDF.append(trues)
             self.trainDF = self.trainDF.append(falses)
             del trues, falses
@@ -1750,75 +1905,123 @@ class cross_validated():
         seriesHitCount = self.trainDat.groupby(['Detection','seriesHit'])['seriesHit'].count()
         seriesHitCount = pd.Series(seriesHitCount, name = 'seriesHitCountT')
         seriesHitCount = pd.DataFrame(seriesHitCount).reset_index().rename(columns = {'Detection':'HT'})
-        self.testDat = pd.merge(left = self.testDat, right = seriesHitCount, how = u'left',left_on = ['HT','seriesHit'], right_on = ['HT','seriesHit'])
+        self.testDat = pd.merge(left = self.testDat, 
+				right = seriesHitCount, 
+				how = u'left',
+				left_on = ['HT','seriesHit'], 
+				right_on = ['HT','seriesHit'])
         seriesHitCount = seriesHitCount.rename(columns = {'HT':'HF','seriesHitCountT':'seriesHitCountF'})
-        self.testDat = pd.merge(left = self.testDat, right = seriesHitCount, how = u'left',left_on = ['HF','seriesHit'], right_on = ['HF','seriesHit'])
+        self.testDat = pd.merge(left = self.testDat, 
+				right = seriesHitCount, 
+				how = u'left',left_on = ['HF','seriesHit'], 
+				right_on = ['HF','seriesHit'])
         #testDat.drop(['seriesHit_x','seriesHit_y'], axis = 1, inplace = True)
 
         # Consecutive Detections
         consDetCount = self.trainDat.groupby(['Detection','consDet'])['consDet'].count()
         consDetCount = pd.Series(consDetCount, name = 'consDetCountT')
         consDetCount = pd.DataFrame(consDetCount).reset_index().rename(columns = {'Detection':'HT'})
-        self.testDat = pd.merge(left = self.testDat, right = consDetCount, how = u'left', left_on = ['HT','consDet'], right_on = ['HT','consDet'])
+        self.testDat = pd.merge(left = self.testDat, 
+				right = consDetCount, 
+				how = u'left', 
+				left_on = ['HT','consDet'], 
+				right_on = ['HT','consDet'])
         consDetCount = consDetCount.rename(columns = {'HT':'HF','consDetCountT':'consDetCountF'})
-        self.testDat = pd.merge(left = self.testDat, right = consDetCount, how = u'left', left_on = ['HF','consDet'], right_on = ['HF','consDet'])
+        self.testDat = pd.merge(left = self.testDat, 
+				right = consDetCount, 
+				how = u'left', 
+				left_on = ['HF','consDet'], 
+				right_on = ['HF','consDet'])
         #testDat.drop(['consDet_x','consDet_y'], axis = 1, inplace = True)
-
-#        # Detection History
-#        detHistCount = self.trainDat.groupby(['Detection','detHist'])['detHist'].count()
-#        detHistCount = pd.Series(detHistCount, name = 'detHistCountT')
-#        detHistCount = pd.DataFrame(detHistCount).reset_index().rename(columns = {'Detection':'HT'})
-#        self.testDat = pd.merge(how = 'left', left = self.testDat, right = detHistCount, left_on = ['HT','detHist'],right_on =['HT','detHist'])
-#        detHistCount = detHistCount.rename(columns = {'HT':'HF','detHistCountT':'detHistCountF'})
-#        self.testDat = pd.merge(how = 'left', left = self.testDat, right = detHistCount, left_on = ['HF','detHist'],right_on =['HF','detHist'])
-#        #testDat.drop(['detHist_x','detHist_y'], axis = 1, inplace = True)
 
         # Consecutive Record Length
         conRecLengthCount = self.trainDat.groupby(['Detection','conRecLength'])['conRecLength'].count()
         conRecLengthCount = pd.Series(conRecLengthCount, name = 'conRecLengthCountT')
         conRecLengthCount = pd.DataFrame(conRecLengthCount).reset_index().rename(columns = {'Detection':'HT'})
-        self.testDat = pd.merge(left = self.testDat, right = conRecLengthCount, how = u'left', left_on = ['HT','conRecLength'], right_on = ['HT','conRecLength'])
+        self.testDat = pd.merge(left = self.testDat, 
+				right = conRecLengthCount, 
+				how = u'left', 
+				left_on = ['HT','conRecLength'], 
+				right_on = ['HT','conRecLength'])
         conRecLengthCount = conRecLengthCount.rename(columns = {'HT':'HF','conRecLengthCountT':'conRecLengthCountF'})
-        self.testDat = pd.merge(left = self.testDat, right = conRecLengthCount, how = u'left', left_on = ['HF','conRecLength'], right_on = ['HF','conRecLength'])
+        self.testDat = pd.merge(left = self.testDat, 
+				right = conRecLengthCount, 
+				how = u'left', 
+				left_on = ['HF','conRecLength'], 
+				right_on = ['HF','conRecLength'])
         #testDat.drop(['conRecLength_x','conRecLength_y'], axis = 1, inplace = True)
 
         # Hit Ratio
         hitRatioCount = self.trainDat.groupby(['Detection','hitRatio'])['hitRatio'].count()
         hitRatioCount = pd.Series(hitRatioCount, name = 'hitRatioCountT')
         hitRatioCount = pd.DataFrame(hitRatioCount).reset_index().rename(columns = {'Detection':'HT'})
-        self.testDat = pd.merge(left = self.testDat, right = hitRatioCount, how = u'left', left_on = ['HT','hitRatio'], right_on = ['HT','hitRatio'])
+        self.testDat = pd.merge(left = self.testDat, 
+				right = hitRatioCount, 
+				how = u'left', 
+				left_on = ['HT','hitRatio'], 
+				right_on = ['HT','hitRatio'])
         hitRatioCount = hitRatioCount.rename(columns = {'HT':'HF','hitRatioCountT':'hitRatioCountF'})
-        self.testDat = pd.merge(left = self.testDat, right = hitRatioCount, how = u'left', left_on = ['HF','hitRatio'], right_on = ['HF','hitRatio'])
+        self.testDat = pd.merge(left = self.testDat, 
+				right = hitRatioCount, 
+				how = u'left', 
+				left_on = ['HF','hitRatio'], 
+				right_on = ['HF','hitRatio'])
         #testDat.drop(['hitRatio_x','hitRatio_y'], axis = 1, inplace = True)
 
         # Power
         powerCount = self.trainDat.groupby(['Detection','powerBin'])['powerBin'].count()
         powerCount = pd.Series(powerCount, name = 'powerCount_T')
         powerCount = pd.DataFrame(powerCount).reset_index().rename(columns = {'Detection':'HT'})
-        self.testDat = pd.merge(left = self.testDat, right = powerCount, how = u'left', left_on = ['HT','powerBin'], right_on = ['HT','powerBin'])
+        self.testDat = pd.merge(left = self.testDat, 
+				right = powerCount, 
+				how = u'left', 
+				left_on = ['HT','powerBin'], 
+				right_on = ['HT','powerBin'])
         powerCount = powerCount.rename(columns = {'HT':'HF','powerCount_T':'powerCount_F'})
-        self.testDat = pd.merge(left = self.testDat, right = powerCount, how = u'left', left_on = ['HF','powerBin'], right_on = ['HF','powerBin'])
+        self.testDat = pd.merge(left = self.testDat, 
+				right = powerCount, 
+				how = u'left', 
+				left_on = ['HF','powerBin'], 
+				right_on = ['HF','powerBin'])
         #testDat.drop(['hitRatio_x','hitRatio_y'], axis = 1, inplace = True)
 
-        # NoiseR$atio
+        # NoiseRatio
         noiseCount = self.trainDat.groupby(['Detection','noiseBin'])['noiseBin'].count()
         noiseCount = pd.Series(noiseCount, name = 'noiseCount_T')
         noiseCount = pd.DataFrame(noiseCount).reset_index().rename(columns = {'Detection':'HT'})
-        self.testDat = pd.merge(left = self.testDat, right = noiseCount, how = u'left', left_on = ['HT','noiseBin'], right_on = ['HT','noiseBin'])
+        self.testDat = pd.merge(left = self.testDat, 
+				right = noiseCount, 
+				how = u'left', 
+				left_on = ['HT','noiseBin'], 
+				right_on = ['HT','noiseBin'])
         noiseCount = noiseCount.rename(columns = {'HT':'HF','noiseCount_T':'noiseCount_F'})
-        self.testDat = pd.merge(left = self.testDat, right = noiseCount, how = u'left', left_on = ['HF','noiseBin'], right_on = ['HF','noiseBin'])
+        self.testDat = pd.merge(left = self.testDat, 
+				right = noiseCount, 
+				how = u'left', 
+				left_on = ['HF','noiseBin'], 
+				right_on = ['HF','noiseBin'])
         #testDat.drop(['hitRatio_x','hitRatio_y'], axis = 1, inplace = True)
 
         # Lag Bin
         lagCount = self.trainDat.groupby(['Detection','lagDiffBin'])['lagDiffBin'].count()
         lagCount = pd.Series(lagCount, name = 'lagDiffCount_T')
         lagCount = pd.DataFrame(lagCount).reset_index().rename(columns = {'Detection':'HT'})
-        self.testDat = pd.merge(left = self.testDat, right = lagCount, how = u'left', left_on = ['HT','lagDiffBin'], right_on = ['HT','lagDiffBin'])
+        self.testDat = pd.merge(left = self.testDat, 
+				right = lagCount, 
+				how = u'left', 
+				left_on = ['HT','lagDiffBin'], 
+				right_on = ['HT','lagDiffBin'])
         lagCount = lagCount.rename(columns = {'HT':'HF','lagDiffCount_T':'lagDiffCount_F'})
-        self.testDat = pd.merge(left = self.testDat, right = lagCount, how = u'left', left_on = ['HF','lagDiffBin'], right_on = ['HF','lagDiffBin'])
-
-        self.testDat = self.testDat.fillna(0)                                                # Nan gives us heartburn, fill them with zeros
-        # Calculate Number of True and False Positive Detections in Training Dataset
+        self.testDat = pd.merge(left = self.testDat, 
+				right = lagCount, 
+				how = u'left', 
+				left_on = ['HF','lagDiffBin'], 
+				right_on = ['HF','lagDiffBin'])
+	
+	# Nan gives us heartburn, fill them with zeros
+        self.testDat = self.testDat.fillna(0)                                                
+        
+	# Calculate Number of True and False Positive Detections in Training Dataset
         try:
             priorCountT = float(len(self.trainDat[self.trainDat.Detection == 1]))
         except KeyError:
@@ -1835,31 +2038,46 @@ class cross_validated():
         self.testDat['LDenomCount_F'] = falseCount
 
         # calculation of the probability of a false positive given the data
-        self.testDat['priorF'] = round(priorCountF/float(len(self.trainDat)),5)                      # calculate the prior probability of a false detection from the training dataset
-        self.testDat['LHitRatioF'] =(self.testDat['hitRatioCountF'] + 1)/(self.testDat['LDenomCount_F'] + 1)      # calculate the likelihood of this row's particular detection history occuring giving that the detection is a false positive
-        self.testDat['LconRecF'] = (self.testDat['conRecLengthCountF'] + 1)/(self.testDat['LDenomCount_F'] + 1) # calculate the likelihood of this row's particular consecutive record length given that the detection is a false positive
-        self.testDat['LseriesHitF'] = (self.testDat['seriesHitCountF'] + 1)/(self.testDat['LDenomCount_F'] + 1) # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-        self.testDat['LconsDetF'] = (self.testDat['consDetCountF'] + 1)/(self.testDat['LDenomCount_F'] + 1)     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-        self.testDat['LPowerF'] = (self.testDat['powerCount_F'] + 1)/(self.testDat['LDenomCount_F'] + 1)     # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-        self.testDat['LnoiseF'] = (self.testDat['noiseCount_F'] + 1)/(self.testDat['LDenomCount_F'] + 1)    # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-        self.testDat['LlagF'] = (self.testDat['lagDiffCount_F'] + 1)/(self.testDat['LDenomCount_F']    + 1)  # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
 
+    	# calculate the prior probability of a false detection from the training dataset
+        self.testDat['priorF'] = round(priorCountF/float(len(self.trainDat)),5)
+        # calculate the likelihood of this row's particular detection history occuring giving that the detection is a false positive                      
+        self.testDat['LHitRatioF'] =(self.testDat['hitRatioCountF'] + 1)/(self.testDat['LDenomCount_F'] + 1)
+        # calculate the likelihood of this row's particular consecutive record length given that the detection is a false positive      
+        self.testDat['LconRecF'] = (self.testDat['conRecLengthCountF'] + 1)/(self.testDat['LDenomCount_F'] + 1)
+        # calculate the likelihood of this row's particular seriesHit given the detection is a false positive 
+        self.testDat['LseriesHitF'] = (self.testDat['seriesHitCountF'] + 1)/(self.testDat['LDenomCount_F'] + 1) 
+        # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+        self.testDat['LconsDetF'] = (self.testDat['consDetCountF'] + 1)/(self.testDat['LDenomCount_F'] + 1)  
+        # calculate the likelihood of this row's particular seriesHit given the detection is a false positive	   
+        self.testDat['LPowerF'] = (self.testDat['powerCount_F'] + 1)/(self.testDat['LDenomCount_F'] + 1)
+        # calculate the likelihood of this row's particular seriesHit given the detection is a false positive    
+        self.testDat['LnoiseF'] = (self.testDat['noiseCount_F'] + 1)/(self.testDat['LDenomCount_F'] + 1)
+        # calculate the likelihood of this row's particular seriesHit given the detection is a false positive    
+        self.testDat['LlagF'] = (self.testDat['lagDiffCount_F'] + 1)/(self.testDat['LDenomCount_F']    + 1)  
 
         # calculation of the probability of a true detection given the data
-        self.testDat['priorT'] = round(priorCountT/float(len(self.trainDat)),5)                      # calculate the prior probability of a true detection from the training dataset
-        self.testDat['LHitRatioT'] = (self.testDat['hitRatioCountT'] + 1)/(self.testDat['LDenomCount_T'] + 1) # calculate the likelihood of this row's particular detection history occuring giving that the detection is a false positive
-        self.testDat['LconRecT'] = (self.testDat['conRecLengthCountT'] + 1)/(self.testDat['LDenomCount_T'] + 1) # calculate the likelihood of this row's particular consecutive record length given that the detection is a false positive                           # calculate the posterior probability of a false positive detection given this row's detection history, power bin and noise ratio
-        self.testDat['LseriesHitT'] = (self.testDat['seriesHitCountT'] + 1)/(self.testDat['LDenomCount_T'] + 1) # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-        self.testDat['LconsDetT'] = (self.testDat['consDetCountT'] + 1)/(self.testDat['LDenomCount_T'] + 1)  # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-        self.testDat['LPowerT'] = (self.testDat['powerCount_T'] + 1)/(self.testDat['LDenomCount_T'] + 1)   # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-        self.testDat['LnoiseT'] = (self.testDat['noiseCount_T'] + 1)/(self.testDat['LDenomCount_T'] + 1)  # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
-        self.testDat['LlagT'] = (self.testDat['lagDiffCount_T'] + 1)/(self.testDat['LDenomCount_T'] + 1)  # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
 
+    	# calculate the prior probability of a true detection from the training dataset
+        self.testDat['priorT'] = round(priorCountT/float(len(self.trainDat)),5)               
+        # calculate the likelihood of this row's particular detection history occuring giving that the detection is a false positive       
+        self.testDat['LHitRatioT'] = (self.testDat['hitRatioCountT'] + 1)/(self.testDat['LDenomCount_T'] + 1) 
+        # calculate the likelihood of this row's particular consecutive record length given that the detection is a false positive
+        self.testDat['LconRecT'] = (self.testDat['conRecLengthCountT'] + 1)/(self.testDat['LDenomCount_T'] + 1)                            
+	    # calculate the likelihood of this row's particular seriesHit given the detection is a false positive       
+	    self.testDat['LseriesHitT'] = (self.testDat['seriesHitCountT'] + 1)/(self.testDat['LDenomCount_T'] + 1)
+	    # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+        self.testDat['LconsDetT'] = (self.testDat['consDetCountT'] + 1)/(self.testDat['LDenomCount_T'] + 1)  
+	    # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+        self.testDat['LPowerT'] = (self.testDat['powerCount_T'] + 1)/(self.testDat['LDenomCount_T'] + 1) 
+	    # calculate the likelihood of this row's particular seriesHit given the detection is a false positive 
+        self.testDat['LnoiseT'] = (self.testDat['noiseCount_T'] + 1)/(self.testDat['LDenomCount_T'] + 1)  
+	    # calculate the likelihood of this row's particular seriesHit given the detection is a false positive
+        self.testDat['LlagT'] = (self.testDat['lagDiffCount_T'] + 1)/(self.testDat['LDenomCount_T'] + 1)  
 
         # Calculate the likelihood of each hypothesis being true
         self.testDat['LikelihoodTrue'] = likelihood(True,self,status = 'cross')
         self.testDat['LikelihoodFalse'] = likelihood(False,self,status = 'cross')
-
 
         # Calculate the posterior probability of each Hypothesis occuring
         self.testDat['postTrue'] = self.testDat['priorT'] * self.testDat['LikelihoodTrue']
@@ -1901,9 +2119,9 @@ class cross_validated():
         self.corr_matrix = self.histDF[self.fields].apply(pd.to_numeric).corr().round(4)
         print ("The correlation matrix for all predictors variabes:             ")
         print (self.corr_matrix)
-        # visualize the correlation matrix, closer to 1, the stronger the effect
-        # if we are worried about multicollinearity, I would stear away from
-        # variable combinations where coefficient ~ 1
+        
+	    # visualize the correlation matrix, closer to 1, the stronger the effect
+        # if we are worried about multicollinearity, I would stear away from variable combinations where coefficient ~ 1
         fig = plt.figure()
         ax = fig.add_subplot(111)
         cax = ax.matshow(self.corr_matrix, vmin = -1, vmax = 1)
@@ -2004,46 +2222,83 @@ class cross_validated():
 class classification_results():
     '''Python class object to hold the results of false positive classification'''
     def __init__(self,recType,projectDB,figureWS = None,rec_list = None, reclass_iter = None):
-        self.recType = recType
+        # initialize some variables
+	self.recType = recType
         self.projectDB = projectDB
         self.figureWS = figureWS
+	
+	# connect to the project database and get some data
         conn = sqlite3.connect(projectDB)
         c = conn.cursor()
-        conn = sqlite3.connect(self.projectDB)                                              # connect to the database
-        #self.class_stats_data = pd.DataFrame(columns = ['FreqCode','Epoch','recID','Power','hitRatio','postTrue','postFalse','test','lagDiff','conRecLength','noiseRatio','fishCount', 'logLikelihoodRatio'])                # set up an empty data frame
+        conn = sqlite3.connect(self.projectDB)                                              
         self.final_iter = pd.DataFrame(columns = ['FreqCode','Epoch','recID','Power','noiseRatio','hitRatio_A','hitRatio_M','postTrue_A','postTrue_M','postFalse_A','postFalse_M','test','lagDiff','consDet_A', 'consDet_M','conRecLength_A', 'conRecLength_M','logLikelihoodRatio_A', 'logLikelihoodRatio_M'])                # set up an empty data frame
         self.init_iter = pd.DataFrame(columns = ['FreqCode','Epoch','recID','Power','noiseRatio','hitRatio_A','hitRatio_M','postTrue_A','postTrue_M','postFalse_A','postFalse_M','test','lagDiff','consDet_A', 'consDet_M','conRecLength_A', 'conRecLength_M','logLikelihoodRatio_A', 'logLikelihoodRatio_M'])
         self.reclass_iter = reclass_iter
         self.rec_list = rec_list
 
+	# if there is no receiver list we want it all
         if rec_list == None:
             recSQL = "SELECT * FROM tblMasterReceiver WHERE RecType = '%s'"%(self.recType) # SQL code to import data from this node
             receivers = pd.read_sql(recSQL,con = conn)                         # import data
             receivers = receivers.recID.unique()                               # get the unique receivers associated with this node
             for i in receivers:                                                # for every receiver
                 print ("Start selecting and merging data for receiver %s"%(i))
-
-                sql = '''SELECT FreqCode,Epoch,recID,Power,noiseRatio,hitRatio_A,
-                hitRatio_M,postTrue_A,postTrue_M,postFalse_A,postFalse_M,test,
-                lagDiff,consDet_A, consDet_M, conRecLength_A, conRecLength_M,
-                logLikelihoodRatio_A, logLikelihoodRatio_M 
-                FROM tblClassify_%s_%s '''%(i, reclass_iter)
-                dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver
+                
+                sql = '''SELECT FreqCode,
+                                Epoch,
+                                Power,
+                                noiseRatio,
+                                hitRatio_M,
+                                postTrue_A,
+                                postTrue_M,
+                                postFalse_A,
+                                postFalse_M,
+                                test,
+                                lagDiff,
+                                consDet_A, 
+                                consDet_M, 
+                                conRecLength_A, 
+                                conRecLength_M,
+                                logLikelihoodRatio_A, 
+                                logLikelihoodRatio_M 
+                        FROM tblClassify_%s_%s '''%(i, reclass_iter)
+		
+		        # get data for this receiver
+                dat = pd.read_sql(sql, con = conn, coerce_float = True)                     
                 self.final_iter = self.final_iter.append(dat)
                 del dat
 
-                sql = '''SELECT FreqCode,Epoch,recID,Power,noiseRatio,hitRatio_A,
-                hitRatio_M,postTrue_A,postTrue_M,postFalse_A,postFalse_M,test,
-                lagDiff,consDet_A, consDet_M,conRecLength_A, conRecLength_M,
-                logLikelihoodRatio_A, logLikelihoodRatio_M 
-                FROM tblClassify_%s_%s '''%(i, 1)
-                dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver
+                sql = '''SELECT FreqCode,
+                                Epoch,
+                                recID,
+                                Power,
+                                noiseRatio,
+                                hitRatio_A,
+                                hitRatio_M,
+                                postTrue_A,
+                                postTrue_M,
+                                postFalse_A,
+                                postFalse_M,
+                                test,
+                                lagDiff,
+                                consDet_A, 
+                                consDet_M,
+                                conRecLength_A, 
+                                conRecLength_M,
+                                logLikelihoodRatio_A, 
+                                logLikelihoodRatio_M 
+                        FROM tblClassify_%s_%s '''%(i, 1)
+		
+                # get data for this receiver	
+                dat = pd.read_sql(sql, con = conn, coerce_float = True)                    
                 self.init_iter = self.init_iter.append(dat)
                 del dat
 
         else:
-            c.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
+            # get all the table names
+            execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
             tbls = c.fetchall()
+
             # iterate over the receivers to find the final classification (aka the largest _n)
             max_iter_dict = {} # receiver:max iter
             curr_idx = 0
@@ -2059,67 +2314,146 @@ class classification_results():
                                 max_iter_dict[i] = j[0]
                         curr_idx = curr_idx + 1
                 curr_idx = 0
-            print (max_iter_dict)
             del i, j, curr_idx
+
             # once we have a hash table of receiver to max classification, extract the classification dataset
             self.classDF = pd.DataFrame()
             for i in rec_list:
                 if reclass_iter == None:
                     print ("Start selecting and merging data for receiver %s"%(i))
     
-                    sql = '''SELECT FreqCode,Epoch,recID,Power,noiseRatio,hitRatio_A,
-                    hitRatio_M,postTrue_A,postTrue_M,postFalse_A,postFalse_M,test,
-                    lagDiff,consDet_A, consDet_M,conRecLength_A, conRecLength_M,
-                    logLikelihoodRatio_A, logLikelihoodRatio_M 
-                    FROM %s'''%(max_iter_dict[i])
+                    sql = '''SELECT FreqCode,
+                                    Epoch,
+                                    recID,
+                                    Power,
+                                    noiseRatio,
+                                    hitRatio_A,
+                                    hitRatio_M,
+                                    postTrue_A,
+                                    postTrue_M,
+                                    postFalse_A,
+                                    postFalse_M,
+                                    test,
+                                    lagDiff,
+                                    consDet_A, 
+                                    consDet_M,
+                                    conRecLength_A, 
+                                    conRecLength_M,
+                                    logLikelihoodRatio_A, 
+                                    logLikelihoodRatio_M 
+                            FROM %s'''%(max_iter_dict[i])
                     
-                    dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver
+		    # get data for this receiver
+                    dat = pd.read_sql(sql, con = conn, coerce_float = True)                     
                     self.final_iter = self.final_iter.append(dat)
                     del dat
     
-                    sql = '''SELECT FreqCode,Epoch,recID,Power,noiseRatio,hitRatio_A,
-                    hitRatio_M,postTrue_A,postTrue_M,postFalse_A,postFalse_M,test,
-                    lagDiff,consDet_A, consDet_M,conRecLength_A, conRecLength_M,
-                    logLikelihoodRatio_A, logLikelihoodRatio_M 
-                    FROM tblClassify_%s_1 '''%(i)
-                    
-                    dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver
+                    sql = '''SELECT FreqCode,
+                                    Epoch,
+                                    recID,
+                                    Power,
+                                    noiseRatio,
+                                    hitRatio_A,
+                                    hitRatio_M,
+                                    postTrue_A,
+                                    postTrue_M,
+                                    postFalse_A,
+                                    postFalse_M,
+                                    test,
+                                    lagDiff,
+                                    consDet_A, 
+                                    consDet_M,
+                                    conRecLength_A, 
+                                    conRecLength_M,
+                                    logLikelihoodRatio_A, 
+                                    logLikelihoodRatio_M 
+                            FROM tblClassify_%s_1 '''%(i)
+		    
+		    # get data for this receiver                    
+                    dat = pd.read_sql(sql, con = conn, coerce_float = True)                     
                     self.init_iter = self.init_iter.append(dat)
                     del dat
                 else:
                     
                     print ("Start selecting and merging data for receiver %s"%(i))
     
-                    sql = '''SELECT FreqCode,Epoch,recID,Power,noiseRatio,hitRatio_A,
-                    hitRatio_M,postTrue_A,postTrue_M,postFalse_A,postFalse_M,test,
-                    lagDiff,consDet_A, consDet_M,conRecLength_A, conRecLength_M,
-                    logLikelihoodRatio_A, logLikelihoodRatio_M 
-                    FROM tblClassify_%s_%s '''%(i,reclass_iter)
+                    sql = '''SELECT FreqCode,
+                                    Epoch,
+                                    recID,
+                                    Power,
+                                    noiseRatio,
+                                    hitRatio_A,
+                                    hitRatio_M,
+                                    postTrue_A,
+                                    postTrue_M,
+                                    postFalse_A,
+                                    postFalse_M,
+                                    test,
+                                    lagDiff,
+                                    consDet_A, 
+                                    consDet_M,
+                                    conRecLength_A, 
+                                    conRecLength_M,
+                                    logLikelihoodRatio_A, 
+                                    logLikelihoodRatio_M 
+                            FROM tblClassify_%s_%s '''%(i,reclass_iter)
                     
-                    dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver
+                    # get data for this receiver
+                    dat = pd.read_sql(sql, con = conn, coerce_float = True)                     
                     self.final_iter = self.final_iter.append(dat)
                     del dat
     
-                    sql = '''SELECT FreqCode,Epoch,recID,Power,noiseRatio,hitRatio_A,
-                    hitRatio_M,postTrue_A,postTrue_M,postFalse_A,postFalse_M,test,
-                    lagDiff,consDet_A, consDet_M,conRecLength_A, conRecLength_M,
-                    logLikelihoodRatio_A, logLikelihoodRatio_M 
-                    FROM tblClassify_%s_1 '''%(i)
+                    sql = '''SELECT FreqCode,
+                                    Epoch,
+                                    recID,
+                                    Power,
+                                    noiseRatio,
+                                    hitRatio_A,
+                                    hitRatio_M,
+                                    postTrue_A,
+                                    postTrue_M,
+                                    postFalse_A,
+                                    postFalse_M,
+                                    test,
+                                    lagDiff,
+                                    consDet_A, 
+                                    consDet_M,
+                                    conRecLength_A, 
+                                    conRecLength_M,
+                                    logLikelihoodRatio_A, 
+                                    logLikelihoodRatio_M 
+                            FROM tblClassify_%s_1 '''%(i)
                     
-                    dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver
+                    # get data for this receiver
+                    dat = pd.read_sql(sql, con = conn, coerce_float = True)                     
                     self.init_iter = self.init_iter.append(dat)
                     del dat
             trues = self.final_iter[self.final_iter.test == 1]
             falses = pd.DataFrame()
             
             for i in rec_iter_list:
-                sql = '''SELECT FreqCode,Epoch,recID,Power,noiseRatio,hitRatio_A,
-                hitRatio_M,postTrue_A,postTrue_M,postFalse_A,postFalse_M,test,
-                lagDiff,consDet_A, consDet_M,conRecLength_A, conRecLength_M,
-                logLikelihoodRatio_A, logLikelihoodRatio_M 
-                FROM %s'''%(i)
-                
-                dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver
+                sql = '''SELECT FreqCode,
+                                Epoch,
+                                recID,
+                                Power,
+                                noiseRatio,
+                                hitRatio_A,
+                                hitRatio_M,
+                                postTrue_A,
+                                postTrue_M,
+                                postFalse_A,
+                                postFalse_M,
+                                test,
+                                lagDiff,
+                                consDet_A, 
+                                consDet_M,
+                                conRecLength_A, 
+                                conRecLength_M,
+                                logLikelihoodRatio_A, 
+                                logLikelihoodRatio_M 
+                        FROM %s'''%(i)
+                # get data for this receiver
+                dat = pd.read_sql(sql, con = conn, coerce_float = True)                     
                 dat = dat[dat.test == 0]
                 falses = falses.append(dat)
 
@@ -2129,6 +2463,7 @@ class classification_results():
             del trues, falses
         c.close()
         
+
         trues = self.final_iter[self.final_iter.test == 1][['FreqCode','Epoch','test']]
         trues.rename(columns = {'test':'final_test'},inplace = True)
         print (len(trues))
@@ -2139,7 +2474,7 @@ class classification_results():
         self.init_iter.drop_duplicates(keep = 'first', inplace = True)
 
     def classify_stats(self):
-        '''function reads all classified data, generates summary statistics by receiver type,
+        '''function reads all	 classified data, generates summary statistics by receiver type,
         fish, site, classification status and other metrics, as well as generates a number of graphics
         for use in reporting.'''
         print ("")
@@ -2169,23 +2504,10 @@ class classification_results():
             print ("      |______________|______________|")
             print ("")
             print ("----------------------------------------------------------------------------------")
-    #        self.class_stats_data = cons_det_filter(self.class_stats_data)
-    #
-    #        print ("The consecutive detection filter described by Beeman & Perry (2012) would retain %s detections"%(self.class_stats_data.cons_det_filter.sum()))
-    #        print ("A standard of three records in a row will only retain %s records"%len(self.class_stats_data[(self.class_stats_data.conRecLength_A >= 3) |(self.class_stats_data.conRecLength_M >= 3)]))
-    #        print ("A standard of four records in a row will only retain %s records"%len(self.class_stats_data[(self.class_stats_data.conRecLength_A >= 4) |(self.class_stats_data.conRecLength_M >= 4)]))
-    #        print ("A standard of five records in a row will only retain %s records"%len(self.class_stats_data[(self.class_stats_data.conRecLength_A >= 5) |(self.class_stats_data.conRecLength_M >= 5)]))
-    #        print ("A standard of six records in a row will only retain %s records"%len(self.class_stats_data[(self.class_stats_data.conRecLength_A >= 6) |(self.class_stats_data.conRecLength_M >= 6)]))
-    #
-    #        print ("The algorithm retained a total of %s detections"%(self.class_stats_data.test.sum()))
             print ("----------------------------------------------------------------------------------")
             print ("Assess concordance with consecutive detection requirement (Beeman and Perry)")
 
             # calculate Cohen's Kappa (concordance)
-            # step 1, join the final trues to the initial classification dataset
-            # get true detections
-
-
             n11 = len(self.init_iter[(self.init_iter.final_test == 1) & (self.init_iter.consDet_A == 1)])
             print ("The algorithm and Beeman and Perry classified the same %s recoreds as true "%(n11))
             n10 = len(self.init_iter[(self.init_iter.final_test == 1) & (self.init_iter.consDet_A == 0)])
@@ -2204,12 +2526,12 @@ class classification_results():
             print ("Cohen's Kappa: %s"%(self.kappa))
             print ("----------------------------------------------------------------------------------")
             print ("Compiling Figures")
+            
             # get data by detection class for side by side histograms
             self.final_iter['Power'] = self.final_iter.Power.astype(float)
             self.final_iter['lagDiff'] = self.final_iter.lagDiff.astype(float)
             self.final_iter['conRecLength_A'] = self.final_iter.conRecLength_A.astype(float)
             self.final_iter['noiseRatio'] = self.final_iter.noiseRatio.astype(float)
-            #self.class_stats_data['fishCount'] = self.class_stats_data.fishCount.astype(float)
             self.final_iter['logPostRatio_A'] =np.log10(self.final_iter.postTrue_A.values/self.final_iter.postFalse_A.values)
             self.final_iter['logPostRatio_M'] =np.log10(self.final_iter.postTrue_M.values/self.final_iter.postFalse_M.values)
 
@@ -2259,8 +2581,18 @@ class classification_results():
             plt.figure()
             fig, axs = plt.subplots(3,4,tight_layout = True,figsize = figSize)
             # hit ratio
-            axs[0,1].hist(trues.hitRatio_max.values, hitRatioBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
-            axs[0,0].hist(falses.hitRatio_max.values, hitRatioBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
+            axs[0,1].hist(trues.hitRatio_max.values, 
+                          hitRatioBins, 
+                          density = True, 
+                          color = 'grey', 
+                          edgecolor='black', 
+                          linewidth=1.2)
+            axs[0,0].hist(falses.hitRatio_max.values, 
+                          hitRatioBins, 
+                          density = True, 
+                          color = 'grey', 
+                          edgecolor='black', 
+                          linewidth=1.2)
             axs[0,0].set_xlabel('Hit Ratio')
             axs[0,1].set_title('Valid')
             axs[0,1].set_xlabel('Hit Ratio')
@@ -2268,8 +2600,18 @@ class classification_results():
             axs[0,0].set_title('A',loc = 'left')
 
             # consecutive record length
-            axs[0,3].hist(trues.conRecLength_max.values, conBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
-            axs[0,2].hist(falses.conRecLength_max.values, conBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
+            axs[0,3].hist(trues.conRecLength_max.values, 
+                          conBins, 
+                          density = True, 
+                          color = 'grey', 
+                          edgecolor='black', 
+                          linewidth=1.2)
+            axs[0,2].hist(falses.conRecLength_max.values, 
+                          conBins, 
+                          density = True, 
+                          color = 'grey', 
+                          edgecolor='black', 
+                          linewidth=1.2)
             axs[0,2].set_xlabel('Consecutive Hit Length')
             axs[0,3].set_title('Valid')
             axs[0,3].set_xlabel('Consecutive Hit Length')
@@ -2277,53 +2619,99 @@ class classification_results():
             axs[0,2].set_title('B',loc = 'left')
 
             # power
-            axs[1,1].hist(trues.Power.values, powerBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
-            axs[1,0].hist(falses.Power.values, powerBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
+            axs[1,1].hist(trues.Power.values, 
+                          powerBins, 
+                          density = True, 
+                          color = 'grey', 
+                          edgecolor='black', 
+                          linewidth=1.2)
+            axs[1,0].hist(falses.Power.values, 
+                          powerBins, 
+                          density = True, 
+                          color = 'grey', 
+                          edgecolor='black', 
+                          linewidth=1.2)
             axs[1,0].set_xlabel('Signal Power')
             axs[1,1].set_xlabel('Signal Power')
             axs[1,0].set_ylabel('Probability Density')
             axs[1,0].set_title('C',loc = 'left')
 
             # noise ratio
-            axs[1,3].hist(trues.noiseRatio.values, noiseBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
-            axs[1,2].hist(falses.noiseRatio.values, noiseBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
+            axs[1,3].hist(trues.noiseRatio.values, 
+                          noiseBins, 
+                          density = True, 
+                          color = 'grey', 
+                          edgecolor='black', 
+                          linewidth=1.2)
+            axs[1,2].hist(falses.noiseRatio.values, 
+                          noiseBins, 
+                          density = True, 
+                          color = 'grey', 
+                          edgecolor='black', 
+                          linewidth=1.2)
             axs[1,2].set_xlabel('Noise Ratio')
             axs[1,3].set_xlabel('Noise Ratio')
             axs[1,2].set_title('D',loc = 'left')
 
             # lag diff
-            axs[2,1].hist(trues.lagDiff.values, lagBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
-            axs[2,0].hist(falses.lagDiff.values, lagBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
+            axs[2,1].hist(trues.lagDiff.values, 
+                          lagBins, 
+                          density = True, 
+                          color = 'grey', 
+                          edgecolor='black', 
+                          linewidth=1.2)
+            axs[2,0].hist(falses.lagDiff.values, 
+                          lagBins,
+                          density = True, 
+                          color = 'grey', 
+                          edgecolor='black', 
+                          linewidth=1.2)
             axs[2,0].set_xlabel('Lag Differences')
             axs[2,1].set_xlabel('Lag Differences')
             axs[2,0].set_title('E',loc = 'left')
 
             # log posterior ratio
-            axs[2,3].hist(trues.logLikelihoodRatio_max.values, postRatioBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
-            axs[2,2].hist(falses.logLikelihoodRatio_max.values, postRatioBins, density = True, color = 'grey', edgecolor='black', linewidth=1.2)
+            axs[2,3].hist(trues.logLikelihoodRatio_max.values, 
+                          postRatioBins, 
+                          density = True, 
+                          color = 'grey', 
+                          edgecolor='black', 
+                          linewidth=1.2)
+            axs[2,2].hist(falses.logLikelihoodRatio_max.values, 
+                          postRatioBins, 
+                          density = True, 
+                          color = 'grey', 
+                          edgecolor='black', 
+                          linewidth=1.2)
             axs[2,2].set_xlabel('Log Likelihood Ratio')
             axs[2,3].set_xlabel('Log Likelihood Ratio')
             axs[2,2].set_title('F',loc = 'left')
             
             if self.figureWS != None:
                 if self.rec_list != None:
-                   plt.savefig(os.path.join(self.figureWS,"%s_lattice_class.png"%(self.recType)),bbox_inches = 'tight', dpi = 900)
+                   plt.savefig(os.path.join(self.figureWS,"%s_lattice_class.png"%(self.recType)),
+                               bbox_inches = 'tight', 
+                               dpi = 900)
                 else:
-                   plt.savefig(os.path.join(self.figureWS,"%s_%s_lattice_class.png"%(self.recType,self.site)),bbox_inches = 'tight', dpi = 900)
+                   plt.savefig(os.path.join(self.figureWS,"%s_%s_lattice_class.png"%(self.recType,self.site)),
+                               bbox_inches = 'tight', 
+                               dpi = 900)
         else:
            print("There were insufficient data to quantify summary statistics or histogram plots, either because there were no false positives or because there were no valid detections")
 
 class training_results():
     '''Python class object to hold the results of false positive classification'''
     def __init__(self,recType,projectDB,figureWS,site = None):
+        # initialize some variables
         self.recType = recType
         self.projectDB = projectDB
         self.figureWS = figureWS
         self.site = site
+        
+        # connect to database and get data
         conn = sqlite3.connect(projectDB)
         c = conn.cursor()
         conn = sqlite3.connect(self.projectDB)                                 # connect to the database
-
 
         if self.site == None:
             sql = "SELECT * FROM tblTrain WHERE recType = '%s'"%(self.recType)
@@ -2375,10 +2763,6 @@ class training_results():
         for use in reporting.'''
         det_class_count = self.train_stats_data.groupby('Detection')['Detection'].count().to_frame()
 
-
-        
-        
-        
         print ("")
         print ("Training summary statistics report")
         print ("The algorithm collected %s detections from %s %s receivers"%(len(self.train_stats_data),len(self.train_stats_data.recID.unique()),self.recType))
@@ -2495,28 +2879,6 @@ class training_results():
         else:
            plt.savefig(os.path.join(self.figureWS,"%s_lattice_train.png"%(self.recType)),bbox_inches = 'tight', dpi = 900)
 
-#
-#        # plot fish present
-#        minCount = self.train_stats_data.FishCount.min()//10 * 10
-#        maxCount = self.train_stats_data.FishCount.max()//10 * 10
-#        countBins =np.arange(minCount,maxCount+20,10)
-#
-#        plt.figure()
-#        fig, axs = plt.subplots(1,2,sharey = True, sharex = True, tight_layout = True,figsize = figSize)
-#        axs[0].hist(trues.FishCount.values, countBins, density = True)
-#        axs[1].hist(falses.FishCount.values, countBins, density = True)
-#        axs[0].set_xlabel('Fish Present')
-#        axs[0].set_title('True')
-#        axs[1].set_xlabel('Fish Present')
-#        axs[1].set_title('Fish Present')
-#        axs[0].set_ylabel('Probability Density')
-#        if self.site != None:
-#           plt.savefig(os.path.join(self.figureWS,"%s_%s_fishPresentCompare_train.png"%(self.recType,self.site)),bbox_inches = 'tight')
-#        else:
-#           plt.savefig(os.path.join(self.figureWS,"%s_fishPresentCompare_train.png"%(self.recType)),bbox_inches = 'tight')
-
-#        print ("Fish Present Figure Created, check output workspace")
-
 class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, covariates = None, bucket_length = 15):
     '''Class imports standardized raw state presences and converts data structure
     into counting process style data appropriate for time to event analysis.
@@ -2539,14 +2901,33 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
         self.dbDir = dbDir
         conn = sqlite3.connect(dbDir)
         c = conn.cursor()
-        sql = 'SELECT tblRecaptures.FreqCode, Epoch, timeStamp, Node, TagType, presence_number, overlapping, CapLoc, RelLoc, Species, test FROM tblRecaptures LEFT JOIN tblMasterReceiver ON tblRecaptures.recID = tblMasterReceiver.recID LEFT JOIN tblMasterTag ON tblRecaptures.FreqCode = tblMasterTag.FreqCode WHERE tblRecaptures.recID = "%s"'%(receiver_list[0])
+        sql = '''SELECT tblRecaptures.FreqCode, 
+                        Epoch, 
+                        timeStamp, 
+                        Node, 
+                        TagType, 
+                        presence_number, 
+                        overlapping, 
+                        CapLoc, 
+                        RelLoc, 
+                        Species, 
+                        test 
+                FROM tblRecaptures 
+                LEFT JOIN tblMasterReceiver ON tblRecaptures.recID = tblMasterReceiver.recID 
+                LEFT JOIN tblMasterTag ON tblRecaptures.FreqCode = tblMasterTag.FreqCode 
+                WHERE tblRecaptures.recID = "%s"'''%(receiver_list[0])
+
         for i in receiver_list[1:]:
             sql = sql + ' OR tblRecaptures.recID = "%s"'%(i)
+
+    	# get data and filter
         self.data = pd.read_sql_query(sql,con = conn)
         self.data['timeStamp'] = pd.to_datetime(self.data.timeStamp)
         self.data = self.data[self.data.TagType == 'Study']
         self.data = self.data[self.data.test == 1]
         self.data = self.data[self.data.overlapping == 0]
+
+        # more filters if they are passed
         if rel_loc is not None:
             self.data = self.data[self.data.RelLoc == rel_loc]
         if cap_loc is not None:
@@ -2560,6 +2941,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
         print ("Finished sql")
         print ("Starting node to state classification, with %s records this takes time"%(len(self.data)))
         print ("Unique Nodes in Returned Data:%s"%(self.data.Node.unique()))
+        
         # Classify state
         def node_class(row,node_to_state):
             currNode = row['Node']
@@ -2579,17 +2961,25 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
             release times of each fish, morph data into a recaptures file and
             merge it to self.data'''
 
-            sql = "SELECT FreqCode, TagType, RelDate, RelLoc, CapLoc FROM tblMasterTag WHERE TagType = 'Study'"
+            sql = '''SELECT FreqCode, 
+                            TagType, 
+                            RelDate, 
+                            RelLoc, 
+                            CapLoc 
+                            FROM tblMasterTag 
+                            WHERE TagType = 'Study''''
+            # connect to database and grab data
             conn = sqlite3.connect(self.dbDir)
             c = conn.cursor()
-
-
-
             relDat = pd.read_sql_query(sql,con = conn, parse_dates = 'RelDate')
+
+    	    # if filters were passed, apply them
             if self.rel_loc is not None:
                 relDat = relDat[relDat.RelLoc == rel_loc]
             if self.cap_loc is not None:
                 relDat = relDat[relDat.CapLoc == cap_loc]
+
+    	    # do some data management
             relDat['RelDate'] = pd.to_datetime(relDat.RelDate)
             relDat['Epoch'] = (relDat['RelDate'] - datetime.datetime(1970,1,1)).dt.total_seconds()
             relDat.rename(columns = {'RelDate':'timeStamp'}, inplace = True)
@@ -2604,6 +2994,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
 
         self.data['State'] = pd.to_numeric(self.data['State'], errors='coerce')# make sure State is an integer
         self.data['State'] = self.data.State.astype(np.int32)
+        
         if last_presence_time0 == True:
             ''' sometimes when we are modeling downstream movement, it would be
             beneficial to start enumerating movement from the last presence at
@@ -2622,7 +3013,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
             and modeling movement from that point.'''
 
             # identify the last presence at the initial state
-            self.data['presence_number'] = pd.to_numeric(self.data['presence_number'], errors='coerce')# make sure State is an integer
+            self.data['presence_number'] = pd.to_numeric(self.data['presence_number'], errors='coerce')
             self.data.dropna(axis = 0, how = 'any',subset = ['presence_number'], inplace = True)
             self.data['presence_number'] = self.data.presence_number.astype(np.int32)
             last_presence = self.data.groupby(['FreqCode','State'])['presence_number'].max().to_frame().reset_index()
@@ -2635,6 +3026,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
             for i in last_presence.iterrows():
                 fish = i[1]['FreqCode']
                 max_pres = i[1]['max_presence']
+
                 # get the first recapture at the last presence in the initial state for this fish
                 recaps = self.data[(self.data.FreqCode == fish) & (self.data.State == 1) & (self.data.presence_number == max_pres)]
                 min_epoch = recaps.Epoch.min()
@@ -2644,20 +3036,21 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
             for i in all_fish:
                 if i not in fish_at_start:
                     self.data.drop(self.data[self.data.FreqCode == i].index, inplace = True)
-            
 
         # Identify first recapture times
         self.startTimes = self.data[self.data.State == 1].groupby(['FreqCode'])['Epoch'].min().to_frame()
-        #print(self.startTimes.head())
-
         self.startTimes.reset_index(drop = False, inplace = True)
         self.startTimes.Epoch = self.startTimes.Epoch.astype(np.int32)
         self.startTimes.rename(columns = {'Epoch':'FirstRecapture'},inplace = True)
+
+    	# Clean Up stuff that doesn't make sense
         for fish in self.data.FreqCode.unique():
-            if fish not in self.startTimes.FreqCode.unique():                  # fish never made it to the initial state, remove - we only care about movements from the initial sstate - this is a competing risks model
+	    # fish never made it to the initial state, remove - we only care about movements from the initial sstate - this is a competing risks model
+            if fish not in self.startTimes.FreqCode.unique():                  
                 self.data = self.data[self.data.FreqCode != fish]
-        # identify unique fish
-        self.fish = self.data.FreqCode.unique()                                # identify unique fish to loop through
+        
+        # identify unique fish to loop through
+        self.fish = self.data.FreqCode.unique()                                
 
     def data_prep(self,outputFile,time_dependent_covariates = False, unknown_state = None, bucket_length_min = 15, adjacency_filter = None):
         if unknown_state != None:
@@ -2669,6 +3062,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
             them we still have informative data.  For this to work, we only need to
             know the last recapture of any fish in the initial state.  We will
             assess absorbption into the unknown state with a Boolean statement later on.'''
+
             last_epoch = self.data[self.data.State == 1].Epoch.max()
 
         if time_dependent_covariates == False:
@@ -2683,19 +3077,22 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
             columns = ['FreqCode','state','presence','Epoch','timeDelta','time0','firstObs']    # create columns
             self.master_stateTable = pd.DataFrame()
             for i in self.fish:
-                fishDat = self.data[self.data.FreqCode == i]                   # get data for this fish
-                # get first recapture in state 1
-                fishDat.sort_values(by = 'Epoch', ascending = True, inplace = True)  # sort by exposure time
+                # get data for this fish
+                fishDat = self.data[self.data.FreqCode == i]                   
+                # get first recapture in state 
+                fishDat.sort_values(by = 'Epoch', ascending = True, inplace = True) # sort by exposure time  
                 fishDat['prevState'] = fishDat['State'].shift(1)               # get previous state
-                fishDat['prevState'].fillna(fishDat.State.values[0], inplace = True)  # fill NaN states with current state - for first record in data frame
+                fishDat['prevState'].fillna(fishDat.State.values[0], inplace = True) # fill NaN states with current state - for first record in data frame 
                 presence = 1
                 firstObs = 1
-                stateTable = pd.DataFrame(columns = columns)                                # create empty data frame
-                time0 = self.startTimes[self.startTimes.FreqCode == i].FirstRecapture.iloc[0]  # get initial time - need to calculate seconds between current record and time of release
+                # create empty data frame
+                stateTable = pd.DataFrame(columns = columns) 
+                # get initial time - need to calculate seconds between current record and time of release                               
+                time0 = self.startTimes[self.startTimes.FreqCode == i].FirstRecapture.iloc[0]  
                 fishDat = fishDat[fishDat.Epoch >= time0]
                 time1 = fishDat.Epoch.iloc[0]
-                timeDelta = time1 - time0                                      # seconds between observation and release
-                rowArr = [i,fishDat.State.values[0],presence,time1,timeDelta,time0,firstObs]  # create initial row for state table
+                timeDelta = time1 - time0                                     # seconds between observation and release
+                rowArr = [i,fishDat.State.values[0],presence,time1,timeDelta,time0,firstObs] # create initial row for state table  
                 row = pd.DataFrame(np.array([rowArr]),columns = columns)       # now it's officially a pandas row
                 stateTable = stateTable.append(row)                            # now append that row
                 firstObs = 0
@@ -2935,18 +3332,15 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
                                 start = fishDat.iloc[idx_int]['startState']
                                 t0 = fishDat.iloc[idx_int]['t0']
 
-                                
                                 # write it to next row
                                 try:
                                     idx1 = idx_int + 1
                                 except:
                                     start = fishDat.iloc[idx_int].index[0]
                                     idx1 = start + 1
-                                #print (fishDat.iloc[idx1])
                                 try:
                                     fishDat.iloc[idx1, start_col] = start
                                     fishDat.iloc[idx1, t0_col] = t0
-                                    #print (fishDat.iloc[idx1])
                                 except IndexError:
                                     # when this occurs, there is no extra row - this last row will be deleted
                                     continue
@@ -2955,7 +3349,8 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
                             fishDat = fishDat[fishDat.transition_filter != 1]
                             
                             # create a new transition field
-                            fishDat['transition'] = tuple(zip(fishDat.startState.values.astype(int),fishDat.endState.values.astype(int))) # create transition variable, this is helpful in R
+                            fishDat['transition'] = tuple(zip(fishDat.startState.values.astype(int),
+                                                              fishDat.endState.values.astype(int))) 
                             
                             fishDat.reset_index(inplace = True)
                         else:
@@ -3458,7 +3853,6 @@ class overlap_reduction():
 def russian_doll(overlap):
     '''Function iterates through matching recap data from successors to see if
     current recapture row at predeccesor overlaps with successor presence.'''
-    #print "Starting Russing Doll algorithm for node %s, hope you aren't busy, you will be watching this process for hours"%(overlap.curr_node)
     # create function that we can vectorize over list of epochs (i)
     def overlap_check(i, min_epoch, max_epoch):
         return np.logical_and(min_epoch >= i, max_epoch < i).any()
