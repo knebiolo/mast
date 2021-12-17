@@ -9,9 +9,9 @@ Radio telemetry projects create vast quantities of data, especially those that e
 
 Starting in 2019, Kleinschmidt Associates (primary developer) will begin hosting the code on Atlassian Bitbucket.  With internal and external collaborators, version control has become an issue and the software is no longer standard among users.  Bitbucket is a web-based version control repository hosting service, which uses the Git system of version control.  It is the preferred system for developers collaborating on proprietary code, because users must be invited to contribute.  The Git distributed version control system tracks and manages changes in source code during development.  This is important when more than 1 user of the open source software adapts it to use on their project.  
 
-The software is written in Python 3.7.x and uses dependencies outside of the standard packages.  Please make sure you have the following modules installed and updated when running telemetry analysis: Numpy, Pandas, Networkx, Matplotlib, Sqlite3, and Statsmodels.  The software also uses a number of standard packages including: Time, Math, Os, Datetime, Operator, and Collections.  
+The software is written in Python 3.7.x and uses dependencies outside of the standard packages.  Please make sure you have the following modules installed and updated when running telemetry analysis: Numpy, Pandas, Networkx, Matplotlib, Sqlite3, Statsmodels, and SciKit Learn.  The software also uses a number of standard packages including: Time, Math, Os, Datetime, Operator, and Collections.  
 
-The example scripts found in the Read Me will guide the end user through a coplete radio telemetry project.  However, you could import abtas into your own proprietary scripts and data management routines.  These scripts are examples only.
+The example scripts found in the Read Me will guide the end user through a coplete radio telemetry project.  However, you could import BIOTAS into your own proprietary scripts and data management routines.  These scripts are examples only.
 
 # Project Set Up
 The simple 4-line script “project_setup.py” will create a standard file structure and project database in a directory of your choosing.  **It is recommended that the directory does not contain any spaces or special characters.**  For example, if our study was of fish migration in the Connecticut River our initial directory could appear as (if saved to your desktop):
@@ -22,16 +22,16 @@ When a directory has been created, insert it into the script in line 2 (highligh
 projct_setup.py example:
 ```
 import biotas
-proj_dir = 'J:\1210\005\Calcs\Studies\3_3_19\2019'
-dbName = 'ultrasound_2019.db'
-abtas.createTrainDB(proj_dir, dbName)  # create project database
+proj_dir = r'D:\Manuscript\CT_River_2015'
+dbName = 'ctr_2015_v3.db'
+biotas.createTrainDB(proj_dir, dbName)  
 ```
 
 Before proceeding to the next step, investigate the folder structure that was created.  The folders should appear as:
 
 * Project_Name
     * Data *for storing raw data and project set up files*
-	    * Training Files *for storing raw receiver files the station you are currently working up*
+	    * Training Files *stores raw receiver files for the station you are currently working up*
 	* Output *for storing figures, modeling files, and scratch data*
 	    * Scratch *holds intermediate files that are managed by the software* - **never delete the contents of this folder**
 		* Figures *holds figures exported by the software*
@@ -81,38 +81,40 @@ Like the tag and receiver tables, the node table will be saved as a comma delimi
 |X           |Integer    |(required) - arbitrary X coordinate point                                 |
 |Y           |Integer    |(required) - arbitrary Y coordinate point                                 |
 
-Note: There may be more than 1 receiver associated with a node.  For example, a fishway may have two entrances, but for the purposes of the study you only have to know if a fish has entered the fishway.  It is logical to group them into a single network node.  Doing so will greatly simplify movement modeling.  The receiver to node relationship is developed in the master receiver table with the node column.  IDs must match between columns for relationships to work.
+Note: There may be more than 1 receiver associated with a node.  For example, a fishway may have two entrances, but for the purposes of the study you only have to know if a fish has entered the fishway.  It is logical to group them into a single network node.  Doing so will simplify movement modeling.  The receiver to node relationship is developed in the master receiver table with the node column.  IDs must match between columns for relationships to work.
 
 Once the initial data files have been created and stored in the ‘Data’ folder, we will need to import them into the project database.  We will complete this task with the “project_db_ini.py” script (see below).  You will need to follow these steps after pasting the script into your favorite IDE:
 
-1.	Update line 4, identify the project directory (same directory you created prior)  
-2.	Update line 5, identify the project database name
-3.	Update line 8, set the number of detections we will look forward and backwards from the current while creating detection histories.  **The default is 5.**  
-4.	Update line 9, set the duration used when calculating the noise ratio.  **The default is 1 minute.**  
-5.	If you are not assessing movement, and do not have a node table, then comment out lines 13, 19 and 20 before running the script by adding a ‘#’ to the beginning of the line.  
+1.	Update the project directory (proj_dir)  
+2.	Update the project database name (dbName)
+3.	Update the number of detections (+/-) in the Proximate Detection History (det).  **The default is 5.**  
+4.	Update the duration used when calculating the noise ratio (duration).  **The default is 1 minute.**  
+5.	If you are not assessing movement, and do not have a node table, then comment out any lines dealing with nodes 
 
 example project_db_ini.py:
 ```
 import os
 import biotas
 import pandas as pd
-proj_dir = r'J:\1210\005\Calcs\Studies\3_3_19\2018\Test'                       # what is the project directory?
-dbName = 'ultrasound_2018_test.db'                                             # whad did you call the database?
+proj_dir = r'E:\Manuscript\CT_River_2015'                   
+dbName = 'ctr_2015_v2.db'
 data_dir = os.path.join(proj_dir,'Data')                                       
-db_dir = os.path.join(proj_dir,'Data',dbName)                                  
-det = 5                                                                        # number of detections we will look forwards and backwards for in detection history
-duration = 1                                                                   # duration used in noise ratio calculation
+db_dir = os.path.join(proj_dir,'Data',dbName)  
+# number of detections (+/-) in the PDH                                
+det = 5 
+# duration used in noise ratio calculation 
+duration = 1                                                                   
 # import data to Python
 tblMasterTag = pd.read_csv(os.path.join(data_dir,'tblMasterTag.csv'))
 tblMasterReceiver = pd.read_csv(os.path.join(data_dir,'tblMasterReceiver.csv'))
-tblNodes = pd.read_csv(os.path.join(data_dir,'tblNodes.csv'))                  # no nodes?  then comment out this line
+tblNodes = pd.read_csv(os.path.join(data_dir,'tblNodes.csv'))                  
 # write data to SQLite
 biotas.studyDataImport(tblMasterTag,db_dir,'tblMasterTag')
 print ('tblMasterTag imported')
 biotas.studyDataImport(tblMasterReceiver,db_dir,'tblMasterReceiver')
 print ('tblMasterReceiver imported')
-biotas.studyDataImport(tblNodes,db_dir,'tblNodes')                              # no nodes? then comment out this line
-print ('tblNodes imported')                                                    # no nodes? then comment out this line
+biotas.studyDataImport(tblNodes,db_dir,'tblNodes')                             
+print ('tblNodes imported')                                                    
 biotas.setAlgorithmParameters(det,duration,db_dir)
 print ('tblAlgParams data entry complete, begin importing data and training')
 ```
@@ -173,17 +175,23 @@ import time
 import os
 import sqlite3
 import pandas as pd
-import biotas
+import biotas.biotas as biotas
 import warnings
 warnings.filterwarnings('ignore')
-# set script parameters
-site = 'T10'                                                                   # what is the site/receiver ID?
-recType = 'orion'                                                              # what is the receiver type?
-proj_dir = r'\\EGRET\Condor\Jobs\1503\212\Calcs\Scotland_Fall2019'             # what is the project directory?
-dbName = 'manuscript.db'                                                       # whad did you call the database?
-scanTime = 1.0
-channels = 1
-ant_to_rec_dict = {1:'T10'}                                                    # if orion receiver switching between antennas add more to dictionary
+
+#%%
+# Part 1: Set Script Parameters and Workspaces
+
+# what is the site/receiver ID?
+site = 'T27'                                                                   
+# what is the receiver type?
+recType = 'lotek'                                                              
+# what is the project directory?
+proj_dir = r'D:\Manuscript\CT_River_2015'                                      
+# what did you call the database?
+dbName = 'ctr_2015_v2.db'                                                         
+# antenna to location, default project set up 1 Antenna, 1 Location, 1 Receiver 
+ant_to_rec_dict = {1:site}                                                    
 
 # set up workspaces     
 file_dir = os.path.join(proj_dir,'Data','Training_Files')
@@ -192,37 +200,61 @@ projectDB = os.path.join(proj_dir,'Data',dbName)
 scratch_dir = os.path.join(proj_dir,'Output','Scratch')
 figure_ws = os.path.join(proj_dir,'Output','Figures')
 print ("There are %s files to iterate through"%(len(files)))
-tS = time.time()                                                             
 
-# if you are using a Lotek receiver or orion that does not employ switching use:                                                          
-biotas.telemDataImport(site,recType,file_dir,projectDB) 
+#%%
+# Part 2: Import Site Data and Train Alogrithm 
+tS = time.time()
 
-# if orion recievers use swtiching use:
-#biotas.telemDataImport(site,recType,file_dir,projectDB, switch = True, scanTime = scanTime, channels = channels, ant_to_rec_dict = ant_to_rec_dict) 
+# Import Data, if the receiver does not switch between antennas scanTime and channels = 1.
+# If the receiver switches, scanTime and channels must match study values 
+biotas.telemDataImport(site,
+                       recType,
+                       file_dir,
+                       projectDB,
+                       scanTime = 1,
+                       channels = 1,
+                       ant_to_rec_dict = ant_to_rec_dict)
+
+print ("Raw data imported, proceed to training")
 
 for i in ant_to_rec_dict:
-    # get the fish to iterate through using SQL 
+    # get the fish to iterate through using SQL
+    # this SQL statement allows us to train on study tags
     conn = sqlite3.connect(projectDB)
     c = conn.cursor()
-    sql = "SELECT tblRaw.FreqCode FROM tblRaw LEFT JOIN tblMasterTag ON tblRaw.FreqCode = tblMasterTag.FreqCode WHERE recID == '%s' AND TagType IS NOT 'Beacon' AND TagType IS NOT 'Test';"%(site)
+    sql ='''SELECT tblRaw.FreqCode FROM tblRaw 
+            LEFT JOIN tblMasterTag ON tblRaw.FreqCode = tblMasterTag.FreqCode 
+            WHERE recID == '%s' 
+            AND TagType IS NOT 'Beacon' 
+            AND TagType IS NOT 'Test';'''%(ant_to_rec_dict[i])
     histories = pd.read_sql_query(sql,con = conn).FreqCode.unique()
     c.close()
-    print ("Finished importing data and indexing database, there are %s fish to iterate through" %(len(histories)))
-    print ("Creating training objects for every fish at site %s"%(site))   
-    # create a training data object for each fish and calculate training parameters.  
-    for i in histories:
-    	train_dat = biotas.training_data(i,site,projectDB,scratch_dir))
-	biotas.calc_train_params_map(train_dat)  
-    	print ("training parameters quantified for tag %s"%(i))
-print ("Telemetry Parameters Quantified, appending data to project database")
-biotas.trainDatAppend(scratch_dir,projectDB)    
+    
+    print ("There are %s fish to iterate through" %(len(histories)))
+    print ("Creating training objects for every fish at site %s"%(site))
+    
+    # create a training data object for each fish and train naive Bayes.
+    for j in histories:
+        train_dat = biotas.training_data(j,
+                                         ant_to_rec_dict[i],
+                                         projectDB,
+                                         scratch_dir)
+        biotas.calc_train_params_map(train_dat)
+        print ("training parameters quantified for tag %s"%(j))
+    print ("Telemetry Parameters Quantified, appending data to project database")
+    # append data and summarize
+    biotas.trainDatAppend(scratch_dir,projectDB)
+    train_stats = biotas.training_results(recType,
+                                          projectDB,
+                                          figure_ws,
+                                          ant_to_rec_dict[i])
+    train_stats.train_stats()
+    
 print ("process took %s to compile"%(round(time.time() - tS,3)))
-train_stats = abtas.training_results(recType,projectDB,figure_ws)#,site)
-train_stats.train_stats()
 ```
 
 
-There are multiple strategies for training data.  In some studies, practioners may sacrifice study tags and place them in strategic locations to simulate what a fish would look like.  This training data provides excellent information on what a known true positive detection looks like.  However, some studies do not have the project budget available to sacrifice study tags. In this case, the study trains on study tags and assumes all records from study tags are true in the first pass.  You will note the SQL statement in line 37 makes this disctinction.  To train on beacon tags instead, update line 37 to reflect:
+There are multiple strategies for training data.  In some studies, practioners may sacrifice study tags and place them in strategic locations to simulate what a fish would look like.  This training data provides excellent information on what a known true positive detection looks like.  However, some studies do not have the project budget available to sacrifice study tags. In this case, the study trains on study tags and assumes all records from study tags are true in the first pass.  You will note the SQL statement makes this disctinction.  To train on beacon tags instead, update line SQL to:
 
 ```
     sql = "SELECT tblRaw.FreqCode FROM tblRaw LEFT JOIN tblMasterTag ON tblRaw.FreqCode = tblMasterTag.FreqCode WHERE recID == '%s' AND TagType IS NOT 'Study' AND TagType IS NOT 'Test';"%(site)
