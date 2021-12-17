@@ -96,18 +96,24 @@ example project_db_ini.py:
 import os
 import biotas
 import pandas as pd
-proj_dir = r'E:\Manuscript\CT_River_2015'                   
+
+# declare project directory
+proj_dir = r'E:\Manuscript\CT_River_2015'  
+# delcare database name
 dbName = 'ctr_2015_v2.db'
+# create directories using OS tools
 data_dir = os.path.join(proj_dir,'Data')                                       
 db_dir = os.path.join(proj_dir,'Data',dbName)  
 # number of detections (+/-) in the PDH                                
 det = 5 
 # duration used in noise ratio calculation 
-duration = 1                                                                   
+duration = 1   
+
 # import data to Python
 tblMasterTag = pd.read_csv(os.path.join(data_dir,'tblMasterTag.csv'))
 tblMasterReceiver = pd.read_csv(os.path.join(data_dir,'tblMasterReceiver.csv'))
-tblNodes = pd.read_csv(os.path.join(data_dir,'tblNodes.csv'))                  
+tblNodes = pd.read_csv(os.path.join(data_dir,'tblNodes.csv'))    
+
 # write data to SQLite
 biotas.studyDataImport(tblMasterTag,db_dir,'tblMasterTag')
 print ('tblMasterTag imported')
@@ -160,14 +166,12 @@ The first part of the Naïve Bayes classifier develops training data, which is c
 
  To train the classifier with data collected at this site, copy the following script into your favorite IDE, and follow these steps.
  
-1.	Update line 10 with the current site ID, this must match with a single receiver (‘recID’) in the master receiver table.  
-2.	Update Line 11 with the receive type.  Your current options are either ‘lotek’ or ‘orion’.  
-3.	Update Line 12 and identify the project directory, this is the same directory you created in step 1.  
-4.	Update Line 13, which identifies the project database.  This is the same as above.  
-5.  If the study had Orion receivers that switched between antennas, edit line 14 to indicate the time in seconds spent listening to each antenna.
-6.  Update Line 15: Update the value following the colon to the receiver ID (in quotes). If the study had Orion recievers that switched between antennas, change the value preceding the colon to indicate the number of antennas.
-7.  Update line 16, indicate the antenna to receiver relationship in Orion headers, Lotek receivers are arbitrary
-8.  If the study had Orion recievers that switched between antennas, uncomment line 31 and comment out line 28.  Leave as is otherwise.
+1.	Update 'site', this must match with a single receiver (‘recID’) in the master receiver table.  
+2.	Update 'recType' with the receive type.  Your current options are either ‘lotek’ or ‘orion’.  
+3.	Update 'proj_dir' to identify the project directory, this is the same directory you created in step 1.  
+4.	Update 'dbName' with the name of the project database.  
+5.      Whether or not the receiver switched between antennas, edit the antenna to receiver dictionary 'ant_to_rec_dict'.
+6.      Update the scanTime and channel arguments in the biotas.telemDataImport function to match study parameters.  Note the default value for both arguments is 1
 
 ```
 # import modules
@@ -193,7 +197,7 @@ dbName = 'ctr_2015_v2.db'
 # antenna to location, default project set up 1 Antenna, 1 Location, 1 Receiver 
 ant_to_rec_dict = {1:site}                                                    
 
-# set up workspaces     
+# set up workspaces using OS tools    
 file_dir = os.path.join(proj_dir,'Data','Training_Files')
 files = os.listdir(file_dir)
 projectDB = os.path.join(proj_dir,'Data',dbName)
