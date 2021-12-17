@@ -170,8 +170,8 @@ The first part of the Naïve Bayes classifier develops training data, which is c
 2.	Update 'recType' with the receive type.  Your current options are either ‘lotek’ or ‘orion’.  
 3.	Update 'proj_dir' to identify the project directory, this is the same directory you created in step 1.  
 4.	Update 'dbName' with the name of the project database.  
-5.      Whether or not the receiver switched between antennas, edit the antenna to receiver dictionary 'ant_to_rec_dict'.
-6.      Update the scanTime and channel arguments in the biotas.telemDataImport function to match study parameters.  Note the default value for both arguments is 1
+5.	Whether or not the receiver switched between antennas, edit the antenna to receiver dictionary 'ant_to_rec_dict'.
+6.	Update the scanTime and channel arguments in the biotas.telemDataImport function to match study parameters.  Note the default value for both arguments is 1
 
 ```
 # import modules
@@ -288,50 +288,72 @@ Since this algorithm is concerned with identifying and removing false positives,
 
 To run the cross-validation procedure, open ‘cross_validation.py’ and update the following lines:
 
-1.	Update the receiver type (line 9) - We can either validate **lotek** or **orion** receivers. 
-2.	Update the project directory (line 10) 
-3.	Update the name of the database (line 11) 
-4.	Update the number of folds (line 14)
-5.	Update the fields you wish to classify detections (line 16)
+1.	Update 'recType' with either **lotek** or **orion** receivers. 
+2.	Update 'proj_dir' with the project directory
+3.	Update 'dbName' with the name of the database 
+4.	Update the number of folds 'k'
+5.	Update A-La-Carte Likelihood 'fields'
+6.	Update the optional receiver list argument 'rec_list' in the biotas.cross_validated function call, if rec_list argument is null all recievers of a type are used.
 
 ```
 import time
 import os
 import numpy as np
 import biotas
-import warnings
-warnings.filterwarnings('ignore')
-t0 = time.time()
-# What receiver type are you assessing accuracy for?
-recType = 'orion'                                                              # what is the receiver type?
-proj_dir = r'\\EGRET\Condor\Jobs\1503\212\Calcs\Scotland_Fall2019'             # what is the project directory?
-dbName = 'manuscript.db'                                                       # whad did you call the database?
+
+#%%
+# Part 1: Set up Cross Validation Script Parameters
+
+# what is the receiver type?
+recType = 'orion' 
+# what is the project directory?                                                         
+proj_dir = r'D:\Manuscript\CT_River_2015'
+# what did you call the database?             
+dbName = 'ctr_2015_v2.db' 
+# use OS tools to create directories                                                      
 figureWS = os.path.join(proj_dir,'Output','Figures')    
 projectDB = os.path.join(proj_dir,'Data',dbName)
+# How many folds in your cross validation?
 k = 10
+
+#%%
+# Part 2: Cross Validate and Assess Model 
+t0 = time.time()
+
+# A-la-carte likelihood, construct a model from the following parameters:
 # ['conRecLength','consDet','hitRatio','noiseRatio','seriesHit','power','lagDiff']
-fields = ['conRecLength','hitRatio']#,'power','lagBDiff','noiseRatio']
+fields = ['conRecLength','consDet','hitRatio','noiseRatio','seriesHit','power','lagDiff']
+
 # create cross validated data object
-cross = biotas.cross_validated(k,recType,fields,projectDB,figureWS)
+cross = biotas.cross_validated(k,
+                               recType,
+                               fields,
+                               projectDB, 
+                               train_on = 'Study',
+                               rec_list = ['T03','T06','T24'])
 print ("Created a cross validated data object")
+
 # perform the cross validation method
 for i in np.arange(0,k,1):
     cross.fold(i)
+    print ("Classified fold %s"%i)
 # print the summary
 cross.summary()
 print ("process took %s to compile"%(round(time.time() - t0,3)))
 ```
 
 ## False Positive Classification
-Assuming cross validation results were favorable, you can now proceed to false positive classification.  There are three classification methods available; classify 1, 2 and 3.  Classify 1 uses the training data you just created, while classify 2 uses someone else’s training data.  Classify 3 reclassifies an already classified dataset, which is designed to proceed until no more false positives have been identified and removed from the dataset.  
+There are three classification methods available; the first uses the training data you just created, while the second uses someone else’s training data, and the third method reclassifies an already classified dataset.  
+
+### Classify 1: classifying with data trained on this project.  
 
 Copy and paste the classify_1.py script into your favorite IDE and update the following lines: 
-1.	Update the receiver ID (line 12) 
-2.	Update the receiver type (line 13) – input can either be **lotek** or **orion** 
-3.	Update input workspace (line 14) 
-4.	Update project database name (line 15) 
-5.	Update the fields used in the classification (line 25)
-6.	Update whether or not to use an informed prior, default = True
+1.	Update the receiver ID ('site') 
+2.	Update the receiver type ('recType') – input can either be **lotek** or **orion** 
+3.	Update input workspace ('proj_dir') 
+4.	Update project database name ('dbName') 
+5.	Update the A-La-Carte likelihood fileds ('fields')
+6.	Update whether or not to use an informed 'prior', default = True
 
 example classify_1.py:
 ```
@@ -341,49 +363,76 @@ import os
 import sqlite3
 import pandas as pd
 import biotas
-import warnings
-warnings.filterwarnings('ignore')
 tS = time.time()
 
-#set script parameters
-site = 'T03'                                                                   # what is the site/receiver ID?
-recType = 'orion'                                                              # what is the receiver type?
-proj_dir = r'\\EGRET\Condor\Jobs\1503\212\Calcs\Scotland_Fall2019'             # what is the project directory?
-dbName = 'manuscript.db'                                                       # whad did you call the database?
+#%% Part 1: Set Up Script Parameters and Create Diretories
 
-# directory creations
+# what is the site/receiver ID?
+site = 'T27'    
+# what is the receiver type?                                                               
+recType = 'lotek'  
+# what is the project directory?                                                            
+proj_dir = r'D:\Manuscript\CT_River_2015'   
+# whad did you call the database?                                   
+dbName = 'ctr_2015_v2.db'                                                         
+
+# create directories using OS tools
+outputWS = os.path.join(proj_dir,'Output') 
 scratch_ws = os.path.join(proj_dir,'Output','Scratch')  
 figure_ws = os.path.join(proj_dir,'Output','Figures')                
 working_files = os.path.join(proj_dir,'Data','TrainingFiles')
 projectDB = os.path.join(proj_dir,'Data',dbName)
 
-# list fields used in likelihood classification, must be from this list:
+# A-la-carte likelihood, construct a model from the following parameters:
 # ['conRecLength','consDet','hitRatio','noiseRatio','seriesHit','power','lagDiff']
-fields = ['conRecLength','hitRatio','noiseRatio','power','lagDiff']            # enter the fields you wish to classify on from list above
+fields = ['power','lagDiff','hitRatio']            
+
 # Do we want to use an informed prior?
-prior = True                                                                   # enter whether or not you wish to use an informed prior, if not a 50/50 split is used and the classifier behaves like Maximum Likelihood                                                         
+prior = True       
 print ("Set Up Complete, Creating Histories")
+
+#%% Part 2: Classify Detections using A-La-Carte likelihood and Summarize  
 
 # get the fish to iterate over with SQL 
 conn = sqlite3.connect(projectDB)
 c = conn.cursor()
 sql = "SELECT FreqCode FROM tblRaw WHERE recID == '%s';"%(site)
 histories = pd.read_sql(sql,con = conn)
-tags = pd.read_sql("SELECT FreqCode FROM tblMasterTag WHERE TagType == 'Study'", con = conn)
-histories = histories.merge(right = tags, left_on = 'FreqCode', right_on = 'FreqCode').FreqCode.unique()
+tags = pd.read_sql('''SELECT FreqCode, TagType 
+                   FROM tblMasterTag 
+                   WHERE TagType == 'Study' ''', con = conn)
+histories = histories.merge(right = tags, 
+                            how = 'left',
+                            left_on = 'FreqCode', 
+                            right_on = 'FreqCode')
+histories = histories[histories.TagType == 'Study'].FreqCode.unique()
 c.close()
 print ("There are %s fish to iterate through at site %s" %(len(histories),site))
 
-# create a training object and classify each specimen
+# create training data for this round of classification
+train = biotas.create_training_data(site,
+                                    projectDB,
+                                    rec_list = [site])
+
+# classify data from each tag
 for i in histories:
-    class_dat = biotas.classify_data(i,site,fields,projectDB,scratch_ws,informed_prior = prior))
+    class_dat = biotas.classify_data(i,
+                                     site,
+                                     fields,
+                                     projectDB,
+                                     scratch_ws,
+                                     training_data=train,
+                                     informed_prior = prior)
     biotas.calc_class_params_map(class_dat)   
+    print ("Fish %s classified"%(i))
 print ("Detections classified!")
 biotas.classDatAppend(site, scratch_ws, projectDB)
-print ("process took %s to compile"%(round(time.time() - tS,3)))
 
-# generate summary statistics for classification by receiver type
-class_stats = biotas.classification_results(recType,projectDB,figure_ws,site)
+print ("process took %s to compile"%(round(time.time() - tS,3)))
+class_stats = biotas.classification_results(recType,
+                                            projectDB,
+                                            figure_ws,
+                                            rec_list=[site])
 class_stats.classify_stats()
 ```
 
