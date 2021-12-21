@@ -36,7 +36,7 @@ Before proceeding to the next step, investigate the folder structure that was cr
 	    * Scratch *holds intermediate files that are managed by the software* - **never delete the contents of this folder**
 		* Figures *holds figures exported by the software*
 
-**Do not alter the structure of the directory.** Both the sample scripts provided and ABTAS expect that the directory is structured exactly as created.
+**Do not alter the structure of the directory.** Both the sample scripts provided and BIOTAS expects that the directory is structured exactly as created.
 
 # Initializing the Project Database
 Once the project directory has been created, we will initialize the project database by declaring parameters and importing formatted data files that describe the tags and receivers used in the study.  If one of the objectives of your study is to analyze movement or you have close-spaced receivers and overlap is an issue, then we will also need to create a Node table.  This table describes the telemetry network and helps us visualize the relationships between receivers.  Please save initial database files to the ‘Data’ folder (see directory structure above if you forgot where it was) as comma delimited text files (.csv).  
