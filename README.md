@@ -261,7 +261,10 @@ print ("process took %s to compile"%(round(time.time() - tS,3)))
 There are multiple strategies for training data.  In some studies, practioners may sacrifice study tags and place them in strategic locations to simulate what a fish would look like.  This training data provides excellent information on what a known true positive detection looks like.  However, some studies do not have the project budget available to sacrifice study tags. In this case, the study trains on study tags and assumes all records from study tags are true in the first pass.  You will note the SQL statement makes this disctinction.  To train on beacon tags instead, update line SQL to:
 
 ```
-    sql = "SELECT tblRaw.FreqCode FROM tblRaw LEFT JOIN tblMasterTag ON tblRaw.FreqCode = tblMasterTag.FreqCode WHERE recID == '%s' AND TagType IS NOT 'Study' AND TagType IS NOT 'Test';"%(site)
+    sql = '''SELECT tblRaw.FreqCode 
+    	     FROM tblRaw 
+    	     LEFT JOIN tblMasterTag ON tblRaw.FreqCode = tblMasterTag.FreqCode 
+    	     WHERE recID == '%s' AND TagType IS NOT 'Study' AND TagType IS NOT 'Test';'''%(site)
 ```
 
 ## Cross-Validate Training Data
@@ -347,7 +350,7 @@ There are three classification methods available; the first uses the training da
 
 ### Classify 1: classifying with data trained on this project.  
 
-Copy and paste the classify_1.py script into your favorite IDE and update the following lines: 
+Copy and paste the following script into your favorite IDE and update the following lines: 
 1.	Update the receiver ID ('site') 
 2.	Update the receiver type ('recType') – input can either be **lotek** or **orion** 
 3.	Update input workspace ('proj_dir') 
@@ -436,20 +439,21 @@ class_stats = biotas.classification_results(recType,
 class_stats.classify_stats()
 ```
 
-In some circumstances, the end user may not have beacon tags that they can sacrifice.  In this case they can use training data from a previous project or other researcher.  The classify_2.py script is nearly identical to classify_1.py, with the exception of an extra argument in the function call on line 40.  This argument identifies a separate training database.  
+In some circumstances, the end user may not have beacon tags that they can sacrifice or enough known false positive detections.  In these cases the end-user can use training data from a previous project or other researcher.  The script for this method is nearly identical to first, with the exception of an extra argument in the function call on line 40.  This argument identifies a separate training database.  
 
-Classify_2.py:
+Update these variables and run the following script to Classify using someone else's training data.  
 
-1.	Update the receiver ID (line 11) 
-2.	Update the receiver type (line 12) – input can either be **lotek** or **orion** 
-3.	Update input workspace (line 13) 
-4.	Update project database name (line 14) 
-5.  Update the training database name (line 15) - **name of database that contains the training dataset - should be in Data folder**
-6.	Update the fields used in the classification (line 34)
-7.  If Orion switches between receivers update scane time for each antenna (line 18)
-8.  If Orion switches between receivers, update with the number of antennas (line 19)
-9.  If Orion switches between receivers, indicate all antennas in the antenna to receiver dictionary (line 22)
-10.	Update whether or not to use an informed prior (line, default = True
+1.	Identify the receiver ID ('site') 
+2.	Identify the sites ('t_site') in the training database you would like to use for training data
+3.	Identify the receiver type ('recType') – input can either be **lotek** or **orion** 
+4.	Identify input workspace ('proj_dir') 
+5.	Identify project database name ('dbName') 
+6.	Identify the training database name ('t_dbName') - **name of database that contains the training dataset - should be in Data folder**
+7.	Identify the A-La-Carte likelihood fiends ('fields') - **must be list-like object**
+8.	If reciever switches between antennas  update scane time for each antenna ('scanTime') **default = 1**
+9.	If reciever switches between antennas, update with the number of antennas ('channels') **default = 1**
+10.	If receiver switches between antennas, indicate all antennas in the antenna to receiver dictionary ('ant_to_rec_dict')
+11.	Update whether or not to use an informed prior ('prior') **default = True**
 
 ```
 # import modules required for function dependencies
@@ -457,46 +461,63 @@ import time
 import os
 import sqlite3
 import pandas as pd
-import warnings
-warnings.filterwarnings('ignore')
 import biotas
 
-#set script parameters
-site = 'T07'                                                                   # what is the site/receiver ID?
-recType = 'lotek'                                                              # what is the receiver type?
-proj_dir = r'J:\1503\212\Calcs\Scotland_Fall2019'                              # what is the project directory?
-dbName = 'Scotland_Eel_2019.db'                                                # what is the name of the project database?
-t_DBName = 'ultrasound_2018 - Copy.db'                                         # what is the name of the training database?  We assume it is in the same directory
+#%% Part 1: Set Up Script Parameters
+
+# what is the site/receiver ID?
+site = '102' 
+# what is the site/reciever ID in the training database? 
+t_site = '102'
+# what is the receiver type?                                                                 
+recType = 'orion'
+# what is the project directory?                                                              
+proj_dir = r'C:\a\Projects\Winooski\2020\Data'                    
+# what is the name of the project database?
+dbName = 'Winooski_2020_102.db'                                                   
+# what is the name of the training database?  We assume it is in the same directory
+t_DBName = 'Winooski_102_Trainer.db'                                                
 
 # optional orion parameters if receivers used switching
-scanTime = 1.0
+scanTime = 2.0
 channels = 1
+# Dictionary that stores the Antenna to Receiver relationship
+ant_to_rec_dict = {1:'102'}
 
-# even if you aren't using switching, fill in this dictionary with the antenna to reciever ID relationship
-ant_to_rec_dict = {'1':'T07'}
-
-# create worskspaces - you haven't changed the directory have you?                                              
+# create worskspaces - you haven't changed the directory have you?
 trainingDB = os.path.join(proj_dir,'Data',t_DBName)
-outputWS = os.path.join(proj_dir,'Output')                                     # we are getting time out error and database locks - so let's write to disk for now 
-outputScratch = os.path.join(outputWS,'Scratch')                               # we are getting time out error and database locks - so let's write to disk for now 
+
+# create some directories using OS tools
+outputWS = os.path.join(proj_dir,'Output')                                     
+outputScratch = os.path.join(outputWS,'Scratch')                           
 figure_ws = os.path.join(outputWS,'Figures')
 workFiles = os.path.join(proj_dir,'Data','Training_Files')
 projectDB = os.path.join(proj_dir,'Data',dbName)
 
-# list fields used in likelihood classification, must be from this list:
+# A-la-carte likelihood, construct a model from the following parameters:
 # ['conRecLength','consDet','hitRatio','noiseRatio','seriesHit','power','lagDiff']
-fields = ['conRecLength','hitRatio','power','lagDiff']
-prior = True
+fields = ['power','lagDiff','hitRatio']            
 
-files = os.listdir(workFiles)
-print ("There are %s files to iterate through"%(len(files)))
-tS = time.time()  
+# Do we want to use an informed prior?
+prior = True       
+print ("Set Up Complete, Creating Histories")
 
-# if orion receivers do not employ switching use:                                                          
-biotas.telemDataImport(site,recType,workFiles,projectDB) 
+tS = time.time()
 
-# if orion recievers use swtiching use:
-#biotas.telemDataImport(site,recType,workFiles,projectDB, switch = True, scanTime = scanTime, channels = channels, ant_to_rec_dict = ant_to_rec_dict) 
+#%% Part 2: Classify Detections using A-La-Carte Likelihood and Summarize
+# We first need to import data 
+biotas.telemDataImport(site,
+                       recType,
+                       workFiles,
+                       projectDB,
+                       scanTime = scanTime,
+                       channels = channels,
+                       ant_to_rec_dict = ant_to_rec_dict)
+
+# Now we create a training dataset using the separate training database
+# it is also possible to pass a list of receivers 
+train = biotas.create_training_data(t_site,
+                                    trainingDB)
 
 for i in ant_to_rec_dict:
     # get the fish to iterate through using SQL
@@ -506,19 +527,41 @@ for i in ant_to_rec_dict:
     sql = "SELECT FreqCode FROM tblRaw WHERE recID == '%s';"%(site)
     histories = pd.read_sql(sql,con = conn)
     tags = pd.read_sql("SELECT FreqCode FROM tblMasterTag WHERE TagType == 'Study'", con = conn)
-    histories = histories.merge(right = tags, left_on = 'FreqCode', right_on = 'FreqCode').FreqCode.unique()
+    histories = histories.merge(right = tags, 
+                                left_on = 'FreqCode', 
+                                right_on = 'FreqCode').FreqCode.unique()
     c.close()
-    print ("There are %s fish to iterate through at site %s" %(len(histories),site))   
+    print ("There are %s fish to iterate through at site %s" %(len(histories),site))
+    print ("This will take a while")
+    print ("Grab a coffee, call your mother.")
+    
     # create list of training data objects to iterate over with a Pool multiprocess
-    for i in histories:
-        class_dat = biotas.classify_data(i,site,fields,projectDB,outputScratch,training = trainingDB))
-        biotas.calc_class_params_map(class_dat)
-	print("classified specimen %s"%(i))
+    conn = sqlite3.connect(trainingDB)
+    c = conn.cursor()
+    sql = "SELECT * FROM tblTrain WHERE recID == '%s';"%(site)
+    tblTrainDF = pd.read_sql(sql,con = conn)
+    c.close()
+
+    for j in histories:
+        class_dat = biotas.classify_data(i,
+                                         site,
+                                         fields,
+                                         projectDB,
+                                         outputScratch,
+                                         training_data=train,
+                                         informed_prior = prior)
+        biotas.calc_class_params_map(class_dat)   
+        print ("Fish %s classified"%(i))
     print ("Detections classified!")
-    biotas.classDatAppend(site,outputScratch,projectDB)   
+    biotas.classDatAppend(site,outputScratch,projectDB)
+    
     print ("process took %s to compile"%(round(time.time() - tS,3)))
+    
     # generate summary statistics for classification by receiver type
-    class_stats = biotas.classification_results(recType,projectDB,figure_ws,site)
+    class_stats = biotas.classification_results(recType,
+                                                projectDB,
+                                                figure_ws,
+                                                rec_list=[ant_to_rec_dict[i]])
     class_stats.classify_stats()
 ```
 
