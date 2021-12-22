@@ -345,7 +345,7 @@ print ("process took %s to compile"%(round(time.time() - t0,3)))
 ## False Positive Classification
 There are three classification methods available; the first uses the training data you just created, while the second uses someone else’s training data, and the third method reclassifies an already classified dataset.  
 
-### Classify 1: classifying with data trained on current project.  
+### Classify with training data from current project.  
 
 Copy and paste the following script into your favorite IDE and update the following lines: 
 1.	Update the receiver ID ('site') 
@@ -435,7 +435,7 @@ class_stats = biotas.classification_results(recType,
                                             rec_list=[site])
 class_stats.classify_stats()
 ```
-### Classify 2: Classify using training data from another project
+### Classify using training data from another project
 
 In some circumstances, the end user may not have beacon tags that they can sacrifice or enough known false positive detections.  In these cases the end-user can use training data from a previous project or other researcher.  The script for this method is nearly identical to first, with the exception of an extra argument in the function call on line 40.  This argument identifies a separate training database.  
 
@@ -562,7 +562,7 @@ for i in ant_to_rec_dict:
                                                 rec_list=[ant_to_rec_dict[i]])
     class_stats.classify_stats()
 ```
-### Classify 3: Iteratively reclassify a site until convergence.
+### Iteratively reclassify a site until convergence.
 
 The third classification method reclassifies data until there are no more false positives to remove and/or the log posterior ratio no longer improves.  The classify 3 script and workflow is below:
 
