@@ -179,9 +179,6 @@ import time
 import os
 import sqlite3
 import pandas as pd
-import biotas.biotas as biotas
-import warnings
-warnings.filterwarnings('ignore')
 
 #%%
 # Part 1: Set Script Parameters and Workspaces
@@ -348,7 +345,7 @@ print ("process took %s to compile"%(round(time.time() - t0,3)))
 ## False Positive Classification
 There are three classification methods available; the first uses the training data you just created, while the second uses someone else’s training data, and the third method reclassifies an already classified dataset.  
 
-### Classify 1: classifying with data trained on this project.  
+### Classify 1: classifying with data trained on current project.  
 
 Copy and paste the following script into your favorite IDE and update the following lines: 
 1.	Update the receiver ID ('site') 
@@ -438,6 +435,7 @@ class_stats = biotas.classification_results(recType,
                                             rec_list=[site])
 class_stats.classify_stats()
 ```
+### Classify 2: Classify using training data from another project
 
 In some circumstances, the end user may not have beacon tags that they can sacrifice or enough known false positive detections.  In these cases the end-user can use training data from a previous project or other researcher.  The script for this method is nearly identical to first, with the exception of an extra argument in the function call on line 40.  This argument identifies a separate training database.  
 
@@ -564,16 +562,17 @@ for i in ant_to_rec_dict:
                                                 rec_list=[ant_to_rec_dict[i]])
     class_stats.classify_stats()
 ```
+### Classify 3: Iteratively reclassify a site until convergence.
 
-Classify_3 reclassifies data until there are no more false positives to remove and/or the log posterior ratio no longer improves.  The classify 3 script and workflow is below:
+The third classification method reclassifies data until there are no more false positives to remove and/or the log posterior ratio no longer improves.  The classify 3 script and workflow is below:
 
 1.	Update the receiver ID (line 12)
-2.  Enter the classification iteration number (line 13) **start at 2**
+2.	Enter the classification iteration number (line 13) **start at 2**
 3.	Update the receiver type (line 14) – input can either be **lotek** or **orion** 
 4.	Update input workspace (line 15) 
 5.	Update project database name (line 16) 
 6.	Update the fields used in the classification (line 27)
-7.  Update informed prior (line 30) **default True**
+7.	Update informed prior (line 30) **default True**
 
 ```
 # import modules required for function dependencies
