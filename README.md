@@ -566,13 +566,13 @@ for i in ant_to_rec_dict:
 
 The third classification method reclassifies data until there are no more false positives to remove and/or the log posterior ratio no longer improves.  The classify 3 script and workflow is below:
 
-1.	Update the receiver ID (line 12)
-2.	Enter the classification iteration number (line 13) **start at 2**
-3.	Update the receiver type (line 14) – input can either be **lotek** or **orion** 
-4.	Update input workspace (line 15) 
-5.	Update project database name (line 16) 
-6.	Update the fields used in the classification (line 27)
-7.	Update informed prior (line 30) **default True**
+1.	Update the receiver ID ('site')
+2.	Enter the classification iteration number ('class_iter') **start at 2**
+3.	Update the receiver type ('recType') – input can either be **lotek** or **orion** 
+4.	Update input workspace ('proj_dir') 
+5.	Update project database name ('dbName') 
+6.	Update the A-La-Carte likelihood fields used in the classification ('fields')
+7.	Update informed prior ('prior') **default True**
 
 ```
 # import modules required for function dependencies
@@ -581,55 +581,87 @@ import os
 import sqlite3
 import pandas as pd
 import biotas
-import warnings
-warnings.filterwarnings('ignore')
+
+#%% Part 1: Set Up Script Parameters
 tS = time.time()
 
 #set script parameters
-site = 'T02'                                                                   # what is the site/receiver ID?
-class_iter= 2                                                                  # Enter the iteration number here--start at 2
-recType = 'orion'                                                              # what is the receiver type?
-proj_dir = r'\\EGRET\Condor\Jobs\1503\212\Calcs\Scotland_Fall2019'             # what is the project directory?
-dbName = 'manuscript.db'                                                       # whad did you call the database?
+class_iter= 4 #Enter the iteration number here--start at 2
+# what is the site/receiver ID?
+site = 'T14'   
+# what is the receiver type?                                                                
+recType = 'lotek' 
+# what is the project directory?                                                             
+proj_dir = r'D:\Manuscript\CT_River_2015'  
+# whad did you call the database?                                    
+dbName = 'ctr_2015_v2.db'                                                           
 
-# directory creations
-outputWS = os.path.join(proj_dir,'Output')                                     # we are getting time out error and database locks - so let's write to disk for now 
-outputScratch = os.path.join(outputWS,'Scratch')                               # we are getting time out error and database locks - so let's write to disk for now 
+# create directories with OS tools
+outputWS = os.path.join(proj_dir,'Output')                                  
+outputScratch = os.path.join(outputWS,'Scratch')                           
 workFiles = os.path.join(proj_dir,'Data','TrainingFiles')
 projectDB = os.path.join(proj_dir,'Data',dbName)
 figure_ws = os.path.join(proj_dir,'Output','Figures')
 
-# list fields used in likelihood classification, must be from this list:
+# A-la-carte likelihood, construct a model from the following parameters:
 # ['conRecLength','consDet','hitRatio','noiseRatio','seriesHit','power','lagDiff']
-fields = ['conRecLength','hitRatio','power','noiseRatio','lagDiff']
+fields = ['conRecLength','hitRatio','lagDiff','power','noiseRatio']
 
 # Do we want to use an informed prior?
 prior = False
 
 print ("Set Up Complete, Creating Histories")
 
+#%% Part 2: Classify Detections using A-La-Carte Likelihood and Summarize
+
 # get the fish to iterate through using SQL 
 conn = sqlite3.connect(projectDB)
 c = conn.cursor()
 sql = "SELECT FreqCode FROM tblRaw WHERE recID == '%s';"%(site)
 histories = pd.read_sql(sql,con = conn)
-tags = pd.read_sql("SELECT FreqCode FROM tblMasterTag WHERE TagType == 'Study'", con = conn)
-histories = histories.merge(right = tags, left_on = 'FreqCode', right_on = 'FreqCode').FreqCode.unique()
+tags = pd.read_sql('''SELECT FreqCode, TagType 
+                   FROM tblMasterTag 
+                   WHERE TagType == 'Study' ''', con = conn)
+histories = histories.merge(right = tags, 
+                            left_on = 'FreqCode', 
+                            right_on = 'FreqCode')
+histories = histories[histories.TagType == 'Study'].FreqCode.unique()
 c.close()
+histories = histories.tolist()
+
 print ("There are %s fish to iterate through at site %s" %(len(histories),site))
 
-# create list of training data objects and classify
+# create training data for this round of classification
+train = biotas.create_training_data(site,projectDB, rec_list = [site])
+
+counter = 0
 for i in histories:
-    class_dat = biotas.classify_data(i,site,fields,projectDB,outputScratch,informed_prior = prior,reclass_iter=class_iter)
+    counter = counter + 1
+    class_dat =biotas.classify_data(i,
+                                    site,
+                                    fields,
+                                    projectDB,
+                                    outputScratch,
+                                    train,
+                                    informed_prior = prior,
+                                    reclass_iter=class_iter)
     biotas.calc_class_params_map(class_dat)
-    print ("classified specimen %s"%(i))
+    print ('classified detections for fish %s, %s percent complete'%(i,round(counter/len(histories),2)))
 print ("Detections classified!") 
 biotas.classDatAppend(site,outputScratch,projectDB,reclass_iter = class_iter)
 print ("process took %s to compile"%(round(time.time() - tS,3)))
 
 # get data you just classified, run some statistics and make some plots
-class_stats = biotas.classification_results(recType,projectDB,figure_ws,site,reclass_iter = class_iter)
+del train, class_dat
+
+class_stats = biotas.classification_results(recType,
+                                            projectDB,
+                                            figure_ws,
+                                            rec_list=[site],
+                                            reclass_iter = class_iter)
 class_stats.classify_stats()    
+
+
 ```
 
 ## Overlap Removal
