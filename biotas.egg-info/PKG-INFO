@@ -1,11 +1,14 @@
-Metadata-Version: 1.2
+Metadata-Version: 2.1
 Name: biotas
-Version: 0.0.3
+Version: 0.0.4
 Summary: BIO-Telemetry Analysis Software (BIOTAS) for use in       removing false positive and overlap detections from radio telemetry projects.
 Home-page: https://github.com/knebiolo/biotas
-Author: Kevin P. Nebiolo
+Author: Kevin P. Nebiolo and Theodore Castro-Santos
 Author-email: kevin.nebiolo@kleinschmidtgroup.com
 License: MIT
-Description: UNKNOWN
 Platform: UNKNOWN
 Requires-Python: >=3.5
+License-File: LICENSE.txt
+
+UNKNOWN
+

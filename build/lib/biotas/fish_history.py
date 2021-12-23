@@ -20,6 +20,7 @@ import statsmodels.formula.api as smf
 import networkx as nx
 from matplotlib import rcParams
 from scipy import interpolate
+from sklearn import metrics
 
 font = {'family': 'serif','size': 6}
 rcParams['font.size'] = 6

@@ -1,7 +1,7 @@
+LICENSE.txt
 README.md
 setup.py
 biotas/__init__.py
-biotas/biotas.py
 biotas/false_positive.py
 biotas/fish_history.py
 biotas/formatter.py
