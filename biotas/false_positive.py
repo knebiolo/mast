@@ -2127,41 +2127,41 @@ class training_results():
             sql = "SELECT * FROM tblTrain WHERE recType = '%s' AND recID == '%s'"%(self.recType,self.site)
         trainDF = pd.read_sql(sql,con=conn,coerce_float  = True)#This will read in tblTrain and create a pandas dataframe
 
-        recs = pd.read_sql("SELECT recID from tblMasterReceiver", con = conn).recID.values
+        # recs = pd.read_sql("SELECT recID from tblMasterReceiver", con = conn).recID.values
 
-        c.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
-        tbls = c.fetchall()
-        # iterate over the receivers to find the final classification (aka the largest _n)
-        max_iter_dict = {} # receiver:max iter
-        curr_idx = 0
-        for i in recs:
-            max_iter = 1
-            while curr_idx < len(tbls) - 1:
-                for j in tbls:
-                    if i in j[0]:
-                        if int(j[0][-1]) >= max_iter:
-                            max_iter = int(j[0][-1])
-                            max_iter_dict[i] = j[0]
-                    curr_idx = curr_idx + 1
-            curr_idx = 0
-        print (max_iter_dict)
-        del i, j, curr_idx
+        # c.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
+        # tbls = c.fetchall()
+        # # iterate over the receivers to find the final classification (aka the largest _n)
+        # max_iter_dict = {} # receiver:max iter
+        # curr_idx = 0
+        # for i in recs:
+        #     max_iter = 1
+        #     while curr_idx < len(tbls) - 1:
+        #         for j in tbls:
+        #             if i in j[0]:
+        #                 if int(j[0][-1]) >= max_iter:
+        #                     max_iter = int(j[0][-1])
+        #                     max_iter_dict[i] = j[0]
+        #             curr_idx = curr_idx + 1
+        #     curr_idx = 0
+        # print (max_iter_dict)
+        # del i, j, curr_idx
 
-        if len(max_iter_dict) > 0:
-            # once we have a hash table of receiver to max classification, extract the classification dataset
-            classDF = pd.DataFrame()
-            for i in max_iter_dict:
-                classDat = pd.read_sql("select test, FreqCode,Power,noiseRatio, lag,lagDiff,conRecLength_A,consDet_A,detHist_A,hitRatio_A,seriesHit_A,conRecLength_M,consDet_M,detHist_M,hitRatio_M,seriesHit_M,postTrue_A,postTrue_M,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from %s"%(max_iter_dict[i]),con=conn)
-                #classDat = classDat[classDat.postTrue_A >= classDat.postTrue_M]
-                classDat.drop(['conRecLength_M','consDet_M','detHist_M','hitRatio_M','seriesHit_M'], axis = 1, inplace = True)
-                classDat.rename(columns = {'conRecLength_A':'conRecLength','consDet_A':'consDet','detHist_A':'detHist','hitRatio_A':'hitRatio','seriesHit_A':'seriesHit'}, inplace = True)
-                classDF = classDF.append(classDat)
+        # if len(max_iter_dict) > 0:
+        #     # once we have a hash table of receiver to max classification, extract the classification dataset
+        #     classDF = pd.DataFrame()
+        #     for i in max_iter_dict:
+        #         classDat = pd.read_sql("select test, FreqCode,Power,noiseRatio, lag,lagDiff,conRecLength_A,consDet_A,detHist_A,hitRatio_A,seriesHit_A,conRecLength_M,consDet_M,detHist_M,hitRatio_M,seriesHit_M,postTrue_A,postTrue_M,timeStamp,Epoch,RowSeconds,recID,RecType,ScanTime from %s"%(max_iter_dict[i]),con=conn)
+        #         #classDat = classDat[classDat.postTrue_A >= classDat.postTrue_M]
+        #         classDat.drop(['conRecLength_M','consDet_M','detHist_M','hitRatio_M','seriesHit_M'], axis = 1, inplace = True)
+        #         classDat.rename(columns = {'conRecLength_A':'conRecLength','consDet_A':'consDet','detHist_A':'detHist','hitRatio_A':'hitRatio','seriesHit_A':'seriesHit'}, inplace = True)
+        #         classDF = classDF.append(classDat)
 
-            trainDF = trainDF[trainDF.Detection==0]
-            classDF = classDF[classDF.test==1]
-            classDF['Channels']=np.repeat(1,len(classDF))
-            classDF.rename(columns={"test":"Detection","RowSeconds":"Seconds","RecType":"recType"},inplace=True)#inplace tells it to replace the existing dataframe
-            trainDF = trainDF.append(classDF)
+        #     trainDF = trainDF[trainDF.Detection==0]
+        #     classDF = classDF[classDF.test==1]
+        #     classDF['Channels']=np.repeat(1,len(classDF))
+        #     classDF.rename(columns={"test":"Detection","RowSeconds":"Seconds","RecType":"recType"},inplace=True)#inplace tells it to replace the existing dataframe
+        #     trainDF = trainDF.append(classDF)
 
         self.train_stats_data = trainDF
         c.close()
