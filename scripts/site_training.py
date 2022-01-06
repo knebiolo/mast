@@ -3,7 +3,9 @@ import time
 import os
 import sqlite3
 import pandas as pd
-import biotas.biotas as biotas
+import sys
+sys.path.append(r'C:\Users\knebiolo\OneDrive - Kleinschmidt Associates, Inc\Software\biotas') # Enter the path for where the BIOTAS program lives
+import biotas
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -11,17 +13,17 @@ warnings.filterwarnings('ignore')
 # Part 1: Set Script Parameters and Workspaces
 
 # what is the site/receiver ID?
-site = 'T27'                                                                   
+site = '36'
 # what is the receiver type?
-recType = 'lotek'                                                              
+recType = 'lotek'
 # what is the project directory?
-proj_dir = r'D:\Manuscript\CT_River_2015'                                      
+proj_dir = r'C:\Users\knebiolo\Desktop\Ted Import Error'
 # what did you call the database?
-dbName = 'ctr_2015_v2.db'                                                         
-# antenna to location, default project set up 1 Antenna, 1 Location, 1 Receiver 
-ant_to_rec_dict = {1:site}                                                    
+dbName = 'bc_test.db'
+# antenna to location, default project set up 1 Antenna, 1 Location, 1 Receiver
+ant_to_rec_dict = {'1':'36a','2':'36b'}
 
-# set up workspaces     
+# set up workspaces
 file_dir = os.path.join(proj_dir,'Data','Training_Files')
 files = os.listdir(file_dir)
 projectDB = os.path.join(proj_dir,'Data',dbName)
@@ -30,11 +32,11 @@ figure_ws = os.path.join(proj_dir,'Output','Figures')
 print ("There are %s files to iterate through"%(len(files)))
 
 #%%
-# Part 2: Import Site Data and Train Alogrithm 
+# Part 2: Import Site Data and Train Alogrithm
 tS = time.time()
 
 # Import Data, if the receiver does not switch between antennas scanTime and channels = 1.
-# If the receiver switches, scanTime and channels must match study values 
+# If the receiver switches, scanTime and channels must match study values
 biotas.telemDataImport(site,
                        recType,
                        file_dir,
@@ -50,17 +52,17 @@ for i in ant_to_rec_dict:
     # this SQL statement allows us to train on study tags
     conn = sqlite3.connect(projectDB)
     c = conn.cursor()
-    sql ='''SELECT tblRaw.FreqCode FROM tblRaw 
-            LEFT JOIN tblMasterTag ON tblRaw.FreqCode = tblMasterTag.FreqCode 
-            WHERE recID == '%s' 
-            AND TagType IS NOT 'Beacon' 
+    sql ='''SELECT tblRaw.FreqCode FROM tblRaw
+            LEFT JOIN tblMasterTag ON tblRaw.FreqCode = tblMasterTag.FreqCode
+            WHERE recID == '%s'
+            AND TagType IS NOT 'Beacon'
             AND TagType IS NOT 'Test';'''%(ant_to_rec_dict[i])
     histories = pd.read_sql_query(sql,con = conn).FreqCode.unique()
     c.close()
-    
+
     print ("There are %s fish to iterate through" %(len(histories)))
     print ("Creating training objects for every fish at site %s"%(site))
-    
+
     # create a training data object for each fish and train naive Bayes.
     for j in histories:
         train_dat = biotas.training_data(j,
@@ -77,5 +79,5 @@ for i in ant_to_rec_dict:
                                           figure_ws,
                                           ant_to_rec_dict[i])
     train_stats.train_stats()
-    
+
 print ("process took %s to compile"%(round(time.time() - tS,3)))
