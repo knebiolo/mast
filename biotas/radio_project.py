@@ -363,8 +363,8 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict):
                                names = ['Date','Time','ChannelID','TagID','Antenna','Power'],
                                skiprows = dataRow,
                                dtype = {'ChannelID':str,'TagID':str,'Antenna':str})
-
-        telemDat = telemDat.iloc[:-2]                                                   # remove last two
+        telemDat.dropna(inplace = True)
+        #telemDat = telemDat.iloc[:-2]                                                   # remove last two
 
         #telemDat['Antenna'] = telemDat['Antenna'].astype(str)                   #TCS Added this to get dict to line up with data
 
@@ -375,21 +375,7 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict):
             else:
                 return '888'
         if len(telemDat) > 0:
-            # if ant_to_rec_dict == None:
-            #     telemDat['Frequency'] = telemDat.apply(id_to_freq, axis = 1, args = (channelDict,))
-            #     telemDat = telemDat[telemDat.Frequency != '888']
-            #     telemDat = telemDat[telemDat.TagID != 999]
-            #     telemDat['FreqCode'] = telemDat['Frequency'].astype(str) + ' ' + telemDat['TagID'].astype(int).astype(str)
-            #     telemDat['timeStamp'] = pd.to_datetime(telemDat['Date'] + ' ' + telemDat['Time'])# create timestamp field from date and time and apply to index
-            #     telemDat['Epoch'] = (telemDat['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()
-            #     telemDat = noiseRatio(5.0,telemDat,study_tags)
-            #     telemDat.drop (['Date','Time','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
-            #     telemDat['ScanTime'] = np.repeat(scanTime,len(telemDat))
-            #     telemDat['Channels'] = np.repeat(channels,len(telemDat))
-            #     telemDat['RecType'] = np.repeat(recType,len(telemDat))
-            #     telemDat['recID'] = np.repeat(recName,len(telemDat))
-            #     telemDat.to_sql('tblRaw',con = conn,index = False, if_exists = 'append')
-            #else:
+
             for ant in ant_to_rec_dict:
                 site = ant_to_rec_dict[ant]
                 telemDat_sub = telemDat[telemDat.Antenna == ant]
