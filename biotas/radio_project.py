@@ -501,7 +501,11 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict):
         # connect to the project database
         conn = sqlite3.connect(dbName, timeout=30.0)
         c = conn.cursor()
-        study_tags = pd.read_sql('SELECT FreqCode FROM tblMasterTag WHERE TagType == "Study" OR TagType == "Beacon"',con = conn).FreqCode.values
+        study_tags = pd.read_sql('''SELECT FreqCode
+                                 FROM tblMasterTag
+                                 WHERE TagType == "Study" OR TagType == "Beacon"''',
+                                 con = conn).FreqCode.values
+
         def id_to_freq(row,channelDict):
             channel = row['ChannelID']
             if np.int(channel) in channelDict:
