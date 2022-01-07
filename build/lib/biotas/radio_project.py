@@ -144,7 +144,7 @@ def setAlgorithmParameters(det,duration,dbName):
 
 def studyDataImport(dataFrame,dbName,tblName):
     '''function imports formatted data into project database. The code in its current
-    function does not check for inconsistencies with data structures.  
+    function does not check for inconsistencies with data structures.
 
     dataFrame = pandas dataframe imported from your structured file.
     dbName = full directory path to project database
@@ -215,7 +215,7 @@ def orionImport(fileName,rxfile,dbName,recName, scanTime = 1, channels = 1, ant_
 #                conn.executemany('INSERT INTO tblReceiverParameters VALUES (?,?,?,?,?)',recParamLine)
                 conn.commit()
                 c.close()
-                
+
             else:
                 for i in ant_to_rec_dict:
                     site = ant_to_rec_dict[i]
@@ -229,10 +229,10 @@ def orionImport(fileName,rxfile,dbName,recName, scanTime = 1, channels = 1, ant_
 #                    recParamLine = [(site,recType,scanTime,channels,fileName)]
 #                    conn.executemany('INSERT INTO tblReceiverParameters VALUES (?,?,?,?,?)',recParamLine)
                 conn.commit()
-                c.close()                
+                c.close()
 
 
-def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict = None):
+def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict):
     ''' function imports raw lotek data, reads header data to find receiver parameters
     and automatically locates raw telemetry data.  Import procedure works with
     standardized project database. Database must be created before function can be run'''
@@ -248,21 +248,21 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict = None):
 
     recType = 'lotek'
     # create empty dictionary to hold Lotek header data indexed by line number - to be imported to Pandas dataframe
-    headerDat = {}                                                             
+    headerDat = {}
     # create empty array to hold line indices
-    lineCounter = []                                                               
+    lineCounter = []
     # generate a list of header lines - contains all data we need to write to project set up database
-    lineList = []   
+    lineList = []
     # open file passed to function
-    o_file = open(fileName, encoding='utf-8')   
+    o_file = open(fileName, encoding='utf-8')
     # start line counter
-    counter = 0                                                                     
+    counter = 0
     # read first line in file
-    line = o_file.readline()[:-1]                                                   
+    line = o_file.readline()[:-1]
     # append the current line counter to the counter array
-    lineCounter.append(counter)                                                     
+    lineCounter.append(counter)
     # append the current line of header data to the line list
-    lineList.append(line)                                                       
+    lineList.append(line)
 
     if line == "SRX800 / 800D Information:":
         # find where data begins and header data ends
@@ -271,77 +271,87 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict = None):
                 # if this current line signifies the start of the data stream, the data starts three rows down from this
                 if "** Data Segment **" in line:
                     counter = counter + 1
-                    dataRow = counter + 5                                               
+                    dataRow = counter + 5
                     # break the loop, we have reached our stop point
-                    break                                                              
+                    break
                 # else we are still reading header data increase the line counter by 1
                 else:
-                    counter = counter + 1                                               
+                    counter = counter + 1
                     # append the line counter to the count array
-                    lineCounter.append(counter)                                         
+                    lineCounter.append(counter)
                     # append line of data to the data array
-                    lineList.append(line)                                               
+                    lineList.append(line)
 
         # add count array to dictionary with field name 'idx' as key
-        headerDat['idx'] = lineCounter                                                  
+        headerDat['idx'] = lineCounter
         # add data line array to dictionary with field name 'line' as key
-        headerDat['line'] = lineList  
-        # create pandas dataframe of header data indexed by row number                                         
-        headerDF = pd.DataFrame.from_dict(headerDat)                                    
+        headerDat['line'] = lineList
+        # create pandas dataframe of header data indexed by row number
+        headerDF = pd.DataFrame.from_dict(headerDat)
         headerDF.set_index('idx',inplace = True)
 
         # find scan time
-        # for every header data row
-        for row in headerDF.iterrows():                                                
+        for row in headerDF.iterrows():
             # if the first 9 characters of the line say 'Scan Time' = we have found the scan time in the document
-            if 'Scan Time' in row[1][0]:                                            
+            if 'Scan Time' in row[1][0]:
                 # get the number value from the row
-                scanTimeStr = row[1][0][-7:-1]                                          
+                scanTimeStr = row[1][0][-7:-1]
                 # split the string
-                scanTimeSplit = scanTimeStr.split(':')                                  
+                scanTimeSplit = scanTimeStr.split(':')
                 # convert the scan time string to float
-                scanTime = float(scanTimeSplit[1])                                      
+                scanTime = float(scanTimeSplit[1])
                 # stop the loop, we have extracted scan time
-                break                                                                   
-        del row
+                break
+        del row, scanTimeStr, scanTimeSplit
+
+        # Find Master Firmware
+        firmware = ''
+        for row in headerDF.iterrows():
+            # if the first 9 characters of the line say 'Scan Time' = we have found the scan time in the document
+            if 'Master Firmware:' in row[1][0]:
+                # get the number value from the row
+                firmwarestr = row[1][0]
+                # split the string
+                firmware_split = firmwarestr.split(' ')
+                # convert the scan time string to float
+                firmware = str(firmware_split[-1]).lstrip().rstrip()
+                # stop the loop, we have extracted scan time
+                break
+        del row, firmwarestr, firmware_split
 
         # find number of channels and create channel dictionary
-        # create empty array of channel ID's
-        scanChan = []                                                                   
-        # create empty channel ID: frequency dictionary
-        channelDict = {}                                                                
-        # create counter
-        counter = 0                                                                     
-        # create row iterator
-        rows = headerDF.iterrows()                                                      
+        scanChan = []
+        channelDict = {}
+        counter = 0
+        rows = headerDF.iterrows()
         # for every row
-        for row in rows:                                                               
+        for row in rows:
             # if the first 18 characters say what that says
-            if 'Active scan_table:' in row[1][0]:                                  
+            if 'Active scan_table:' in row[1][0]:
                 # channel dictionary data starts two rows from here
-                idx0 = counter + 2                                                      
+                idx0 = counter + 2
                 # while the next row isn't empty
-                while next(rows)[1][0] != '\n':                                       
+                while next(rows)[1][0] != '\n':
                     # increase the counter
-                    counter = counter + 1                                               
+                    counter = counter + 1
                 # get index of last data row
-                idx1 = counter + 1                                                      
+                idx1 = counter + 1
                 # when the row is empty we have reached the end of channels,
-                break                                                                   
+                break
              # else, increase the counter by 1
             else:
-                counter = counter + 1                                                  
+                counter = counter + 1
         del row, rows
-        
+
         # extract channel dictionary data using rows identified earlier
-        channelDat = headerDF.iloc[idx0:idx1]                                           
+        channelDat = headerDF.iloc[idx0:idx1]
         for row in channelDat.iterrows():
             dat = row[1][0]
-            channel = int(dat[0:4])
+            channel = str(dat[0:4]).lstrip()
             frequency = dat[10:17]
             channelDict[channel] = frequency
             # extract that channel ID from the data row and append to array
-            scanChan.append(channel)                                              
+            scanChan.append(channel)
         channels = len(scanChan)
 
         # connect to database, read telemetry data using extracted parameters
@@ -349,60 +359,50 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict = None):
         c = conn.cursor()
         study_tags = pd.read_sql('SELECT FreqCode, TagType FROM tblMasterTag',con = conn)
         study_tags = study_tags[study_tags.TagType == 'Study'].FreqCode.values
+
         # with our data row, extract information using pandas fwf import procedure
-        # with our data row, extract information using pandas fwf import procedure
+        if firmware == '9.12.5':
+            telemDat = pd.read_fwf(fileName,
+                                   colspecs = [(0,8),(8,23),(23,33),(33,41),(41,56),(56,64)],
+                                   names = ['Date','Time','ChannelID','TagID','Antenna','Power'],
+                                   skiprows = dataRow,
+                                   dtype = {'ChannelID':str,'TagID':str,'Antenna':str})
+        else:
+            telemDat = pd.read_fwf(fileName,
+                                   colspecs = [(0,8),(8,18),(18,28),(28,36),(36,51),(51,59)],
+                                   names = ['Date','Time','ChannelID','TagID','Antenna','Power'],
+                                   skiprows = dataRow,
+                                   dtype = {'ChannelID':str,'TagID':str,'Antenna':str})
 
-        #Depending on firmware the data structure will change.  This is for xxx firmware.  See below for additional firmware configs
-
-#       telemDat = pd.read_fwf(fileName,colspecs = [(0,8),(8,18),(18,28),(28,36),(36,51),(51,59)],names = ['Date','Time','ChannelID','TagID','Antenna','Power'],skiprows = dataRow)
-#       telemDat = telemDat.iloc[:-2]                                                   # remove last two rows, Lotek adds garbage at the end
-
-        #Master Firmware: Version 9.12.5
-        telemDat = pd.read_fwf(fileName,colspecs = [(0,8),(8,23),(23,33),(33,41),(41,56),(56,64)],names = ['Date','Time','ChannelID','TagID','Antenna','Power'],skiprows = dataRow)
-        telemDat = telemDat.iloc[:-2]                                                   # remove last two
-
-        telemDat['Antenna'] = telemDat['Antenna'].astype(str)                   #TCS Added this to get dict to line up with data
+        telemDat.dropna(inplace = True)
 
         telemDat['fileName'] = np.repeat(rxfile,len(telemDat))                   # Adding the filename into the dataset...drop the path (note this may cause confusion because above we use filename with path.  Decide what to do and fix)
+
         def id_to_freq(row,channelDict):
             if row[2] in channelDict:
                 return channelDict[row[2]]
             else:
                 return '888'
         if len(telemDat) > 0:
-            if ant_to_rec_dict == None:
-                telemDat['Frequency'] = telemDat.apply(id_to_freq, axis = 1, args = (channelDict,))
-                telemDat = telemDat[telemDat.Frequency != '888']
-                telemDat = telemDat[telemDat.TagID != 999]
-                telemDat['FreqCode'] = telemDat['Frequency'].astype(str) + ' ' + telemDat['TagID'].astype(int).astype(str)
-                telemDat['timeStamp'] = pd.to_datetime(telemDat['Date'] + ' ' + telemDat['Time'])# create timestamp field from date and time and apply to index
-                telemDat['Epoch'] = (telemDat['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()
-                telemDat = noiseRatio(5.0,telemDat,study_tags)
-                telemDat.drop (['Date','Time','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
-                telemDat['ScanTime'] = np.repeat(scanTime,len(telemDat))
-                telemDat['Channels'] = np.repeat(channels,len(telemDat))
-                telemDat['RecType'] = np.repeat(recType,len(telemDat))
-                telemDat['recID'] = np.repeat(recName,len(telemDat))
-                telemDat.to_sql('tblRaw',con = conn,index = False, if_exists = 'append')
-            else:
-                for ant in ant_to_rec_dict:
-                    site = ant_to_rec_dict[ant]
-                    telemDat_sub = telemDat[telemDat.Antenna == str(ant)]
-                    telemDat_sub['Frequency'] = telemDat_sub.apply(id_to_freq, axis = 1, args = (channelDict,))
-                    telemDat_sub = telemDat_sub[telemDat_sub.Frequency != '888']
-                    telemDat_sub = telemDat_sub[telemDat_sub.TagID != 999]
-                    telemDat_sub['FreqCode'] = telemDat_sub['Frequency'].astype(str) + ' ' + telemDat_sub['TagID'].astype(int).astype(str)
-                    telemDat_sub['timeStamp'] = pd.to_datetime(telemDat_sub['Date'] + ' ' + telemDat_sub['Time'])# create timestamp field from date and time and apply to index
-                    telemDat_sub['Epoch'] = (telemDat_sub['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()
-                    telemDat_sub = noiseRatio(5.0,telemDat_sub,study_tags)
-                    telemDat_sub.drop (['Date','Time','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
-                    telemDat_sub['ScanTime'] = np.repeat(scanTime,len(telemDat_sub))
-                    telemDat_sub['Channels'] = np.repeat(channels,len(telemDat_sub))
-                    telemDat_sub['RecType'] = np.repeat(recType,len(telemDat_sub))
-                    telemDat_sub['recID'] = np.repeat(site,len(telemDat_sub))
-                    telemDat_sub.to_sql('tblRaw',con = conn,index = False, if_exists = 'append')       
-                    c.close()
-        
+
+            for ant in ant_to_rec_dict:
+                site = ant_to_rec_dict[ant]
+                telemDat_sub = telemDat[telemDat.Antenna == ant]
+                telemDat_sub['Frequency'] = telemDat_sub.apply(id_to_freq, axis = 1, args = (channelDict,))
+                telemDat_sub = telemDat_sub[telemDat_sub.Frequency != '888']
+                telemDat_sub = telemDat_sub[telemDat_sub.TagID != 999]
+                telemDat_sub['FreqCode'] = telemDat_sub['Frequency'].astype(str) + ' ' + telemDat_sub['TagID'].astype(int).astype(str)
+                telemDat_sub['timeStamp'] = pd.to_datetime(telemDat_sub['Date'] + ' ' + telemDat_sub['Time'])# create timestamp field from date and time and apply to index
+                telemDat_sub['Epoch'] = (telemDat_sub['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()
+                telemDat_sub = noiseRatio(5.0,telemDat_sub,study_tags)
+                telemDat_sub.drop (['Date','Time','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
+                telemDat_sub['ScanTime'] = np.repeat(scanTime,len(telemDat_sub))
+                telemDat_sub['Channels'] = np.repeat(channels,len(telemDat_sub))
+                telemDat_sub['RecType'] = np.repeat(recType,len(telemDat_sub))
+                telemDat_sub['recID'] = np.repeat(site,len(telemDat_sub))
+                telemDat_sub.to_sql('tblRaw',con = conn,index = False, if_exists = 'append')
+                c.close()
+
     else:
         lotek400 = False
         # find where data begins and header data ends
@@ -412,9 +412,9 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict = None):
                     # if this current line signifies the start of the data stream
                     counter = counter + 1
                     # the data starts 5 rows down from this
-                    dataRow = counter + 5  
-                    # break the loop, we have reached our stop point                         
-                    break                                                               
+                    dataRow = counter + 5
+                    # break the loop, we have reached our stop point
+                    break
                 elif line[0:14] == "Code_log data:":
                     # you have a lotek400
                     counter = counter + 1
@@ -423,79 +423,79 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict = None):
                     break
                 else:
                     # if we are still reading header data increase the line counter by 1
-                    counter = counter + 1                                               
+                    counter = counter + 1
                     # append the line counter to the count array
-                    lineCounter.append(counter)                                         
+                    lineCounter.append(counter)
                     # append line of data to the data array
-                    lineList.append(line)                                               
+                    lineList.append(line)
         # add count array to dictionary with field name 'idx' as key
-        headerDat['idx'] = lineCounter                                         
+        headerDat['idx'] = lineCounter
         # add data line array to dictionary with field name 'line' as key
-        headerDat['line'] = lineList                                           
+        headerDat['line'] = lineList
         # create pandas dataframe of header data indexed by row number
-        headerDF = pd.DataFrame.from_dict(headerDat)                           
+        headerDF = pd.DataFrame.from_dict(headerDat)
         headerDF.set_index('idx',inplace = True)
 
         # find scan time
         # for every header data row
-        for row in headerDF.iterrows():                                                
-            if 'scan time' in row[1][0] or 'Scan time' in row[1][0]:                   
+        for row in headerDF.iterrows():
+            if 'scan time' in row[1][0] or 'Scan time' in row[1][0]:
                 # get the number value from the row
-                scanTimeStr = row[1][0][-7:-1]                                          
+                scanTimeStr = row[1][0][-7:-1]
                 # split the string
-                scanTimeSplit = scanTimeStr.split(':')                                  
+                scanTimeSplit = scanTimeStr.split(':')
                 # convert the scan time string to float
                 scanTime = float(scanTimeSplit[1])
-                # stop that loop, we done                                    
-                break                                                                   
+                # stop that loop, we done
+                break
         del row
         if lotek400 == True:
             # determine if researchers used CRTO and extract
-            for row in headerDF.iterrows():                                   
-                if 'Continuous record time-out' in row[1][0]:                  
-                    crto_split = row[1][0].split('=')                          
-                    crto_time = crto_split[1]                                  
+            for row in headerDF.iterrows():
+                if 'Continuous record time-out' in row[1][0]:
+                    crto_split = row[1][0].split('=')
+                    crto_time = crto_split[1]
                     if crto_time == '0:00.00':
                         crto = False
                     else:
                         crto = True
-                    break                                                      
+                    break
             del row
 
         # find number of channels and create channel dictionary
         # create empty array of channel ID's
-        scanChan = []                                                                   
+        scanChan = []
         # create empty channel ID: frequency dictionary
-        channelDict = {}                                                                
+        channelDict = {}
         # create counter
-        counter = 0                                                                     
+        counter = 0
         # create row iterator
-        rows = headerDF.iterrows()                                                      
-        for row in rows:     
-            # if the first 18 characters say Active scan_table                                                          
-            if 'Active scan_table:' in row[1][0]:    
-                # channel dictionary data starts two rows from here                               
-                idx0 = counter + 2 
-                # while the next row isn't empty                                   
-                while next(rows)[1][0] != '\n':                                       
+        rows = headerDF.iterrows()
+        for row in rows:
+            # if the first 18 characters say Active scan_table
+            if 'Active scan_table:' in row[1][0]:
+                # channel dictionary data starts two rows from here
+                idx0 = counter + 2
+                # while the next row isn't empty
+                while next(rows)[1][0] != '\n':
                     # increase the counter
-                    counter = counter + 1                                               
+                    counter = counter + 1
                 # get index of last data row
-                idx1 = counter + 1                                                      
-                break                                                                   
+                idx1 = counter + 1
+                break
             else:
-                counter = counter + 1                                                   
+                counter = counter + 1
         del row, rows
-        
+
         # extract channel dictionary data using rows identified earlier
-        channelDat = headerDF.iloc[idx0:idx1]                                           
+        channelDat = headerDF.iloc[idx0:idx1]
         for row in channelDat.iterrows():
             # extract that channel ID from the data row and append to array
             dat = row[1][0]
             channel = int(dat[0:4])
             frequency = dat[10:17]
             channelDict[channel] = frequency
-            scanChan.append(channel)                                              
+            scanChan.append(channel)
         channels = len(scanChan)
 
         # connect to the project database
@@ -516,7 +516,7 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict = None):
                                    names = ['DayNumber','Time','ChannelID','TagID','Antenna','Power'],
                                    skiprows = dataRow)
             # remove last two rows, Lotek adds garbage at the end
-            telemDat = telemDat.iloc[:-2]                                                   
+            telemDat = telemDat.iloc[:-2]
             telemDat.dropna(inplace = True)
             if len(telemDat) > 0:
                 telemDat['Frequency'] = telemDat.apply(id_to_freq, axis = 1, args = (channelDict,))
@@ -530,7 +530,7 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict = None):
                 telemDat.drop(['day0','DayNumber'],axis = 1, inplace = True)
                 telemDat['Epoch'] = (telemDat['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()
                 telemDat.drop (['Date','Time','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
-                telemDat['fileName'] = np.repeat(rxfile,len(telemDat))            
+                telemDat['fileName'] = np.repeat(rxfile,len(telemDat))
                 telemDat['recID'] = np.repeat(recName,len(telemDat))
                 telemDat['noiseRatio'] = noiseRatio(5.0,telemDat,study_tags)
                 telemDat['ScanTime'] = np.repeat(scanTime,len(telemDat))
@@ -567,7 +567,7 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict = None):
                 telemDat['events_per_duration'] = telemDat.Events / telemDat.duration
                 telemDat['Epoch'] = (telemDat['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()
                 telemDat.drop (['Date_Start','Date_End','time_end','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
-                telemDat['fileName'] = np.repeat(rxfile,len(telemDat))           
+                telemDat['fileName'] = np.repeat(rxfile,len(telemDat))
                 telemDat['recID'] = np.repeat(recName,len(telemDat))
                 telemDat['ScanTime'] = np.repeat(scanTime,len(telemDat))
                 telemDat['Channels'] = np.repeat(channels,len(telemDat))
@@ -581,7 +581,7 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict = None):
     # commit and closee
     conn.commit()
     c.close()
-    
+
 def telemDataImport(site,recType,file_directory,projectDB, scanTime = 1, channels = 1, ant_to_rec_dict = None):
     tFiles = os.listdir(file_directory)
     for f in tFiles:
@@ -589,7 +589,7 @@ def telemDataImport(site,recType,file_directory,projectDB, scanTime = 1, channel
         f_dir = os.path.join(file_directory,f)
         rxfile=f
         if recType == 'lotek':
-            lotek_import(f_dir,rxfile,projectDB,site)
+            lotek_import(f_dir,rxfile,projectDB,site,ant_to_rec_dict)
         elif recType == 'orion':
             orionImport(f_dir,rxfile,projectDB,site, scanTime, channels, ant_to_rec_dict)
         else:

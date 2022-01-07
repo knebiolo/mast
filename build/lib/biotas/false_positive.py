@@ -1186,7 +1186,7 @@ def classDatAppend(site,inputWS,projectDB,reclass_iter = 1):
         dat.to_sql(out_name,con = conn,index = False, if_exists = 'append', chunksize = 1000, dtype = dtype)
         os.remove(os.path.join(inputWS,f))
         del dat
-    c.execute('''CREATE INDEX idx_combined_%s ON tblClassify_%s (recID,FreqCode,Epoch)'''%(site,site))
+    c.execute('''CREATE INDEX idx_combined_%s_%s ON tblClassify_%s_%s (recID,FreqCode,Epoch)'''%(site,reclass_iter,site,reclass_iter))
     c.close()
 
 
@@ -1896,7 +1896,7 @@ class classification_results():
             print ("")
             print ("%s detection class statistics:"%(self.recType))
             print ("The probability that a detection was classified as true was %s"%((round(float(det_class_count.at[1,'final_test'])/float(det_class_count.sum()),3))))
-            print ("The probability that a detection was classified as fasle positive was %s"%((round(float(det_class_count.at[0,'final_test'])/float(det_class_count.sum()),3))))
+            print ("The probability that a detection was classified as false positive was %s"%((round(float(det_class_count.at[0,'final_test'])/float(det_class_count.sum()),3))))
             print ("")
             print ("----------------------------------------------------------------------------------")
             print ("")

@@ -291,7 +291,6 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict):
         headerDF.set_index('idx',inplace = True)
 
         # find scan time
-        # for every header data row
         for row in headerDF.iterrows():
             # if the first 9 characters of the line say 'Scan Time' = we have found the scan time in the document
             if 'Scan Time' in row[1][0]:
@@ -303,16 +302,27 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict):
                 scanTime = float(scanTimeSplit[1])
                 # stop the loop, we have extracted scan time
                 break
-        del row
+        del row, scanTimeStr, scanTimeSplit
+
+        # Find Master Firmware
+        firmware = ''
+        for row in headerDF.iterrows():
+            # if the first 9 characters of the line say 'Scan Time' = we have found the scan time in the document
+            if 'Master Firmware:' in row[1][0]:
+                # get the number value from the row
+                firmwarestr = row[1][0]
+                # split the string
+                firmware_split = firmwarestr.split(' ')
+                # convert the scan time string to float
+                firmware = str(firmware_split[-1]).lstrip().rstrip()
+                # stop the loop, we have extracted scan time
+                break
+        del row, firmwarestr, firmware_split
 
         # find number of channels and create channel dictionary
-        # create empty array of channel ID's
         scanChan = []
-        # create empty channel ID: frequency dictionary
         channelDict = {}
-        # create counter
         counter = 0
-        # create row iterator
         rows = headerDF.iterrows()
         # for every row
         for row in rows:
@@ -349,26 +359,25 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict):
         c = conn.cursor()
         study_tags = pd.read_sql('SELECT FreqCode, TagType FROM tblMasterTag',con = conn)
         study_tags = study_tags[study_tags.TagType == 'Study'].FreqCode.values
+
         # with our data row, extract information using pandas fwf import procedure
-        # with our data row, extract information using pandas fwf import procedure
+        if firmware == '9.12.5':
+            telemDat = pd.read_fwf(fileName,
+                                   colspecs = [(0,8),(8,23),(23,33),(33,41),(41,56),(56,64)],
+                                   names = ['Date','Time','ChannelID','TagID','Antenna','Power'],
+                                   skiprows = dataRow,
+                                   dtype = {'ChannelID':str,'TagID':str,'Antenna':str})
+        else:
+            telemDat = pd.read_fwf(fileName,
+                                   colspecs = [(0,8),(8,18),(18,28),(28,36),(36,51),(51,59)],
+                                   names = ['Date','Time','ChannelID','TagID','Antenna','Power'],
+                                   skiprows = dataRow,
+                                   dtype = {'ChannelID':str,'TagID':str,'Antenna':str})
 
-        #Depending on firmware the data structure will change.  This is for xxx firmware.  See below for additional firmware configs
-
-#       telemDat = pd.read_fwf(fileName,colspecs = [(0,8),(8,18),(18,28),(28,36),(36,51),(51,59)],names = ['Date','Time','ChannelID','TagID','Antenna','Power'],skiprows = dataRow)
-#       telemDat = telemDat.iloc[:-2]                                                   # remove last two rows, Lotek adds garbage at the end
-
-        #Master Firmware: Version 9.12.5
-        telemDat = pd.read_fwf(fileName,
-                               colspecs = [(0,8),(8,23),(23,33),(33,41),(41,56),(56,64)],
-                               names = ['Date','Time','ChannelID','TagID','Antenna','Power'],
-                               skiprows = dataRow,
-                               dtype = {'ChannelID':str,'TagID':str,'Antenna':str})
         telemDat.dropna(inplace = True)
-        #telemDat = telemDat.iloc[:-2]                                                   # remove last two
-
-        #telemDat['Antenna'] = telemDat['Antenna'].astype(str)                   #TCS Added this to get dict to line up with data
 
         telemDat['fileName'] = np.repeat(rxfile,len(telemDat))                   # Adding the filename into the dataset...drop the path (note this may cause confusion because above we use filename with path.  Decide what to do and fix)
+
         def id_to_freq(row,channelDict):
             if row[2] in channelDict:
                 return channelDict[row[2]]
