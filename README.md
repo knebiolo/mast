@@ -192,7 +192,7 @@ proj_dir = r'D:\Manuscript\CT_River_2015'
 # what did you call the database?
 dbName = 'ctr_2015_v2.db'                                                         
 # antenna to location, default project set up 1 Antenna, 1 Location, 1 Receiver 
-ant_to_rec_dict = {1:site}                                                    
+ant_to_rec_dict = {'1':site}                                                    
 
 # set up workspaces using OS tools    
 file_dir = os.path.join(proj_dir,'Data','Training_Files')
@@ -480,7 +480,7 @@ t_DBName = 'Winooski_102_Trainer.db'
 scanTime = 2.0
 channels = 1
 # Dictionary that stores the Antenna to Receiver relationship
-ant_to_rec_dict = {1:'102'}
+ant_to_rec_dict = {'1':'102'}
 
 # create worskspaces - you haven't changed the directory have you?
 trainingDB = os.path.join(proj_dir,'Data',t_DBName)
