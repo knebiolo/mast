@@ -175,10 +175,13 @@ The first part of the Naïve Bayes classifier develops training data, which is c
 
 ```
 # import modules
+import biotas
 import time
 import os
 import sqlite3
 import pandas as pd
+import warnings
+warnings.filterwarnings('ignore')
 
 #%%
 # Part 1: Set Script Parameters and Workspaces
