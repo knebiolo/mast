@@ -26,7 +26,7 @@ rcParams['font.family'] = 'serif'
 
 def factors(n):
 
-    ''''function to return primes used to quantify the least common multiplier for creation of ship tracks
+    ''''function to return primes used to quantify the least common multiplier
     see: http://stackoverflow.com/questions/16996217/prime-factorization-list for recipe'''
     pList = []
     for i in np.arange(1, n + 1):
@@ -93,7 +93,8 @@ def detHist (data,rate,det, status = 'A', training = False):
             data['det_0'] = '1'
         else:
             for j in np.arange(det * -1 , det + 1, 1):
-                data.loc[(data['epoch_shift_%s'%(np.int(j))] >= data['ll_%s'%(np.int(i))]) & (data['epoch_shift_%s'%(np.int(j))] <= data['ul_%s'%(np.int(i))]),'det_%s'%(np.int(i))] = '1'
+                data.loc[(data['epoch_shift_%s'%(np.int(j))] >= data['ll_%s'%(np.int(i))]) &\
+                         (data['epoch_shift_%s'%(np.int(j))] <= data['ul_%s'%(np.int(i))]),'det_%s'%(np.int(i))] = '1'
 
         data['det_%s'%(np.int(i))].fillna(value = '0', inplace = True)
 

@@ -35,7 +35,7 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
         recSQL = "SELECT * FROM tblMasterReceiver"                                 # SQL code to import data from this node
     receivers = pd.read_sql(recSQL,con = conn)                                 # import data
     receivers = receivers.recID.unique()                                       # get the unique receivers associated with this node
-    recapdata = pd.DataFrame(columns = ['FreqCode','Epoch','recID','timeStamp','fileName'])                # set up an empty data frame
+    recapdata = pd.DataFrame()#columns = ['FreqCode','Epoch','recID','timeStamp','fileName'])                # set up an empty data frame
     c = conn.cursor()
 
     bouts = False
