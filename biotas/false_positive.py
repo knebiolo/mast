@@ -1190,6 +1190,32 @@ def classDatAppend(site,inputWS,projectDB,reclass_iter = 1):
     c.execute('''CREATE INDEX idx_combined_%s_%s ON tblClassify_%s_%s (recID,FreqCode,Epoch)'''%(site,reclass_iter,site,reclass_iter))
     c.close()
 
+def max_iter(rec_list, tables):
+    '''Function used by training, classification, and cross validation to find the
+    last iteration of a receiver classification.
+
+    Inputs to the function are a list of recievers to iterate through and
+    the list of tables contained in the database.'''
+
+    # iterate over the receivers to find the final classification (aka the largest _n)
+    max_iter_dict = {} # receiver:max iter
+    curr_idx = 0
+    rec_iter_list = []
+    for i in rec_list:
+        max_iter = 1
+        while curr_idx < len(tables) - 1:
+            for j in tables:
+                if i in j[0]:
+                    tbl_name = j[0].split('_')
+                    rec_iter_list.append(j[0])
+                    if int(tbl_name[-1]) >= max_iter:
+                        max_iter = int(tbl_name[-1])
+                        max_iter_dict[i] = j[0]
+                curr_idx = curr_idx + 1
+        curr_idx = 0
+    del i, j, curr_idx
+
+    return max_iter_dict, rec_iter_list
 
 class cross_validated():
     '''We validate the training data against itself with a cross validated data
@@ -1222,22 +1248,9 @@ class cross_validated():
 
             c.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
             tbls = c.fetchall()
-            # iterate over the receivers to find the final classification (aka the largest _n)
-            max_iter_dict = {} # receiver:max iter
-            curr_idx = 0
-            rec_iter_list = []
-            for i in recs:
-                max_iter = 1
-                while curr_idx < len(tbls) - 1:
-                    for j in tbls:
-                        if i in j[0]:
-                            rec_iter_list.append(j[0])
-                            if int(j[0][-1]) >= max_iter:
-                                max_iter = int(j[0][-1])
-                                max_iter_dict[i] = j[0]
-                        curr_idx = curr_idx + 1
-                curr_idx = 0
-            del i, j, curr_idx
+
+            # create a maximum iteration dictionary
+            max_iter_dict = max_iter(recs,tbls)[0]
 
             # once we have a hash table of receiver to max classification, extract the classification dataset
             trues = pd.DataFrame()
@@ -1708,22 +1721,8 @@ class classification_results():
             c.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
             tbls = c.fetchall()
 
-            # iterate over the receivers to find the final classification (aka the largest _n)
-            max_iter_dict = {} # receiver:max iter
-            curr_idx = 0
-            rec_iter_list = []
-            for i in rec_list:
-                max_iter = 1
-                while curr_idx < len(tbls) - 1:
-                    for j in tbls:
-                        if i in j[0]:
-                            rec_iter_list.append(j[0])
-                            if int(j[0][-1]) >= max_iter:
-                                max_iter = int(j[0][-1])
-                                max_iter_dict[i] = j[0]
-                        curr_idx = curr_idx + 1
-                curr_idx = 0
-            del i, j, curr_idx
+            # generate maximum iteration dictionary
+            max_iter_dict = max_iter(rec_list,tbls)[0]
 
             # once we have a hash table of receiver to max classification, extract the classification dataset
             self.classDF = pd.DataFrame()
@@ -1752,7 +1751,7 @@ class classification_results():
                                     logLikelihoodRatio_M
                             FROM %s'''%(max_iter_dict[i])
 
-		    # get data for this receiver
+        		    # get data for this receiver
                     dat = pd.read_sql(sql, con = conn, coerce_float = True)
                     self.final_iter = self.final_iter.append(dat)
                     del dat
@@ -1839,6 +1838,8 @@ class classification_results():
                     del dat
             trues = self.final_iter[self.final_iter.test == 1]
             falses = pd.DataFrame()
+
+            rec_iter_list = max_iter(rec_list,tbls)[1]
 
             for i in rec_iter_list:
                 sql = '''SELECT FreqCode,
