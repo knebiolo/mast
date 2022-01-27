@@ -20,7 +20,7 @@ receiver_to_recap = {'T23':'R00','T24':'R00',
                      'T15':'R06','T33':'R06','T03':'R06','T02':'R06'}
 
 # Step 1, create time to event data class - we only need to feed it the directory and file name of input data
-cjs = biotas.cjs_data_prep(receiver_to_recap, projectDB, initial_recap_release = True)
+cjs = biotas.cjs_data_prep(receiver_to_recap, projectDB, species = 'Shad', initial_recap_release = True)
 print ("Step 1 Completed, Data Class Finished")
 # Step 2, Create input file for MARK
 cjs.input_file(modelName,outputWS)

@@ -29,7 +29,7 @@ rcParams['font.family'] = 'serif'
 
 class cjs_data_prep():
     '''Class creates input files for Cormack Jolly Seber modeling in MARK'''
-    def __init__(self,receiver_to_recap, dbDir, input_type = 'query', rel_loc = None, cap_loc = None, initial_recap_release = False):
+    def __init__(self,receiver_to_recap, dbDir, input_type = 'query',species = None, rel_loc = None, cap_loc = None, initial_recap_release = False):
         # Import Data using sql
         print ("Starting extraction of recapture data conforming to the recievers chosen")
         conn = sqlite3.connect(dbDir)
@@ -39,7 +39,7 @@ class cjs_data_prep():
         self.cap_loc = cap_loc
 
         receiver_list = sorted(list(receiver_to_recap.keys()))
-        sql = '''SELECT tblRecaptures.FreqCode, Epoch, timeStamp, tblRecaptures.recID, TagType, overlapping, RelLoc, CapLoc, test
+        sql = '''SELECT tblRecaptures.FreqCode, Epoch, timeStamp, tblRecaptures.recID, TagType, overlapping, RelLoc, CapLoc, Species, test
                 FROM tblRecaptures
                 LEFT JOIN tblMasterReceiver ON tblRecaptures.recID = tblMasterReceiver.recID
                 LEFT JOIN tblMasterTag ON tblRecaptures.FreqCode = tblMasterTag.FreqCode
@@ -51,6 +51,8 @@ class cjs_data_prep():
         recap_data = recap_data[recap_data.TagType == 'Study']
         recap_data = recap_data[recap_data.overlapping == 0.0]
         recap_data = recap_data[recap_data.test == 1.0]
+        if species != None:
+            recap_data = recap_data[recap_data.Species == species]
         if rel_loc != None:
             recap_data = recap_data[recap_data.RelLoc == rel_loc]
         if cap_loc != None:
@@ -80,6 +82,8 @@ class cjs_data_prep():
             release time and we add in R00 as our release location, otherwise R00
             should appear on the input receiver to recapture event dictionary.
             '''
+
+            print ("Adding release time for this fish")
             sql = "SELECT FreqCode, TagType, RelDate, RelLoc, CapLoc FROM tblMasterTag WHERE TagType = 'Study'"
             relDat = pd.read_sql_query(sql,con = conn, parse_dates = 'RelDate')
             if self.rel_loc is not None:
@@ -94,35 +98,47 @@ class cjs_data_prep():
             relDat['overlapping'] = np.zeros(len(relDat))
             self.data = self.data.append(relDat)
 
+
         else:
+            print ("Starting Initial Recap Release Procedure")
             # Identify first recapture times
             startTimes = self.data[self.data.RecapOccasion == "R00"].groupby(['FreqCode'])['Epoch'].min().to_frame()
             startTimes.reset_index(drop = False, inplace = True)
             startTimes.set_index('FreqCode',inplace = True)
-            #self.startTimes.Epoch = self.startTimes.Epoch.astype(np.int32)
             startTimes.rename(columns = {'Epoch':'FirstRecapture'},inplace = True)
 
             # make sure fish start from the first recapture occassion and that there are no recaps before release
             for fish in self.data.FreqCode.unique():
-                if fish not in startTimes.index.values:                  # fish never made it to the initial state, remove - we only care about movements from the initial sstate - this is a competing risks model
+
+                if fish not in startTimes.index.values:
+                    # fish never made it to the initial state
                     self.data.drop(self.data[self.data.FreqCode == fish].index, inplace = True)
                 else:
+                    # fish arrived at the initial state but their may be recaptures before arrival at initial state
                     t = startTimes.at[fish,'FirstRecapture']
-                    print (t)
                     self.data.drop(self.data[(self.data.FreqCode == fish) & (self.data.Epoch < t)].index, inplace = True)
 
         print (self.data.head())
         c.close()
 
     def input_file(self,modelName, outputWS):
-        #Step 1: Create cross tabulated data frame with FreqCode as row index
-        #and recap occasion as column.  Identify the min epoch'''
+        #Step 1: Create cross tabulated data frame with FreqCode as row index and recap occasion as column
         cross_tab = pd.pivot_table(self.data, values = 'Epoch', index = 'FreqCode', columns = 'RecapOccasion', aggfunc = 'min')
+
         #Step 2: Fill in those nan values with 0, we can't perform logic on nothing!'''
         cross_tab.fillna(value = 0, inplace = True)
+
         #Step 3: Map a simply if else statement, if value > 0,1 else 0'''
         cross_tab = cross_tab.applymap(lambda x:1 if x > 0 else 0)
-        self.inp = cross_tab
+
+        # put together the input string
+        inp = "/* " + cross_tab.index.astype(str) + " */  "
+        for i in np.arange(0,len(cross_tab.columns),1):
+            inp = inp + cross_tab.iloc[:,i].astype(str)
+        inp = inp + "     1;"
+
+        self.inp = inp
+        self.cross = cross_tab
         # Check your work
         print (cross_tab.head(100))
         cross_tab.to_csv(os.path.join(outputWS,'%s_cjs.csv'%(modelName)))
