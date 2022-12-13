@@ -9,15 +9,15 @@ import biotas
 tS = time.time()
 
 #set script parameters
-class_iter= 4 #Enter the iteration number here--start at 2
+class_iter= 2 #Enter the iteration number here--start at 2
 # what is the site/receiver ID?
-site = 'T14'   
+site = 'T4'   
 # what is the receiver type?                                                                
-recType = 'lotek' 
+recType = 'orion' 
 # what is the project directory?                                                             
-proj_dir = r'D:\Manuscript\CT_River_2015'  
+proj_dir = r'J:\1871\196\Calcs\BIOTAS'  
 # whad did you call the database?                                    
-dbName = 'ctr_2015_v2.db'                                                           
+dbName = 'pepperell_am_eel.db'                                                           
 
 # create directories with OS tools
 outputWS = os.path.join(proj_dir,'Output')                                  
@@ -28,7 +28,7 @@ figure_ws = os.path.join(proj_dir,'Output','Figures')
 
 # A-la-carte likelihood, construct a model from the following parameters:
 # ['conRecLength','consDet','hitRatio','noiseRatio','seriesHit','power','lagDiff']
-fields = ['conRecLength','hitRatio','lagDiff','power','noiseRatio']
+fields = ['conRecLength','hitRatio','lagDiff','power']
 
 # Do we want to use an informed prior?
 prior = False

@@ -9,13 +9,13 @@ tS = time.time()
 #%% Part 1: Set Up Script Parameters and Create Diretories
 
 # what is the site/receiver ID?
-site = 'T27'    
+site = 'T5'    
 # what is the receiver type?                                                               
-recType = 'lotek'  
+recType = 'orion'  
 # what is the project directory?                                                            
-proj_dir = r'D:\Manuscript\CT_River_2015'   
+proj_dir = r'J:\1871\196\Calcs\BIOTAS'   
 # whad did you call the database?                                   
-dbName = 'ctr_2015_v2.db'                                                         
+dbName = 'pepperell_am_eel.db'                                                         
 
 # create directories using OS tools
 outputWS = os.path.join(proj_dir,'Output') 
@@ -26,7 +26,7 @@ projectDB = os.path.join(proj_dir,'Data',dbName)
 
 # A-la-carte likelihood, construct a model from the following parameters:
 # ['conRecLength','consDet','hitRatio','noiseRatio','seriesHit','power','lagDiff']
-fields = ['power','lagDiff','hitRatio']            
+fields = ['conRecLength','hitRatio','power','lagDiff']            
 
 # Do we want to use an informed prior?
 prior = True       
@@ -53,7 +53,7 @@ print ("There are %s fish to iterate through at site %s" %(len(histories),site))
 # create training data for this round of classification
 train = biotas.create_training_data(site,
                                     projectDB,
-                                    rec_list = [site])
+                                    rec_list = ['T1','T2','T3','T4','T5'])
 
 # classify data from each tag
 for i in histories:

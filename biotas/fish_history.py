@@ -67,7 +67,7 @@ class fish_history():
                 if i in j[0]:
                     tblList.append(j[0])
             del j
-            print (tblList)
+            #print (tblList)
             # iterate over the receivers to find the final classification (aka the largest _n)
             max_iter_dict = {} # receiver:max iter
             curr_idx = 0
@@ -79,7 +79,7 @@ class fish_history():
                         max_iter_dict[i] = j
                     curr_idx = curr_idx + 1
             curr_idx = 0
-            print (max_iter_dict)
+           # print (max_iter_dict)
             if filtered == False and overlapping == False:
                 sql = "SELECT FreqCode, Epoch, timeStamp, recID, test FROM tblClassify_%s_1"%(i)
                 dat = pd.read_sql(sql,con = conn)

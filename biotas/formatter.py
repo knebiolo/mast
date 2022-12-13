@@ -379,18 +379,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
         self.dbDir = dbDir
         conn = sqlite3.connect(dbDir)
         c = conn.cursor()
-        sql = '''SELECT tblRecaptures.FreqCode,
-                        Epoch,
-                        timeStamp,
-                        Node,
-                        TagType,
-                        presence_number,
-                        overlapping,
-                        CapLoc,
-                        RelLoc,
-                        Species,
-                        test
-                FROM tblRecaptures
+        sql = '''SELECT * FROM tblRecaptures
                 LEFT JOIN tblMasterReceiver ON tblRecaptures.recID = tblMasterReceiver.recID
                 LEFT JOIN tblMasterTag ON tblRecaptures.FreqCode = tblMasterTag.FreqCode
                 WHERE tblRecaptures.recID = "%s"'''%(receiver_list[0])
@@ -404,7 +393,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
         self.data = self.data[self.data.TagType == 'Study']
         self.data = self.data[self.data.test == 1]
         self.data = self.data[self.data.overlapping == 0]
-
+        self.data = self.data.loc[:,~self.data.columns.duplicated()].copy()
         # get tblMasterReceivers and join to recap
 
         # get tblMasterTag and join to recap
@@ -902,7 +891,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
         #max_transCount.to_csv(os.path.join(r'C:\Users\Kevin Nebiolo\Desktop','maxCountByFreqCode.csv'))
         print (max_transCount)
         print ("")
-        print ("Movement summaries")
-        self.master_stateTable['dur'] = (self.master_stateTable.t1 - self.master_stateTable.t0)/3600.0
-        move_summ = self.master_stateTable.groupby('transition')['dur'].describe().round(decimals = 2)
+        print ("Movement summaries - Duration between states in seconds")
+        self.master_stateTable['dur'] = (self.master_stateTable.t1 - self.master_stateTable.t0)
+        move_summ = self.master_stateTable.groupby('transition')['dur'].describe().round(decimals = 3)
         print (move_summ)

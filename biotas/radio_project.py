@@ -156,6 +156,56 @@ def studyDataImport(dataFrame,dbName,tblName):
     conn.commit()
     c.close()
 
+def vr2Import(fileName,rxfile,dbName,recName):
+    '''Function imports raw VEMCO VR2 acoustic data.
+
+    '''
+    conn = sqlite3.connect(dbName, timeout=30.0)
+    c = conn.cursor()
+    study_tags = pd.read_sql('SELECT FreqCode, TagType FROM tblMasterTag',con = conn)
+    study_tags = study_tags[study_tags.TagType == 'Study'].FreqCode.values
+
+    recType = 'vr2'
+
+    # import csv format and export - pretty simple
+    telemDat = pd.read_csv(fileName)
+
+    if len(telemDat) > 0:
+        telemDat['fileName'] = np.repeat(rxfile,len(telemDat))    #Note I'm going back here to the actual file name without the path.  Is that OK?  I prefer it, but it's a potential source of confusion
+        try:
+            telemDat['timeStamp'] = pd.to_datetime(telemDat['Date and Time (UTC)'])
+        except KeyError:
+            seconds = pd.to_numeric(telemDat['Unnamed: 2'].str.split(":", n = 1, expand = True)[1])
+            telemDat['timeStamp'] = pd.to_datetime(telemDat['Date and Time'])
+            telemDat['timeStamp'] = telemDat.timeStamp + pd.to_timedelta(seconds,unit = 's')
+            telemDat['Receiver'] = telemDat['Receiver'].str.split("-", expand = True)[0]
+            telemDat['Receiver'] = telemDat.Receiver + "-" + telemDat['Receiver.1'].astype('str')
+        telemDat['ScanTime'] = np.repeat(1,len(telemDat))
+        telemDat['Channels'] = np.repeat(1,len(telemDat))
+        telemDat['RecType'] = np.repeat('vr2',len(telemDat))
+        telemDat['Transmitter'] = telemDat['Transmitter'].str.split("-", n = 2, expand = True)[2]
+        telemDat['Transmitter'] = telemDat.Transmitter.astype(str)
+        telemDat.rename(columns = {'Receiver':'recID','Transmitter':'FreqCode'}, inplace = True)
+        telemDat['Epoch'] = (telemDat['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()
+        try:
+            telemDat.drop (['Date and Time (UTC)', 'Transmitter Name','Transmitter Serial','Sensor Value','Sensor Unit','Station Name','Latitude','Longitude','Transmitter Type','Sensor Precision'],axis = 1, inplace = True)
+        except KeyError:
+            telemDat.drop (['Unnamed: 0', 'Date and Time', 'Unnamed: 2', 'Unnamed: 3', 'Unnamed: 4', 'Receiver.1', 'Unnamed: 7', 'Unnamed: 8', 'Transmitter Name', 'Unnamed: 11', 'Unnamed: 12', 'Unnamed: 13',],axis = 1, inplace = True)
+
+        tuples = zip(telemDat.FreqCode.values,telemDat.recID.values,telemDat.Epoch.values)
+        index = pd.MultiIndex.from_tuples(tuples, names=['FreqCode', 'recID','Epoch'])
+        telemDat.set_index(index,inplace = True,drop = False)
+        telemDat.to_sql('tblRaw',con = conn,index = False, if_exists = 'append')
+        conn.commit()
+        c.close()
+
+def orionImport(fileName,rxfile,dbName,recName, scanTime = 1, channels = 1, ant_to_rec_dict = None):
+    '''Function imports raw Sigma Eight orion data.
+    
+    Text parser uses simple column fixed column widths.
+    '''
+
+
 def orionImport(fileName,rxfile,dbName,recName, scanTime = 1, channels = 1, ant_to_rec_dict = None):
     '''Function imports raw Sigma Eight orion data.
 
@@ -388,7 +438,8 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict):
             for ant in ant_to_rec_dict:
                 site = ant_to_rec_dict[ant]
                 telemDat_sub = telemDat[telemDat.Antenna == ant]
-                telemDat_sub['Frequency'] = telemDat_sub.apply(id_to_freq, axis = 1, args = (channelDict,))
+                telemDat_sub['Frequency'] = telemDat_sub['ChannelID'].map(channelDict)
+                #telemDat_sub['Frequency'] = telemDat_sub.apply(id_to_freq, axis = 1, args = (channelDict,))
                 telemDat_sub = telemDat_sub[telemDat_sub.Frequency != '888']
                 telemDat_sub = telemDat_sub[telemDat_sub.TagID != 999]
                 telemDat_sub['FreqCode'] = telemDat_sub['Frequency'].astype(str) + ' ' + telemDat_sub['TagID'].astype(int).astype(str)
@@ -523,7 +574,7 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict):
             telemDat = telemDat.iloc[:-2]
             telemDat.dropna(inplace = True)
             if len(telemDat) > 0:
-                telemDat['Frequency'] = telemDat.apply(id_to_freq, axis = 1, args = (channelDict,))
+                telemDat['Frequency'] = telemDat['ChannelID'].map(channelDict) #(id_to_freq, axis = 1, args = (channelDict,))
                 telemDat = telemDat[telemDat.Frequency != '888']
                 telemDat = telemDat[telemDat.TagID != 999]
                 telemDat['FreqCode'] = telemDat['Frequency'].astype(str) + ' ' + telemDat['TagID'].astype(int).astype(str)
@@ -596,6 +647,8 @@ def telemDataImport(site,recType,file_directory,projectDB, scanTime = 1, channel
             lotek_import(f_dir,rxfile,projectDB,site,ant_to_rec_dict)
         elif recType == 'orion':
             orionImport(f_dir,rxfile,projectDB,site, scanTime, channels, ant_to_rec_dict)
+        elif recType == 'vr2':
+            vr2Import(f_dir,rxfile,projectDB,site)
         else:
             print ("There currently is not an import routine created for this receiver type.  Please try again")
         print ("File %s imported"%(f))

@@ -98,8 +98,10 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
                     sql = '''SELECT %s.FreqCode, %s.Epoch, %s.recID, timeStamp, test, RelDate
                     FROM %s
                     LEFT JOIN tblMasterTag ON %s.FreqCode = tblMasterTag.FreqCode'''%(max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j],max_iter_dict[j])
-                dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver
 
+                dat = pd.read_sql(sql, con = conn, coerce_float = True)                     # get data for this receiver
+                dat['presence_number'] = np.zeros(len(dat))
+                dat['overlapping'] = np.zeros(len(dat))
 
             dat = dat[dat.test == 1]
             dat['RelDate'] = pd.to_datetime(dat.RelDate)
@@ -116,3 +118,37 @@ def the_big_merge(outputWS,projectDB, hitRatio_Filter = False, pre_release_Filte
 
     recapdata.drop_duplicates(keep = 'first', inplace = True)
     return recapdata
+
+def vr2_recaps(projectDB, pre_release_Filter = False):
+    '''If the VR2 acoustic study uses large random pulse widths, the false positive
+    reduction algorithm used in BIOTAS is moot.  We will never be able to create
+    a useful detection history, which is central to the algorithm.  However, 
+    we can still use BIOTAS for data management, model building and analysis.
+    
+    This function creates tblRecaptures from tblRaw
+    '''
+    # connect to project database and get tags
+    conn = sqlite3.connect(projectDB)                                              #
+    c = conn.cursor()    
+                                     
+    tags = pd.read_sql("SELECT * FROM tblMasterTag WHERE TagType == 'Study'", con = conn)
+    tags = tags.FreqCode.unique()
+    
+    recapdata = pd.DataFrame()
+    
+    # build a recaptures table
+    for tag in tags:
+        tag_dat = pd.read_sql("SELECT * FROM tblRaw WHERE FreqCode =='%s'"%(tag), con = conn)
+        recapdata = recapdata.append(tag_dat)
+        
+    c.close()
+
+    recapdata.drop_duplicates(keep = 'first', inplace = True)
+    
+    # make all test = 1 and overlapping = 1
+    recapdata['test'] = np.repeat(1,len(recapdata))
+    recapdata['overlapping'] = np.zeros(len(recapdata))
+
+    # return dataframe
+    return recapdata    
+    
