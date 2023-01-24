@@ -658,7 +658,7 @@ def create_training_data(site,projectDB,reclass_iter = None, rec_list = None):
     c.close()
     return trainDF
 
-def calc_class_params_map(classify_object):
+def classify(classify_object):
     '''
 
     '''

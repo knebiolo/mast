@@ -68,7 +68,7 @@ for i in histories:
                                     train,
                                     informed_prior = prior,
                                     reclass_iter=class_iter)
-    biotas.calc_class_params_map(class_dat)
+    biotas.classify(class_dat)
     print ('classified detections for fish %s, %s percent complete'%(i,round(counter/len(histories),2)))
 print ("Detections classified!") 
 biotas.classDatAppend(site,outputScratch,projectDB,reclass_iter = class_iter)

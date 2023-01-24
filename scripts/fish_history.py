@@ -5,7 +5,7 @@ import os
 import warnings
 warnings.filterwarnings('ignore')
 # set up script parameters
-proj_dir = r'J:\1871\196\Calcs\BIOTAS'       # what is the project directory?
+proj_dir = r'J:\1871\196\Calcs\BIOTAS\kpn_test'       # what is the project directory?
 dbName = 'pepperell_am_eel.db'                                                       # whad did you call the database?
 projectDB = os.path.join(proj_dir,'Data',dbName)
 rec_list = ['T1','T2','T3','T4','T5']
