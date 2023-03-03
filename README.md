@@ -544,7 +544,7 @@ for i in ant_to_rec_dict:
     c.close()
 
     for j in histories:
-        class_dat = biotas.classify_data(i,
+        class_dat = biotas.classify_data(j,
                                          site,
                                          fields,
                                          projectDB,
@@ -552,7 +552,7 @@ for i in ant_to_rec_dict:
                                          training_data=train,
                                          informed_prior = prior)
         biotas.calc_class_params_map(class_dat)   
-        print ("Fish %s classified"%(i))
+        print ("Fish %s classified"%(j))
     print ("Detections classified!")
     biotas.classDatAppend(site,outputScratch,projectDB)
     
