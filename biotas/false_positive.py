@@ -2097,15 +2097,15 @@ class classification_results():
             axs[2,3].set_xlabel('Log Likelihood Ratio')
             axs[2,2].set_title('F',loc = 'left')
 
-            if self.figureWS != None:
-                if self.rec_list != None:
-                   plt.savefig(os.path.join(self.figureWS,"%s_lattice_class.png"%(self.recType)),
-                               bbox_inches = 'tight',
-                               dpi = 900)
-                else:
-                   plt.savefig(os.path.join(self.figureWS,"%s_%s_lattice_class.png"%(self.recType,self.site)),
-                               bbox_inches = 'tight',
-                               dpi = 900)
+            # if self.figureWS != None:
+            #     if self.rec_list != None:
+            #        plt.savefig(os.path.join(self.figureWS,"%s_lattice_class.png"%(self.recType)),
+            #                    bbox_inches = 'tight',
+            #                    dpi = 900)
+            #     else:
+            #        plt.savefig(os.path.join(self.figureWS,"%s_%s_lattice_class.png"%(self.recType,self.site)),
+            #                    bbox_inches = 'tight',
+            #                    dpi = 900)
         else:
            print("There were insufficient data to quantify summary statistics or histogram plots, either because there were no false positives or because there were no valid detections")
 
@@ -2285,10 +2285,10 @@ class training_results():
         axs[4,0].set_title('E',loc = 'left')
 
 
-        if self.site != None:
-           plt.savefig(os.path.join(self.figureWS,"%s_%s_lattice_train.png"%(self.recType,self.site)),bbox_inches = 'tight', dpi = 900)
-        else:
-           plt.savefig(os.path.join(self.figureWS,"%s_lattice_train.png"%(self.recType)),bbox_inches = 'tight', dpi = 900)
+        # if self.site != None:
+        #    plt.savefig(os.path.join(self.figureWS,"%s_%s_lattice_train.png"%(self.recType,self.site)),bbox_inches = 'tight', dpi = 900)
+        # else:
+        #    plt.savefig(os.path.join(self.figureWS,"%s_lattice_train.png"%(self.recType)),bbox_inches = 'tight', dpi = 900)
 
 class receiver_stats():
     '''Python class object that creates a receiver object of either raw or reduced
