@@ -375,7 +375,7 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict,recType):
                 firmware = str(firmware_split[-1]).lstrip().rstrip()
                 # stop the loop, we have extracted scan time
                 break
-        del row, firmwarestr, firmware_split
+        #del row, firmwarestr, firmware_split
 
         # find number of channels and create channel dictionary
         scanChan = []
@@ -399,7 +399,7 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict,recType):
              # else, increase the counter by 1
             else:
                 counter = counter + 1
-        del row, rows
+        #del row, rows
 
         # extract channel dictionary data using rows identified earlier
         channelDat = headerDF.iloc[idx0:idx1]
@@ -452,7 +452,7 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict,recType):
 
                 # remove extraneous data
                 telemDat_sub = telemDat_sub[telemDat_sub.Frequency != '888']
-                telemDat_sub = telemDat_sub[telemDat_sub.TagID != 999]
+                #telemDat_sub = telemDat_sub[telemDat_sub.TagID != 999]
                 
                 # create FreqCode
                 telemDat_sub['FreqCode'] = telemDat_sub['Frequency'].astype(str) + ' ' + telemDat_sub['TagID'].astype(int).astype(str)
