@@ -360,7 +360,7 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict,recType):
                 scanTime = float(scanTimeSplit[1])
                 # stop the loop, we have extracted scan time
                 break
-        del row, scanTimeStr, scanTimeSplit
+        #del row, scanTimeStr, scanTimeSplit
 
         # Find Master Firmware
         firmware = ''

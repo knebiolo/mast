@@ -1,5 +1,5 @@
 import sys
-sys.path.append(r"D:\a\Projects\Telemetry\Nebiolo\BIOTAS\biotas")
+sys.path.append(r"C:\Users\knebiolo\OneDrive - Kleinschmidt Associates, Inc\Software\biotas")
 
 import time
 import os
@@ -11,11 +11,11 @@ t0 = time.time()
 # What receiver type are you assessing accuracy for?
 recType = 'orion'                                                              # what is the receiver type?
 proj_dir = r'J:\1871\196\Calcs\BIOTAS'                                      # what is the project directory?
-dbName = 'pepperell_am_eel.db'                                                    # what is the name of the project database
+dbName = 'Pepperell_v2.db'                                                    # what is the name of the project database
 projectDB = os.path.join(proj_dir,'Data',dbName)
 scratch_dir = os.path.join(proj_dir,'Output','Scratch')
 figure_ws = os.path.join(proj_dir,'Output','Figures')
-rec_list = ['33']
+rec_list = ['T1']
 
 train_stats = biotas.training_results(recType,projectDB,figure_ws)#,'33')
 train_stats.train_stats() 

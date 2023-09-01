@@ -13,15 +13,15 @@ warnings.filterwarnings('ignore')
 
 
 # what is the site/receiver ID?
-site = 'VR2Tx-487374'
+site = 2
 # what is the receiver type?
-recType = 'vr2'
+recType = 'srx800'
 # what is the project directory?
-proj_dir = r'C:\Users\knebiolo\Desktop\vr2_test'
+proj_dir = r'C:\Users\knebiolo\Desktop\Nuyakuk BIOTAS'
 # what did you call the database?
-dbName = 'vr2_test.db'
+dbName = 'nuya_test.db'
 # antenna to location, default project set up 1 Antenna, 1 Location, 1 Receiver
-ant_to_rec_dict = {'1':site}
+ant_to_rec_dict = {'A0':site}
 
 # set up workspaces
 file_dir = os.path.join(proj_dir,'Data','Training_Files')
@@ -34,15 +34,16 @@ print ("There are %s files to iterate through"%(len(files)))
 #%% Part 2: Import Site Data and Train Alogrithm
 tS = time.time()
 
-# Import Data, if the receiver does not switch between antennas scanTime and channels = 1.
-# If the receiver switches, scanTime and channels must match study values
-# biotas.telemDataImport(site,
-#                        recType,
-#                        file_dir,
-#                        projectDB,
-#                        scanTime = 1,
-#                        channels = 1,
-#                        ant_to_rec_dict = ant_to_rec_dict)
+#Import Data, if the receiver does not switch between antennas scanTime and channels = 1.
+#If the receiver switches, scanTime and channels must match study values
+
+biotas.telemDataImport(site,
+                        recType,
+                        file_dir,
+                        projectDB,
+                        scanTime = 1,
+                        channels = 1,
+                        ant_to_rec_dict = ant_to_rec_dict)
 
 print ("Raw data imported, proceed to training")
 
@@ -62,7 +63,6 @@ for i in ant_to_rec_dict:
     print ("There are %s fish to iterate through" %(len(histories)))
     print ("Creating training objects for every fish at site %s"%(site))
     
-    fuck
 
     # create a training data object for each fish and train naive Bayes.
     for j in histories:
@@ -70,7 +70,7 @@ for i in ant_to_rec_dict:
                                          ant_to_rec_dict[i],
                                          projectDB,
                                          scratch_dir)
-        fuck
+        
         biotas.calc_train_params_map(train_dat)
         print ("training parameters quantified for tag %s"%(j))
     print ("Telemetry Parameters Quantified, appending data to project database")
