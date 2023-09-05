@@ -347,11 +347,21 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict,recType):
         # create pandas dataframe of header data indexed by row number
         headerDF = pd.DataFrame.from_dict(headerDat)
         headerDF.set_index('idx',inplace = True)
+        
+        data_format = 'primary'
+        for row in  headerDF.iterrows():
+            idx = row[0]
+            if 'Environment History:' in row[1][0]:
+                data_format = 'alternate'
+            if idx > 0:
+                break
+            
+
 
         # find scan time
         for row in headerDF.iterrows():
             # if the first 9 characters of the line say 'Scan Time' = we have found the scan time in the document
-            if 'Scan Time' in row[1][0]:
+            if 'Scan Time' in row[1][0] or 'scan time' in row[1][0]:
                 # get the number value from the row
                 scanTimeStr = row[1][0][-7:-1]
                 # split the string
@@ -359,8 +369,8 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict,recType):
                 # convert the scan time string to float
                 scanTime = float(scanTimeSplit[1])
                 # stop the loop, we have extracted scan time
+                del row, scanTimeStr, scanTimeSplit
                 break
-        #del row, scanTimeStr, scanTimeSplit
 
         # Find Master Firmware
         firmware = ''
@@ -374,8 +384,9 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict,recType):
                 # convert the scan time string to float
                 firmware = str(firmware_split[-1]).lstrip().rstrip()
                 # stop the loop, we have extracted scan time
+                del row, firmwarestr, firmware_split
                 break
-        #del row, firmwarestr, firmware_split
+        
 
         # find number of channels and create channel dictionary
         scanChan = []
@@ -425,6 +436,16 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict,recType):
                                    names = ['Date','Time','ChannelID','TagID','Antenna','Power'],
                                    skiprows = dataRow,
                                    dtype = {'ChannelID':str,'TagID':str,'Antenna':str})
+        elif data_format == 'alternate':
+            telemDat = pd.read_fwf(fileName,
+                                   colspecs = [(0,5),(5,14),(14,23),(23,31),(31,46),(46,53)],
+                                   names = ['DayNumber','Time','ChannelID','TagID','Antenna','Power'],
+                                   skiprows = dataRow,
+                                   dtype = {'ChannelID':str,'TagID':str,'Antenna':str})
+            telemDat['day0'] = np.repeat(pd.to_datetime("1900-01-01"),len(telemDat))
+            telemDat['Date'] = telemDat['day0'] + pd.to_timedelta(telemDat['DayNumber'].astype(int), unit='d')
+            telemDat['Date'] = telemDat.Date.astype('str')
+            telemDat.drop(columns = ['DayNumber','day0'], inplace = True)
         else:
             telemDat = pd.read_fwf(fileName,
                                    colspecs = [(0,8),(8,18),(18,28),(28,36),(36,51),(51,59)],
