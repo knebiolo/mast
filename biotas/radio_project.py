@@ -420,9 +420,9 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict,recType, scanTim
             # read in telemetry data
             telemDat = pd.read_fwf(fileName,
                                    colspecs = [(0,6),(6,20),(20,32),(32,40),(40,55),(55,64),(64,72),(72,85),(85,93),(93,102)],
-                                   names = ['Index','Date','Time','[uSec]','Tag/BPM','Freq [MHz]','Codeset','Antenna','Gain','RSSI'])#,
-                                   #skiprows = dataRow)#, 
-                                   #skipfooter = eof - dataEnd)
+                                   names = ['Index','Date','Time','[uSec]','Tag/BPM','Freq [MHz]','Codeset','Antenna','Gain','RSSI'],
+                                   skiprows = dataRow, 
+                                   skipfooter = eof - dataEnd)
             
             # create a timestamp and conver to datetime object
             telemDat['timeStamp'] = telemDat.Date + ' ' + telemDat.Time + '.' + telemDat['[uSec]'].astype(str)
