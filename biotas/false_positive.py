@@ -1655,7 +1655,10 @@ class classification_results():
         conn = sqlite3.connect(self.projectDB)
         self.final_iter = pd.DataFrame(columns = ['FreqCode','Epoch','recID','Power','noiseRatio','hitRatio_A','hitRatio_M','postTrue_A','postTrue_M','postFalse_A','postFalse_M','test','lagDiff','consDet_A', 'consDet_M','conRecLength_A', 'conRecLength_M','logLikelihoodRatio_A', 'logLikelihoodRatio_M'])                # set up an empty data frame
         self.init_iter = pd.DataFrame(columns = ['FreqCode','Epoch','recID','Power','noiseRatio','hitRatio_A','hitRatio_M','postTrue_A','postTrue_M','postFalse_A','postFalse_M','test','lagDiff','consDet_A', 'consDet_M','conRecLength_A', 'conRecLength_M','logLikelihoodRatio_A', 'logLikelihoodRatio_M'])
-        self.reclass_iter = reclass_iter
+        if reclass_iter == None:
+            self.reclass_iter = 1
+        else:
+            self.reclass_iter = reclass_iter
         self.rec_list = rec_list
 
 	    # if there is no receiver list we want it all
@@ -1730,31 +1733,31 @@ class classification_results():
                 if reclass_iter == None:
                     print ("Start selecting and merging data for receiver %s"%(i))
 
-                    sql = '''SELECT FreqCode,
-                                    Epoch,
-                                    recID,
-                                    Power,
-                                    noiseRatio,
-                                    hitRatio_A,
-                                    hitRatio_M,
-                                    postTrue_A,
-                                    postTrue_M,
-                                    postFalse_A,
-                                    postFalse_M,
-                                    test,
-                                    lagDiff,
-                                    consDet_A,
-                                    consDet_M,
-                                    conRecLength_A,
-                                    conRecLength_M,
-                                    logLikelihoodRatio_A,
-                                    logLikelihoodRatio_M
-                            FROM %s'''%(max_iter_dict[i])
+              #       sql = '''SELECT FreqCode,
+              #                       Epoch,
+              #                       recID,
+              #                       Power,
+              #                       noiseRatio,
+              #                       hitRatio_A,
+              #                       hitRatio_M,
+              #                       postTrue_A,
+              #                       postTrue_M,
+              #                       postFalse_A,
+              #                       postFalse_M,
+              #                       test,
+              #                       lagDiff,
+              #                       consDet_A,
+              #                       consDet_M,
+              #                       conRecLength_A,
+              #                       conRecLength_M,
+              #                       logLikelihoodRatio_A,
+              #                       logLikelihoodRatio_M
+              #               FROM %s'''%(max_iter_dict[i])
 
-        		    # get data for this receiver
-                    dat = pd.read_sql(sql, con = conn, coerce_float = True)
-                    self.final_iter = self.final_iter.append(dat)
-                    del dat
+        		    # # get data for this receiver
+              #       dat = pd.read_sql(sql, con = conn, coerce_float = True)
+              #       self.final_iter = self.final_iter.append(dat)
+              #       del dat
 
                     sql = '''SELECT FreqCode,
                                     Epoch,
@@ -1879,8 +1882,8 @@ class classification_results():
         print (len(trues))
         # join true detections to initial data
         self.init_iter = self.init_iter.merge(trues,how = 'left',left_on = ['FreqCode','Epoch'], right_on = ['FreqCode','Epoch'])
-        self.init_iter = cons_det_filter(self.init_iter)
-        self.init_iter.final_test.fillna(0,inplace = True)
+        #self.init_iter = cons_det_filter(self.init_iter)
+        #self.init_iter.final_test.fillna(0,inplace = True)
         self.init_iter.drop_duplicates(keep = 'first', inplace = True)
 
     def classify_stats(self):

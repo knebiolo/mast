@@ -284,7 +284,7 @@ def orionImport(fileName,rxfile,dbName,recName, scanTime = 1, channels = 1, ant_
                 c.close()
 
 
-def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict,recType):
+def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict,recType, scanTime = 1, channels = 1):
     ''' function imports raw lotek data, reads header data to find receiver parameters
     and automatically locates raw telemetry data.  Import procedure works with
     standardized project database. Database must be created before function can be run'''
@@ -312,15 +312,197 @@ def lotek_import(fileName,rxfile,dbName,recName,ant_to_rec_dict,recType):
     
     # start line counter
     counter = 0
-    
+    eof = 0
+    lineCounter.append(counter)
     # read first line in file
     line = o_file.readline()[:-1]
     
-    # append the current line counter to the counter array
-    lineCounter.append(counter)
     
     # append the current line of header data to the line list
     lineList.append(line)
+
+    if recType == 'srx1200':
+        
+        # determine file format 
+        file_header = True
+        if 'SRX1200 Data File Export' not in line:
+            file_header = False
+        
+        if file_header == True:
+            # find where data begins and header data ends
+            with o_file as f:
+                for line in f:
+                    # if this current line signifies the start of the data stream, the data starts three rows down from this
+                    if "All Detection Records" in line:
+                        counter = counter + 1
+                        dataRow = counter + 5
+                        # break the loop, we have reached our stop point
+                        
+                    # else we are still reading header data increase the line counter by 1
+                    elif "Battery Report" in line:
+                        counter = counter + 1
+                        dataEnd = counter - 2
+                    else:
+                        counter = counter + 1
+                        # append the line counter to the count array
+                        lineCounter.append(counter)
+                        # append line of data to the data array
+                        lineList.append(line)
+                        eof = counter
+
+            # add count array to dictionary with field name 'idx' as key
+            headerDat['idx'] = lineCounter
+            # add data line array to dictionary with field name 'line' as key
+            headerDat['line'] = lineList
+            # create pandas dataframe of header data indexed by row number
+            headerDF = pd.DataFrame.from_dict(headerDat)
+            headerDF.set_index('idx',inplace = True)
+                
+            # find scan time
+            for row in headerDF.iterrows():
+                # if the first 9 characters of the line say 'Scan Time' = we have found the scan time in the document
+                if 'Scan Period' in row[1][0]:
+                    # get the number value from the row
+                    scanTimeStr = row[1][0]
+                    #scanTimeStr = scanTimeStr.rstrip()
+                    scanTimeStr = scanTimeStr[:-4]
+                    # split the string
+                    scanTimeSplit = scanTimeStr.split(':')
+                    # convert the scan time string to float
+                    scanTime = float(scanTimeSplit[1])
+                    # stop the loop, we have extracted scan time
+                    del row, scanTimeStr, scanTimeSplit
+                    break
+            
+            # find number of channels and create channel dictionary
+            scanChan = []
+            channelDict = {}
+            counter = 0
+            rows = headerDF.iterrows()
+            # for every row
+            for row in rows:
+                # if the first 18 characters say what that says
+                if 'Channel Settings' in row[1][0]:
+                    # channel dictionary data starts two rows from here
+                    idx0 = counter + 5
+                    # while the next row isn't empty
+                    while 'Antenna Configuration' not in next(rows)[1][0]:
+                        # increase the counter
+                        counter = counter + 1
+                    # get index of last data row
+                    idx1 = counter
+                    # when the row is empty we have reached the end of channels,
+                    break
+                 # else, increase the counter by 1
+                else:
+                    counter = counter + 1
+            del row, rows
+
+            # extract channel dictionary data using rows identified earlier
+            channelDat = headerDF.iloc[idx0:idx1]
+            for row in channelDat.iterrows():
+                dat = row[1][0]
+                channel = float(dat[0:6])
+                frequency = dat[16:23]
+                channelDict[channel] = frequency
+                # extract that channel ID from the data row and append to array
+                scanChan.append(channel)
+            channels = len(scanChan)
+            
+            del row
+
+            # connect to database, read telemetry data using extracted parameters
+            conn = sqlite3.connect(dbName, timeout=30.0)
+            c = conn.cursor()
+            study_tags = pd.read_sql('SELECT FreqCode, TagType FROM tblMasterTag',con = conn)
+            study_tags = study_tags[study_tags.TagType == 'STUDY'].FreqCode.values
+
+            # read in telemetry data
+            telemDat = pd.read_fwf(fileName,
+                                   colspecs = [(0,6),(6,20),(20,32),(32,40),(40,55),(55,64),(64,72),(72,85),(85,93),(93,102)],
+                                   names = ['Index','Date','Time','[uSec]','Tag/BPM','Freq [MHz]','Codeset','Antenna','Gain','RSSI'])#,
+                                   #skiprows = dataRow)#, 
+                                   #skipfooter = eof - dataEnd)
+            
+            # create a timestamp and conver to datetime object
+            telemDat['timeStamp'] = telemDat.Date + ' ' + telemDat.Time + '.' + telemDat['[uSec]'].astype(str)
+            telemDat['timeStamp'] = pd.to_datetime(telemDat.timeStamp)
+            
+            # calculate Epoch
+            telemDat['Epoch'] = (telemDat['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()       
+            
+            # format frequency code
+            telemDat['FreqNo'] = telemDat['Freq [MHz]'].apply(lambda x: f"{x:.3f}" )
+            telemDat['FreqCode'] = telemDat['FreqNo'] + ' ' + telemDat['Tag/BPM'].astype(np.str)
+            
+            # calculate 
+            telemDat = noiseRatio(5.0,telemDat,study_tags)
+    
+            # write scan time, channels, rec type and recID to data
+            telemDat['ScanTime'] = np.repeat(scanTime,len(telemDat))
+            telemDat['Channels'] = np.repeat(channels,len(telemDat))
+            telemDat['RecType'] = np.repeat(recType,len(telemDat))
+            telemDat['recID'] = np.repeat(recName,len(telemDat))
+                    
+            # remove unnecessary columns
+            telemDat.drop(columns = ['Index','Date','Time','[uSec]','Freq [MHz]','FreqNo', 'Codeset', 'Gain','Tag/BPM','Antenna'], inplace = True)
+            telemDat.rename(columns = {'RSSI':'Power'}, inplace = True)
+            telemDat.to_sql('tblRaw',con = conn,index = False, if_exists = 'append')
+            c.close()            
+            
+        
+        else:
+            stop = 0
+            eof = 0
+            # find where data ends
+            with o_file as f:
+                for line in f:
+                    if "Battery Report" in line:
+                        stop = counter - 1
+    
+                    else:
+                        counter = counter + 1
+                        eof = counter
+                        
+            # connect to database, read telemetry data using extracted parameters
+            conn = sqlite3.connect(dbName, timeout=30.0)
+            c = conn.cursor()
+            study_tags = pd.read_sql('SELECT FreqCode, TagType FROM tblMasterTag',con = conn)
+            study_tags = study_tags[study_tags.TagType == 'STUDY'].FreqCode.values
+            
+            # import data using specs defined above
+            telemDat = pd.read_csv(fileName, skiprows = 3, skipfooter = eof - stop)
+            
+            # create a timestamp and conver to datetime object
+            telemDat['timeStamp'] = telemDat.Date + ' ' + telemDat.Time + '.' + telemDat['[uSec]'].astype(str)
+            telemDat['timeStamp'] = pd.to_datetime(telemDat.timeStamp)
+            
+            # calculate Epoch
+            telemDat['Epoch'] = (telemDat['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()       
+            
+            # format frequency code
+            telemDat['FreqNo'] = telemDat['Freq [MHz]'].apply(lambda x: f"{x:.3f}" )
+            telemDat['FreqCode'] = telemDat['FreqNo'] + ' ' + telemDat['TagID/BPM'].astype(np.str)
+            
+            # calculate 
+            telemDat = noiseRatio(5.0,telemDat,study_tags)
+    
+            # write scan time, channels, rec type and recID to data
+            telemDat['ScanTime'] = np.repeat(scanTime,len(telemDat))
+            telemDat['Channels'] = np.repeat(channels,len(telemDat))
+            telemDat['RecType'] = np.repeat(recType,len(telemDat))
+            telemDat['recID'] = np.repeat(recName,len(telemDat))
+                    
+            # remove unnecessary columns
+            telemDat.drop(columns = ['Index','Date','Time','[uSec]','Freq [MHz]','FreqNo', 'Codeset', 'Gain','TagID/BPM','Antenna'], inplace = True)
+            telemDat.rename(columns = {'RSSI':'Power'}, inplace = True)
+            telemDat.to_sql('tblRaw',con = conn,index = False, if_exists = 'append')
+            c.close()
+        
+        'tblRaw(timeStamp, Epoch, FreqCode, Power, noiseRatio, fileName, recID, ScanTime, Channels, RecType)'
+        'Index,Date,Time,[uSec],TagID/BPM,Freq [MHz],Codeset,Antenna,Gain,RSSI'
+       
+                    
 
     if recType == 'srx800':
         # find where data begins and header data ends
@@ -825,8 +1007,8 @@ def telemDataImport(site,recType,file_directory,projectDB, scanTime = 1, channel
         print ("start importing file %s"%(f))
         f_dir = os.path.join(file_directory,f)
         rxfile=f
-        if recType == 'srx600' or recType == 'srx800':
-            lotek_import(f_dir,rxfile,projectDB,site,ant_to_rec_dict,recType)
+        if recType == 'srx600' or recType == 'srx800' or recType == 'srx1200':
+            lotek_import(f_dir,rxfile,projectDB,site,ant_to_rec_dict,recType, scanTime, channels)
         elif recType == 'orion':
             orionImport(f_dir,rxfile,projectDB,site, scanTime, channels, ant_to_rec_dict)
         elif recType == 'vr2':
