@@ -24,113 +24,11 @@ font = {'family': 'serif','size': 6}
 rcParams['font.size'] = 6
 rcParams['font.family'] = 'serif'
 
-def factors(n):
-
-    ''''function to return primes used to quantify the least common multiplier
-    see: http://stackoverflow.com/questions/16996217/prime-factorization-list for recipe'''
-    pList = []
-    for i in np.arange(1, n + 1):
-        if n % i == 0:
-            pList.append(i)
-    return pList
-
-def seriesHit (row,status,datObject,data):
-    '''seriesHit is a function for returning whether or not a detection on a specific
-    frequency/code is in series with the previous or next detection on that same
-    frequency/code
-        '''
-    lagB = abs(row['lagB'])
-    if status == "A" or status == "U" or status == "T":
-        pulseRate = datObject.PulseRate
-    else:
-        pulseRate = datObject.MortRate
-
-    if lagB <= 3600:
-        factB = factors(lagB)
-        if pulseRate in factB:
-            return 1
-        else:
-            return 0
-    else:
-        return 0
-
-def detHist (data,rate,det, status = 'A', training = False):
-    '''New iteration of the detection history function meant to be superfast.
-    We use pandas tricks to create the history by shifting epoch columns and
-    perfoming boolean logic on the entire dataframe rather than row-by-row'''
-
-    # first step, identify how many channels are in this dataset
-    channels = data.Channels.max()
-
-    # build detection history ushing shifts
-    if channels > 1:
-        for i in np.arange(det * -1 , det + 1, 1):
-            data['epoch_shift_%s'%(np.int(i))] = data.Epoch.shift(-1 * np.int(i))
-            data['ll_%s'%(np.int(i))] = data['Epoch'] + ((data['ScanTime'] * data['Channels'] * i) - 1)
-            data['ul_%s'%(np.int(i))] = data['Epoch'] + ((data['ScanTime'] * data['Channels'] * i) + 1)
-
-            '''if the scan time is 2 seconds and there are two channels and the Epoch is 100...
-            We would listen to this receiver at:
-                (-3) 87-89, (-2) 91-93, (-1) 95-97, (0) 100, (1) 103-105, (2) 107-109, (3) 111-113 seconds
-
-            A tag with a 3 second burst rate at epoch of 100 would be heard at:
-                100, 103, 106, 109, 112 - we would miss at least 1 out of 5 bursts!!!
-
-            We should expect detection histories from multi channel switching receivers
-            to be sparse because they are not always listening - bursts will never
-            line up with scan windows - need to get over it and trust the sparseness - eek
-            '''
-
-            #print (data[['Epoch','ll','epoch_shift_%s'%(np.int(i)),'ul','det_%s'%(np.int(i))]].head(20))
-    else:
-        for i in np.arange(det * -1 , det + 1, 1):
-            data['epoch_shift_%s'%(np.int(i))] = data.Epoch.shift(-1 * np.int(i))
-            data['ll_%s'%(np.int(i))] = data['Epoch'] + (rate * i - 1)   # number of detection period time steps backward buffered by -1 pulse rate seconds that we will be checking for possible detections in series
-            data['ul_%s'%(np.int(i))] = data['Epoch'] + (rate * i + 1)     # number of detection period time steps backward buffered by +1 pulse rate that we will be checking for possible detections in series
-            #print (data[['Epoch','ll','epoch_shift_%s'%(np.int(i)),'ul','det_%s'%(np.int(i))]].head(20))
-    for i in np.arange(det * -1 , det + 1, 1):
-        if det == 0:
-            data['det_0'] = '1'
-        else:
-            for j in np.arange(det * -1 , det + 1, 1):
-                data.loc[(data['epoch_shift_%s'%(np.int(j))] >= data['ll_%s'%(np.int(i))]) &\
-                         (data['epoch_shift_%s'%(np.int(j))] <= data['ul_%s'%(np.int(i))]),'det_%s'%(np.int(i))] = '1'
-
-        data['det_%s'%(np.int(i))].fillna(value = '0', inplace = True)
 
 
-    # determine if consecutive detections consDet is true
-    data.loc[(data['det_-1'] == '1') | (data['det_1'] == '1'), 'consDet_%s'%(status)] = 1
-    data.loc[(data['det_-1'] != '1') & (data['det_1'] != '1'), 'consDet_%s'%(status)] = 0
 
-    # calculate hit ratio
-    data['hitRatio_%s'%(status)] = np.zeros(len(data))
-    for i in np.arange(det * -1, det + 1, 1):
-        data['hitRatio_%s'%(status)] = data['hitRatio_%s'%(status)] + data['det_%s'%(np.int(i))].astype(np.int)
-    data['hitRatio_%s'%(status)] = data['hitRatio_%s'%(status)] / np.float(len(np.arange(det * -1, det + 1, 1)))
 
-    # concatenate a detection history string and calculate maximum consecutive hit length
-    data['detHist_%s'%(status)] = np.repeat('',len(data))
-    data['conRecLength_%s'%(status)] = np.zeros(len(data))
-    data['score'] = np.zeros(len(data))
-    for i in np.arange(det * -1, det + 1, 1):
-        data['detHist_%s'%(status)] = data['detHist_%s'%(status)] + data['det_%s'%(np.int(i))].astype('str')
-        if i == min(np.arange(det * -1, det + 1, 1)):
-            data['score'] = data['det_%s'%(np.int(i))].astype(int)
-        else:
-            data['conRecLength_%s'%(status)] = np.where(data['conRecLength_%s'%(status)] < data.score, data.score, data['conRecLength_%s'%(status)])
-            data.loc[(data['det_%s'%(np.int(i))] == '0','points')] = 0
-            data.loc[(data['det_%s'%(np.int(i))] == '0','score')] = 0
-            data.loc[(data['det_%s'%(np.int(i))] == '1','points')] = 1
-            data['score'] = data.score + data.points
-        data.drop(labels = ['det_%s'%(np.int(i)),'epoch_shift_%s'%(np.int(i))], axis = 1, inplace = True)
-        data.drop(labels = ['ll_%s'%(np.int(i)),'ul_%s'%(np.int(i))], axis = 1, inplace = True)
 
-    data.drop(labels = ['score','points'], axis = 1, inplace = True)
-
-    if training == True:
-        data.rename(columns = {'detHist_A':'detHist','consDet_A':'consDet','hitRatio_A':'hitRatio','conRecLength_A':'conRecLength'},inplace = True)
-    return data
 
 class training_data():
     '''A class object for a training dataframe and related data objects.
@@ -1083,10 +981,8 @@ def classify(classify_object):
         classify_object.histDF.to_csv(os.path.join(classify_object.scratchWS,"%s.csv"%(classify_object.i)))
         del trainDF
 
-def classDatAppend(site,inputWS,projectDB,reclass_iter = None):
+def classDatAppend(site,inputWS,projectDB,reclass_iter = 1):
     # As soon as I figure out how to do this function is moot.
-    if reclass_iter == None:
-        reclass_iter = 1
     files = os.listdir(inputWS)
     conn = sqlite3.connect(projectDB)
     c = conn.cursor()
