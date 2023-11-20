@@ -346,12 +346,14 @@ def srx1200(file_name,
                                    names = ['Index','Date','Time','[uSec]','Tag/BPM','Freq [MHz]','Codeset','Antenna','Gain','RSSI'],
                                    skiprows = dataRow, 
                                    skipfooter = eof - dataEnd)
+            telem_dat.drop(columns = ['Index'], inplace = True)
 
         else:
             telem_dat = pd.read_csv(file_name,
                                    names = ['Index','Date','Time','[uSec]','Tag/BPM','Freq [MHz]','Codeset','Antenna','','Gain','RSSI'],
                                    skiprows = dataRow, 
                                    skipfooter = eof - dataEnd)
+            telem_dat.drop(columns = ['', 'Index'], inplace = True)
             telem_dat.dropna(inplace = True)
             telem_dat = telem_dat.astype({'[uSec]':'int32'})
 
@@ -383,7 +385,7 @@ def srx1200(file_name,
         telem_dat['noise_ratio'] = telem_dat.noise_ratio.values.astype(np.float32)
        
         # remove unnecessary columns
-        telem_dat.drop(columns = ['Index','Date','Time','[uSec]','Freq [MHz]','FreqNo', 'Codeset', 'Gain','Tag/BPM','Antenna'], inplace = True)
+        telem_dat.drop(columns = ['Date','Time','[uSec]','Freq [MHz]','FreqNo', 'Codeset', 'Gain','Tag/BPM','Antenna'], inplace = True)
         telem_dat.rename(columns = {'RSSI':'power'}, inplace = True)
         telem_dat['power'] = telem_dat.power.values.astype(np.float32)
         telem_dat['noise_ratio'] = telem_dat.noise_ratio.values.astype(np.float32)
@@ -399,6 +401,10 @@ def srx1200(file_name,
                                       'Epoch':'float32',
                                       'noise_ratio':'float32',
                                       'rec_id':'object'})
+        
+        if new_split != None:
+            telem_dat.drop(columns = ['index'], inplace = True)
+            print ('fuck')
                 
         with pd.HDFStore(db_dir, mode='a') as store:
             store.append(key = 'raw_data',
