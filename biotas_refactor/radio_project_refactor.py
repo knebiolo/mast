@@ -279,7 +279,11 @@ class radio_project():
             store.append(key = 'trained',
                          value = train_dat, 
                          format = 'table', 
-                         index = False, 
+                         index = False,
+                         min_itemsize = {'freq_code':20,
+                                         'rec_type':20,
+                                         'rec_id':20,
+                                         'det_hist':20},
                          append = True, 
                          chunksize = 1000000)
             
@@ -630,7 +634,11 @@ class radio_project():
                 store.append(key = 'classified',
                              value = class_dat, 
                              format = 'table', 
-                             index = False, 
+                             index = False,
+                             min_itemsize = {'freq_code':20,
+                                             'rec_type':20,
+                                             'rec_id':20,
+                                             'det_hist':20},
                              append = True, 
                              chunksize = 1000000)
             

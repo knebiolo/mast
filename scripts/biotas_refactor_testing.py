@@ -44,8 +44,8 @@ project.telem_data_import(rec_id,
                           training_dir,
                           db_dir,
                           scan_time,
-                          channels)#,
-                          #antenna_to_rec_dict)
+                          channels,
+                          antenna_to_rec_dict)
 
 #%%  train data
 # set parameters and get a list of fish to iterate over
