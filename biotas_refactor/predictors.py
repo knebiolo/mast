@@ -7,7 +7,7 @@ Created on Tue Nov 14 10:52:20 2023
 import numpy as np
 import pandas as pd
 
-def noise_ratio (duration,freq_codes,epochs,study_tags):
+def noise_ratio (duration, freq_codes,epochs,study_tags):
 
     ''' function calculates the ratio of miscoded, pure noise detections, to matching frequency/code
     detections within the duration specified.
@@ -22,29 +22,28 @@ def noise_ratio (duration,freq_codes,epochs,study_tags):
     miscode = np.isin(freq_codes, study_tags, invert = True)
 
     # bin everything into nearest 5 min time bin and count miscodes and total number of detections
-    bins = epochs // 600.
-    
-    # Sum boolean values within each bin
-    sums_per_bin = np.bincount(bins, weights=miscode.astype(int))
-
-    # Repeat sums to match the original array size
-    unique_bins, bin_counts = np.unique(bins, return_counts=True)
-    summed_miscode = np.repeat(sums_per_bin, bin_counts)
-    
+    binned_epoch = epochs//duration
+        
     # Now identify the number of unique freq-codes within each bin
     # Create a DataFrame from the arrays
-    df = pd.DataFrame({'FreqCodes': freq_codes, 'Bins': bins})
+    df = pd.DataFrame({'FreqCodes': freq_codes,'Epoch':epochs, 'Bins': binned_epoch, 'miscode': miscode})
     
     # Group by 'Bins' and count unique 'FreqCodes' in each bin
-    unique_counts_per_bin = df.groupby('Bins')['FreqCodes'].nunique()
+    miscodes_per_bin = df.groupby('Bins')['miscode'].sum()
+    obs_per_bin = df.groupby('Bins')['miscode'].count()
     
-    # Repeat counts to match the original array size
-    unique_bins, bin_counts = np.unique(bins, return_counts=True)
-    repeated_counts = np.repeat(unique_counts_per_bin, bin_counts)    
+    # Convert Series to DataFrame and reset index
+    miscodes_per_bin_df = miscodes_per_bin.reset_index()
+    obs_per_bin_df = obs_per_bin.reset_index()
     
-    noise_ratio = summed_miscode / repeated_counts
+    # Merge the aggregated data back to the original DataFrame
+    # Assuming 'Bins' is the common column
+    df = pd.merge(df, miscodes_per_bin_df, on='Bins', how='left', suffixes=('', '_miscodes_sum'))
+    df = pd.merge(df, obs_per_bin_df, on='Bins', how='left', suffixes=('', '_obs_count'))
     
-    return noise_ratio
+    df['noise_ratio'] = df.miscode_miscodes_sum / df.miscode_obs_count
+    
+    return df.noise_ratio.values.astype(np.float32)
 
 def factors(n):
 
@@ -130,7 +129,7 @@ def detection_history (Epoch, pulse_rate, num_detects, num_channels, scan_time, 
 
     for i in np.arange(num_detects * -1 , num_detects + 1, 1):
         if i == 0:
-            detection_history_dict[i] = '1'
+            detection_history_dict[i] = np.repeat('1',len(Epoch))
 
         else:
             for j in np.arange(num_detects * -1 , num_detects + 1, 1):

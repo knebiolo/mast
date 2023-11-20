@@ -3,7 +3,9 @@
 import pandas as pd
 import numpy as np
 import datetime
-import predictors
+import os
+import biotas_refactor.predictors as predictors
+
 
 def orion_import(file_name, 
                  db_dir, 
@@ -29,22 +31,22 @@ def orion_import(file_name,
     if 'Type' in columns:
         # with our data row, extract information using pandas fwf import procedure
         telem_dat = pd.read_fwf(file_name,colspecs = [(0,12),(13,23),(24,30),(31,35),(36,45),(46,54),(55,60),(61,65)],
-                                names = ['Date','Time','Site','Ant','Freq','Type','Code','Power'],
+                                names = ['Date','Time','Site','Ant','Freq','Type','Code','power'],
                                 skiprows = 1,
-                                dtype = {'Date':str,'Time':str,'Site':np.int32,'Ant':str,'Freq':str,'Type':str,'Code':str,'Power':np.float64})
+                                dtype = {'Date':str,'Time':str,'Site':np.int32,'Ant':str,'Freq':str,'Type':str,'Code':str,'power':np.float64})
         telem_dat = telem_dat[telem_dat.Type != 'STATUS']
         telem_dat.drop(['Type'], axis = 1, inplace = True)
 
     else:
         # with our data row, extract information using pandas fwf import procedure
         telem_dat = pd.read_fwf(file_name,colspecs = [(0,11),(11,20),(20,26),(26,30),(30,37),(37,42),(42,48)],
-                                names = ['Date','Time','Site','Ant','Freq','Code','Power'],
+                                names = ['Date','Time','Site','Ant','Freq','Code','power'],
                                 skiprows = 1,
-                                dtype = {'Date':str,'Time':str,'Site':str,'Ant':str,'Freq':str,'Code':str,'Power':str})
+                                dtype = {'Date':str,'Time':str,'Site':str,'Ant':str,'Freq':str,'Code':str,'power':str})
 
     if len(telem_dat) > 0:
         # add file name to data
-        telem_dat['fileName'] = np.repeat(file_name,len(telem_dat))    #Note I'm going back here to the actual file name without the path.  Is that OK?  I prefer it, but it's a potential source of confusion
+        #['fileName'] = np.repeat(file_name,len(telem_dat))    #Note I'm going back here to the actual file name without the path.  Is that OK?  I prefer it, but it's a potential source of confusion
         
         # aggregate frequency and code intoa unique identifier
         telem_dat['freq_code'] = telem_dat['Freq'].astype(str) + ' ' + telem_dat['Code'].astype(str)
@@ -54,21 +56,21 @@ def orion_import(file_name,
         telem_dat['scan_time'] = np.repeat(scan_time,len(telem_dat))
         telem_dat['channels'] = np.repeat(channels,len(telem_dat))
         telem_dat['rec_type'] = np.repeat('orion',len(telem_dat))
-        telem_dat = telem_dat[telem_dat.timeStamp.notnull()]
+        telem_dat = telem_dat[telem_dat.time_stamp.notnull()]
         
         if len(telem_dat) == 0:
             print ("Invalid timestamps in raw data, cannot import")
         else:
             # create epoch
-            telem_dat['epoch'] = (telem_dat['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()
+            telem_dat['Epoch'] = (telem_dat['time_stamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()
             
             # drop unnecessary columns 
             telem_dat.drop (['Date','Time','Freq','Code','Site'],axis = 1, inplace = True)
             
             # calculate noise ratio
             telem_dat['noise_ratio'] = predictors.noise_ratio(5.0,
-                                                   telem_dat.freq_codes.values,
-                                                   telem_dat.freq_codes.epoch,
+                                                   telem_dat.freq_code.values,
+                                                   telem_dat.Epoch.values,
                                                    study_tags)
             
             # if there is no antenna to receiver dictionary 
@@ -80,12 +82,30 @@ def orion_import(file_name,
                 telem_dat['rec_id'] = np.repeat(rec_id,len(telem_dat))
                 
                 # create a multindex 
-                tuples = zip(telem_dat.freq_code.values,telem_dat.rec_id.values,telem_dat.Epoch.values)
-                index = pd.MultiIndex.from_tuples(tuples, names=['frqe_code', 'rec_id','Epoch'])
-                telem_dat.set_index(index,inplace = True,drop = False)
+                # tuples = zip(telem_dat.freq_code.values,telem_dat.rec_id.values,telem_dat.Epoch.values)
+                # index = pd.MultiIndex.from_tuples(tuples, names=['frqe_code', 'rec_id','Epoch'])
+                # telem_dat.set_index(index,inplace = True,drop = False)
+
+                telem_dat = telem_dat.astype({'power':'float32',
+                                              'freq_code':'object',
+                                              'time_stamp':'datetime64',
+                                              'scan_time':'int32',
+                                              'channels':'int32',
+                                              'rec_type':'object',
+                                              'Epoch':'float32',
+                                              'noise_ratio':'float32',
+                                              'rec_id':'object'})
                 
-                # write to raw data
-                telem_dat.to_hdf(db_dir, key='/raw_data', mode='a', format='table')
+                with pd.HDFStore(db_dir, mode='a') as store:
+                    store.append(key = 'raw_data',
+                                 value = telem_dat, 
+                                 format = 'table', 
+                                 index = False,
+                                 min_itemsize = {'freq_code':20,
+                                                 'rec_type':20,
+                                                 'rec_id':20},
+                                 append = True, 
+                                 chunksize = 1000000)
 
 
             # if there is an antenna to receiver dictionary
@@ -101,17 +121,39 @@ def orion_import(file_name,
                     telem_dat_sub['rec_id'] = np.repeat(site,len(telem_dat_sub))
                     
                     # index
-                    tuples = zip(telem_dat_sub.FreqCode.values,
-                                 telem_dat_sub.recID.values,
-                                 telem_dat_sub.Epoch.values)
-                    index = pd.MultiIndex.from_tuples(tuples, names=['freq_code', 'rec_id','Epoch'])
-                    telem_dat_sub.set_index(index,inplace = True,drop = False)
+                    # tuples = zip(telem_dat_sub.FreqCode.values,
+                    #              telem_dat_sub.recID.values,
+                    #              telem_dat_sub.Epoch.values)
+                    # index = pd.MultiIndex.from_tuples(tuples, names=['freq_code', 'rec_id','Epoch'])
+                    #telem_dat_sub.set_index(index,inplace = True,drop = False)
                     
                     # remove exctranneous columns
                     telem_dat_sub.drop(['Ant'], axis = 1, inplace = True)
-                    
+                    #TODO this needs to be switched to HDF
                     # write to HDF
-                    telem_dat_sub.to_sql(db_dir, key='/raw_data', mode='a')
+                    
+                    telem_dat_sub = telem_dat_sub.astype({'power':'float32',
+                                                  'freq_code':'object',
+                                                  'time_stamp':'datetime64',
+                                                  'scan_time':'int32',
+                                                  'channels':'int32',
+                                                  'rec_type':'object',
+                                                  'Epoch':'float32',
+                                                  'noise_ratio':'float32',
+                                                  'rec_id':'object'})
+                    
+                    telem_dat_sub.reset_index(drop = True, inplace = True)
+
+                    with pd.HDFStore(db_dir, mode='a') as store:
+                        store.append(key = 'raw_data',
+                                     value = telem_dat_sub, 
+                                     format = 'table', 
+                                     index = False,
+                                     min_itemsize = {'freq_code':20,
+                                                     'rec_type':20,
+                                                     'rec_id':20},
+                                     append = True, 
+                                     chunksize = 1000000)                    
                     
 def vr2_import(file_name,db_dir,study_tags, rec_id):
     '''Function imports raw VEMCO VR2 acoustic data.
@@ -146,11 +188,30 @@ def vr2_import(file_name,db_dir,study_tags, rec_id):
         except KeyError:
             telem_dat.drop (['Unnamed: 0', 'Date and Time', 'Unnamed: 2', 'Unnamed: 3', 'Unnamed: 4', 'Receiver.1', 'Unnamed: 7', 'Unnamed: 8', 'Transmitter Name', 'Unnamed: 11', 'Unnamed: 12', 'Unnamed: 13',],axis = 1, inplace = True)
 
-        tuples = zip(telem_dat.FreqCode.values,telem_dat.recID.values,telem_dat.Epoch.values)
-        index = pd.MultiIndex.from_tuples(tuples, names=['freq_code', 'rec_id','Epoch'])
-        telem_dat.set_index(index,inplace = True,drop = False)
-        telem_dat.to_hdf(db_dir, key='/raw_data', mode='a', format='table')
+        # tuples = zip(telem_dat.FreqCode.values,telem_dat.recID.values,telem_dat.Epoch.values)
+        # index = pd.MultiIndex.from_tuples(tuples, names=['freq_code', 'rec_id','Epoch'])
+        # telem_dat.set_index(index,inplace = True,drop = False)
         
+        telem_dat = telem_dat.astype({'power':'np.float32',
+                                      'frea_code':'object',
+                                      'time_stamp':'datetime64',
+                                      'scan_time':'int32',
+                                      'channels':'int32',
+                                      'rec_type':'object',
+                                      'Epoch':'float32',
+                                      'noise_ratio':'float32',
+                                      'rec_id':'object'})
+        
+        with pd.HDFStore(db_dir, mode='a') as store:
+            store.append(key = 'raw_data',
+                         value = telem_dat, 
+                         format = 'table', 
+                         index = False,
+                         min_itemsize = {'freq_code':20,
+                                         'rec_type':20,
+                                         'rec_id':20},
+                         append = True, 
+                         chunksize = 1000000)        
 def srx1200(file_name,
              db_dir,
              rec_id, 
@@ -222,7 +283,7 @@ def srx1200(file_name,
         header_df.set_index('idx',inplace = True)
             
         # find scan time
-        for row in header_dat.iterrows():
+        for row in header_df.iterrows():
             # if the first 9 characters of the line say 'Scan Time' = we have found the scan time in the document
             if 'Scan Period' in row[1][0]:
                 # get the number value from the row
@@ -230,7 +291,11 @@ def srx1200(file_name,
                 #scanTimeStr = scanTimeStr.rstrip()
                 scanTimeStr = scanTimeStr[:-4]
                 # split the string
+                new_split = None
                 scanTimeSplit = scanTimeStr.split(':')
+                if 'sec' in scanTimeSplit[1]:
+                    new_split = scanTimeSplit[1].split(' ')
+                    scanTimeSplit[1] = new_split[8]
                 # convert the scan time string to float
                 scanTime = float(scanTimeSplit[1])
                 # stop the loop, we have extracted scan time
@@ -241,7 +306,7 @@ def srx1200(file_name,
         scanChan = []
         channelDict = {}
         counter = 0
-        rows = header_dat.iterrows()
+        rows = header_df.iterrows()
         # for every row
         for row in rows:
             # if the first 18 characters say what that says
@@ -262,7 +327,7 @@ def srx1200(file_name,
         del row, rows
 
         # extract channel dictionary data using rows identified earlier
-        channelDat = header_dat.iloc[idx0:idx1]
+        channelDat = header_df.iloc[idx0:idx1]
         for row in channelDat.iterrows():
             dat = row[1][0]
             channel = float(dat[0:6])
@@ -275,25 +340,37 @@ def srx1200(file_name,
         del row
 
         # read in telemetry data
-        telem_dat = pd.read_fwf(file_name,
-                               colspecs = [(0,6),(6,20),(20,32),(32,40),(40,55),(55,64),(64,72),(72,85),(85,93),(93,102)],
-                               names = ['Index','Date','Time','[uSec]','Tag/BPM','Freq [MHz]','Codeset','Antenna','Gain','RSSI'],
-                               skiprows = dataRow, 
-                               skipfooter = eof - dataEnd)
+        if new_split == None:
+            telem_dat = pd.read_fwf(file_name,
+                                   colspecs = [(0,6),(6,20),(20,32),(32,40),(40,55),(55,64),(64,72),(72,85),(85,93),(93,102)],
+                                   names = ['Index','Date','Time','[uSec]','Tag/BPM','Freq [MHz]','Codeset','Antenna','Gain','RSSI'],
+                                   skiprows = dataRow, 
+                                   skipfooter = eof - dataEnd)
+
+        else:
+            telem_dat = pd.read_csv(file_name,
+                                   names = ['Index','Date','Time','[uSec]','Tag/BPM','Freq [MHz]','Codeset','Antenna','','Gain','RSSI'],
+                                   skiprows = dataRow, 
+                                   skipfooter = eof - dataEnd)
+            telem_dat.dropna(inplace = True)
+            telem_dat = telem_dat.astype({'[uSec]':'int32'})
+
         
         # create a timestamp and conver to datetime object
-        telem_dat['timeStamp'] = telem_dat.Date + ' ' + telem_dat.Time + '.' + telem_dat['[uSec]'].astype(str)
-        telem_dat['timeStamp'] = pd.to_datetime(telem_dat.timeStamp)
+        telem_dat['time_stamp'] = telem_dat.Date + ' ' + telem_dat.Time + '.' + telem_dat['[uSec]'].astype(str)
+
+        telem_dat['time_stamp'] = pd.to_datetime(telem_dat.time_stamp)
         
         # calculate Epoch
-        telem_dat['Epoch'] = (telem_dat['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()       
+        telem_dat['Epoch'] = (telem_dat['time_stamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()       
         
         # format frequency code
         telem_dat['FreqNo'] = telem_dat['Freq [MHz]'].apply(lambda x: f"{x:.3f}" )
-        telem_dat['FreqCode'] = telem_dat['FreqNo'] + ' ' + telem_dat['Tag/BPM'].astype(np.str)
+        telem_dat = telem_dat[telem_dat['Tag/BPM'] != 999]
+        telem_dat['freq_code'] = telem_dat['FreqNo'] + ' ' + telem_dat['Tag/BPM'].astype(np.str)
         
         # calculate 
-        telem_dat['noise_ratio'] = predictors.noise_ratio(5.0,
+        telem_dat['noise_ratio'] = predictors.noise_ratio(600,
                                               telem_dat.freq_code.values,
                                               telem_dat.Epoch.values,
                                               study_tags)
@@ -303,11 +380,36 @@ def srx1200(file_name,
         telem_dat['channels'] = np.repeat(channels,len(telem_dat))
         telem_dat['rec_type'] = np.repeat(rec_type,len(telem_dat))
         telem_dat['rec_id'] = np.repeat(rec_id,len(telem_dat))
-                
+        telem_dat['noise_ratio'] = telem_dat.noise_ratio.values.astype(np.float32)
+       
         # remove unnecessary columns
         telem_dat.drop(columns = ['Index','Date','Time','[uSec]','Freq [MHz]','FreqNo', 'Codeset', 'Gain','Tag/BPM','Antenna'], inplace = True)
-        telem_dat.rename(columns = {'RSSI':'Power'}, inplace = True)
-        telem_dat.to_hdf(db_dir, key='/raw_data', mode='a', format='table')
+        telem_dat.rename(columns = {'RSSI':'power'}, inplace = True)
+        telem_dat['power'] = telem_dat.power.values.astype(np.float32)
+        telem_dat['noise_ratio'] = telem_dat.noise_ratio.values.astype(np.float32)
+
+        telem_dat.reset_index(inplace = True)
+        
+        telem_dat = telem_dat.astype({'power':'float32',
+                                      'freq_code':'object',
+                                      'time_stamp':'datetime64',
+                                      'scan_time':'int32',
+                                      'channels':'int32',
+                                      'rec_type':'object',
+                                      'Epoch':'float32',
+                                      'noise_ratio':'float32',
+                                      'rec_id':'object'})
+                
+        with pd.HDFStore(db_dir, mode='a') as store:
+            store.append(key = 'raw_data',
+                         value = telem_dat, 
+                         format = 'table', 
+                         index = False, 
+                         append = True, 
+                         min_itemsize = {'freq_code':20,
+                                         'rec_type':20,
+                                         'rec_id':20},
+                         chunksize = 1000000)
         
     # if the data doesn't have a header
     else:
@@ -328,18 +430,20 @@ def srx1200(file_name,
         
         # create a timestamp and conver to datetime object
         telem_dat['time_stamp'] = telem_dat.Date + ' ' + telem_dat.Time + '.' + telem_dat['[uSec]'].astype(str)
-        telem_dat['time_stamp'] = pd.to_datetime(telem_dat.timeStamp)
+        telem_dat['time_stamp'] = pd.to_datetime(telem_dat.time_stamp)
         
         # calculate Epoch
         telem_dat['Epoch'] = (telem_dat['time_stamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()       
         
         # format frequency code
         telem_dat['FreqNo'] = telem_dat['Freq [MHz]'].apply(lambda x: f"{x:.3f}" )
+        telem_dat = telem_dat[telem_dat['TagID/BPM'] != 999]
+
         telem_dat['freq_code'] = telem_dat['FreqNo'] + ' ' + telem_dat['TagID/BPM'].astype(np.str)
         
         # calculate 
-        telem_dat['noise_ratio'] = predictors.noise_ratio(5.0,
-                                              telem_dat.freq_codes.values,
+        telem_dat['noise_ratio'] = predictors.noise_ratio(600,
+                                              telem_dat.freq_code.values,
                                               telem_dat.Epoch.values,
                                               study_tags)
 
@@ -351,9 +455,32 @@ def srx1200(file_name,
                 
         # remove unnecessary columns
         telem_dat.drop(columns = ['Index','Date','Time','[uSec]','Freq [MHz]','FreqNo', 'Codeset', 'Gain','TagID/BPM','Antenna'], inplace = True)
-        telem_dat.rename(columns = {'RSSI':'Power'}, inplace = True)
-        telem_dat.to_hdf(db_dir, key='/raw_data', mode='a', format='table')
-    
+        telem_dat.rename(columns = {'RSSI':'power'}, inplace = True)
+        telem_dat['noise_ratio'] = telem_dat.noise_ratio.values.astype(np.float32)
+        telem_dat['power'] = telem_dat.power.values.astype(np.float32)
+        
+        telem_dat.reset_index(inplace = True, drop = True)
+        
+        telem_dat = telem_dat.astype({'power':'float32',
+                                      'freq_code':'object',
+                                      'time_stamp':'datetime64',
+                                      'scan_time':'int32',
+                                      'channels':'int32',
+                                      'rec_type':'object',
+                                      'Epoch':'float32',
+                                      'noise_ratio':'float32',
+                                      'rec_id':'object'})
+                
+        with pd.HDFStore(db_dir, mode='a') as store:
+            store.append(key = 'raw_data',
+                         value = telem_dat, 
+                         format = 'table', 
+                         index = False, 
+                         min_itemsize = {'freq_code':20,
+                                         'rec_type':20,
+                                         'rec_id':20},
+                         append = True, 
+                         chunksize = 1000000)    
 def srx800(file_name,
              db_dir,
              rec_id, 
@@ -532,10 +659,10 @@ def srx800(file_name,
             #telemDat_sub = telemDat_sub[telemDat_sub.TagID != 999]
             
             # create FreqCode
-            telem_dat_sub['FreqCode'] = telem_dat_sub['Frequency'].astype(str) + ' ' + telem_dat_sub['TagID'].astype(int).astype(str)
+            telem_dat_sub['freq_code'] = telem_dat_sub['Frequency'].astype(str) + ' ' + telem_dat_sub['TagID'].astype(int).astype(str)
             
             # create timestamp
-            telem_dat_sub['timeStamp'] = pd.to_datetime(telem_dat_sub['Date'] + ' ' + telem_dat_sub['Time'])# create timestamp field from date and time and apply to index
+            telem_dat_sub['time_stamp'] = pd.to_datetime(telem_dat_sub['Date'] + ' ' + telem_dat_sub['Time'])# create timestamp field from date and time and apply to index
             
             # get UNIX epoch
             telem_dat_sub['Epoch'] = (telem_dat_sub['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()
@@ -547,13 +674,35 @@ def srx800(file_name,
             telem_dat_sub.drop (['Date','Time','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
             
             # write scan time, channels, rec type and recID to data
-            telem_dat_sub['ScanTime'] = np.repeat(scan_time,len(telem_dat_sub))
-            telem_dat_sub['Channels'] = np.repeat(channels,len(telem_dat_sub))
-            telem_dat_sub['RecType'] = np.repeat(rec_type,len(telem_dat_sub))
-            telem_dat_sub['recID'] = np.repeat(site,len(telem_dat_sub))
-            
+            telem_dat_sub['scan_time'] = np.repeat(scan_time,len(telem_dat_sub))
+            telem_dat_sub['channels'] = np.repeat(channels,len(telem_dat_sub))
+            telem_dat_sub['rec_type'] = np.repeat(rec_type,len(telem_dat_sub))
+            telem_dat_sub['rec_id'] = np.repeat(site,len(telem_dat_sub))
+            telem_dat_sub.reset_index(inplace = True)
+            telem_dat_sub['noise_ratio'] = telem_dat_sub.noise_ratio.values.astype(np.float32)
+
             # write to hdf
-            telem_dat_sub.to_hdf(db_dir, key='/raw_data', mode='a', format='table')
+            
+            telem_dat_sub = telem_dat_sub.astype({'power':'np.float32',
+                                          'frea_code':'object',
+                                          'time_stamp':'datetime64',
+                                          'scan_time':'int32',
+                                          'channels':'int32',
+                                          'rec_type':'object',
+                                          'Epoch':'float32',
+                                          'noise_ratio':'float32',
+                                          'rec_id':'object'})
+                
+            with pd.HDFStore(db_dir, mode='a') as store:
+                store.append(key = 'raw_data',
+                             value = telem_dat_sub, 
+                             format = 'table', 
+                             index = False,
+                             min_itemsize = {'freq_code':20,
+                                             'rec_type':20,
+                                             'rec_id':20},
+                             append = True, 
+                             chunksize = 1000000)
 
 def srx600(file_name,
              db_dir,
@@ -714,13 +863,13 @@ def srx600(file_name,
                 telem_dat_sub = telem_dat_sub[telem_dat_sub.TagID != 999]
                 
                 # create freq code column
-                telem_dat_sub['FreqCode'] = telem_dat_sub['Frequency'].astype(str) + ' ' + telem_dat_sub['TagID'].astype(int).astype(str)
+                telem_dat_sub['freq_code'] = telem_dat_sub['Frequency'].astype(str) + ' ' + telem_dat_sub['TagID'].astype(int).astype(str)
                 
                 # deal with that pesky number date and clean up
                 telem_dat_sub['day0'] = np.repeat(pd.to_datetime("1900-01-01"),len(telem_dat_sub))
                 telem_dat_sub['Date'] = telem_dat_sub['day0'] + pd.to_timedelta(telem_dat_sub['DayNumber'].astype(int), unit='d')
                 telem_dat_sub['Date'] = telem_dat_sub.Date.astype('str')
-                telem_dat_sub['timeStamp'] = pd.to_datetime(telem_dat_sub['Date'] + ' ' + telem_dat_sub['Time'])
+                telem_dat_sub['time_stamp'] = pd.to_datetime(telem_dat_sub['Date'] + ' ' + telem_dat_sub['Time'])
                 telem_dat_sub.drop(['day0','DayNumber'],axis = 1, inplace = True)
                 
                 # calculate unix epoch
@@ -742,19 +891,39 @@ def srx600(file_name,
                                            study_tags)
                 
                 # add in scan time, channels, rec type
-                telem_dat_sub['ScanTime'] = np.repeat(scan_time,len(telem_dat_sub))
-                telem_dat_sub['Channels'] = np.repeat(channels,len(telem_dat_sub))
-                telem_dat_sub['RecType'] = np.repeat(rec_type,len(telem_dat_sub))
+                telem_dat_sub['scan_time'] = np.repeat(scan_time,len(telem_dat_sub))
+                telem_dat_sub['channels'] = np.repeat(channels,len(telem_dat_sub))
+                telem_dat_sub['rec_type'] = np.repeat(rec_type,len(telem_dat_sub))
                 
                 # make multiindex for fast indexing
-                tuples = zip(telem_dat_sub.FreqCode.values,telem_dat_sub.recID.values,telem_dat_sub.Epoch.values)
-                index = pd.MultiIndex.from_tuples(tuples, names=['FreqCode', 'recID','Epoch'])
-                telem_dat_sub.set_index(index,inplace = True,drop = False)
-                
+                # tuples = zip(telem_dat_sub.FreqCode.values,telem_dat_sub.recID.values,telem_dat_sub.Epoch.values)
+                # index = pd.MultiIndex.from_tuples(tuples, names=['FreqCode', 'recID','Epoch'])
+                # telem_dat_sub.set_index(index,inplace = True,drop = False)
+                telem_dat_sub.reset_index(inplace = True)
+                telem_dat_sub['noise_ratio'] = telem_dat_sub.noise_ratio.values.astype(np.float32)
+
                 # write to SQL
-                telem_dat_sub.to_hdf(db_dir, key='/raw_data', mode='a', format='table')
                 
-    
+                telem_dat_sub = telem_dat_sub.astype({'power':'np.float32',
+                                              'frea_code':'object',
+                                              'time_stamp':'datetime64',
+                                              'scan_time':'int32',
+                                              'channels':'int32',
+                                              'rec_type':'object',
+                                              'Epoch':'float32',
+                                              'noise_ratio':'float32',
+                                              'rec_id':'object'})
+                
+                with pd.HDFStore(db_dir, mode='a') as store:
+                    store.append(key = 'raw_data',
+                                 value = telem_dat_sub, 
+                                 format = 'table', 
+                                 index = False,
+                                 min_itemsize = {'freq_code':20,
+                                                 'rec_type':20,
+                                                 'rec_id':20},
+                                 append = True, 
+                                 chunksize = 1000000)    
     else:
         telem_dat = pd.read_fwf(file_name,
                                colspecs = [(0,9),(9,19),(19,29),(29,36),(36,44),(44,52)],
@@ -779,10 +948,10 @@ def srx600(file_name,
                 
                 
                 # calculate freqcode
-                telem_dat_sub['FreqCode'] = telem_dat_sub['Frequency'].astype(str) + ' ' + telem_dat_sub['TagID'].astype(int).astype(str)
+                telem_dat_sub['freqcode'] = telem_dat_sub['Frequency'].astype(str) + ' ' + telem_dat_sub['TagID'].astype(int).astype(str)
                 
                 # get timestamp
-                telem_dat_sub['timeStamp'] = pd.to_datetime(telem_dat_sub['Date'] + ' ' + telem_dat_sub['Time'])# create timestamp field from date and time and apply to index
+                telem_dat_sub['time_stamp'] = pd.to_datetime(telem_dat_sub['Date'] + ' ' + telem_dat_sub['Time'])# create timestamp field from date and time and apply to index
                 
                 # calculate UNIX epoch 
                 telem_dat_sub['Epoch'] = (telem_dat_sub['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()
@@ -797,16 +966,43 @@ def srx600(file_name,
                 telem_dat_sub.drop (['Date','Time','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
                 
                 # add in scan time, channels, rec type
-                telem_dat_sub['ScanTime'] = np.repeat(scan_time,len(telem_dat_sub))
-                telem_dat_sub['Channels'] = np.repeat(channels,len(telem_dat_sub))
-                telem_dat_sub['RecType'] = np.repeat(rec_type,len(telem_dat_sub))
-                telem_dat_sub['recID'] = np.repeat(site,len(telem_dat_sub))
+                telem_dat_sub['scan_time'] = np.repeat(scan_time,len(telem_dat_sub))
+                telem_dat_sub['channels'] = np.repeat(channels,len(telem_dat_sub))
+                telem_dat_sub['rec_type'] = np.repeat(rec_type,len(telem_dat_sub))
+                telem_dat_sub['rec_id'] = np.repeat(site,len(telem_dat_sub))
                 
                 # make multiindex for fast indexing
-                tuples = zip(telem_dat_sub.FreqCode.values,telem_dat_sub.recID.values,telem_dat_sub.Epoch.values)
-                index = pd.MultiIndex.from_tuples(tuples, names=['FreqCode', 'recID','Epoch'])
-                telem_dat_sub.set_index(index,inplace = True,drop = False)
-                
+                # tuples = zip(telem_dat_sub.FreqCode.values,telem_dat_sub.recID.values,telem_dat_sub.Epoch.values)
+                # index = pd.MultiIndex.from_tuples(tuples, names=['FreqCode', 'recID','Epoch'])
+                # telem_dat_sub.set_index(index,inplace = True,drop = False)
+                telem_dat_sub.reset_index(inplace = True)
+                telem_dat_sub['noise_ratio'] = telem_dat.noise_ratio.values.astype(np.float32)
+
+                telem_dat_sub = telem_dat_sub.astype({'power':'np.float32',
+                                              'frea_code':'object',
+                                              'time_stamp':'datetime64',
+                                              'scan_time':'int32',
+                                              'channels':'int32',
+                                              'rec_type':'object',
+                                              'Epoch':'float32',
+                                              'noise_ratio':'float32',
+                                              'rec_id':'object'})
+
                 # write to SQL
-                telem_dat_sub.to_hdf(db_dir, key='/raw_data', mode='a', format='table')
-     
+                with pd.HDFStore(db_dir, mode='a') as store:
+                    store.append(key = 'raw_data',
+                                 value = telem_dat_sub, 
+                                 format = 'table', 
+                                 index = False,
+                                 min_itemsize = {'freq_code':20,
+                                                 'rec_type':20,
+                                                 'rec_id':20},
+                                 append = True, 
+                                 chunksize = 1000000)
+    
+    
+    
+    
+    
+    
+    
