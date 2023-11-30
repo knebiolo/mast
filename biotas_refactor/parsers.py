@@ -6,6 +6,92 @@ import datetime
 import os
 import biotas_refactor.predictors as predictors
 
+def ares(file_name, 
+                 db_dir, 
+                 rec_id, 
+                 study_tags, 
+                 scan_time = 1, 
+                 channels = 1, 
+                 ant_to_rec_dict = None):
+    # identify the receiver type 
+    rec_type = 'ares'
+    
+    # what file format is it?  the header row is the key
+    o_file =open(file_name, encoding='utf-8')
+    header = o_file.readline()[:-1]                                            
+    columns = header.split(',')
+    o_file.close()
+    
+    # import ARES data and standardize
+    if columns[0] == 'Date':
+        telem_dat = pd.read_csv(file_name, 
+                                names = ['Date','Time','RxID','Freq','Antenna',
+                                         'Protocol','Code','Power','Squelch','Noise Level',
+                                         'Pulse Width 1','Pulse Width 2','Pulse Width 3',
+                                         'Pulse Interval 1','Pulse Interval 2','Pulse Interval 3'],
+                                header = 0,
+                                index_col = False)
+        
+        telem_dat['time_stamp'] = pd.to_datetime(telem_dat['Date'] + ' ' + telem_dat['Time'],errors = 'coerce')
+        telem_dat['Freq'] = np.round(telem_dat.Freq,1)
+        telem_dat['Freq'] = telem_dat['Freq'].apply(lambda x: f"{x:.3f}" )
+        telem_dat['freq_code'] = telem_dat['Freq'].astype(str) + ' ' + telem_dat['Code'].astype(str)
+        telem_dat.rename(columns = {'Power':'power'}, inplace = True)
+        telem_dat.drop(columns = ['Date','Time','RxID','Freq','Antenna',
+                                 'Protocol','Code','Squelch','Noise Level',
+                                 'Pulse Width 1','Pulse Width 2','Pulse Width 3',
+                                 'Pulse Interval 1','Pulse Interval 2','Pulse Interval 3'],
+                       inplace = True)
+    
+    # import mitas data and standardize
+    else:
+        telem_dat = pd.read_csv(file_name,
+                                names = ['contactId','decodeTimeUTC-05:00','ReceiverId',
+                                         'antenna','frequency','codeNumber','protocol','power'],
+                                header = 0,
+                                index_col = None)
+        
+        telem_dat['decodeTimeUTC-05:00'] = pd.to_datetime(telem_dat['decodeTimeUTC-05:00'])
+        telem_dat['frequency'] = np.round(telem_dat.frequency,1)
+        telem_dat['frequency'] = telem_dat['frequency'].apply(lambda x: f"{x:.3f}" )
+        telem_dat['freq_code'] = telem_dat['frequency'].astype(str) + ' ' + telem_dat['codeNumber'].astype(str)
+        telem_dat.rename(columns = {'decodeTimeUTC-05:00':'time_stamp'}, inplace = True)
+        telem_dat.drop(columns = ['contactId','ReceiverId','antenna',
+                                 'frequency','codeNumber','protocol'],
+                       inplace = True)
+        
+    # now do this stuff to files regardless of type
+    telem_dat['Epoch'] = (telem_dat['time_stamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()        
+    telem_dat['rec_type'] = np.repeat(rec_type,len(telem_dat))
+    telem_dat['rec_id'] = np.repeat(rec_id,len(telem_dat))
+    telem_dat['channels'] = np.repeat(channels,len(telem_dat))
+    telem_dat['scan_time'] = np.repeat(scan_time, len(telem_dat))
+    telem_dat['noise_ratio'] = predictors.noise_ratio(5.0,
+                                           telem_dat.freq_code.values,
+                                           telem_dat.Epoch.values,
+                                           study_tags)
+        
+    telem_dat = telem_dat.astype({'power':'float32',
+                                  'freq_code':'object',
+                                  'time_stamp':'datetime64',
+                                  'scan_time':'int32',
+                                  'channels':'int32',
+                                  'rec_type':'object',
+                                  'Epoch':'float32',
+                                  'noise_ratio':'float32',
+                                  'rec_id':'object'})
+    
+    with pd.HDFStore(db_dir, mode='a') as store:
+        store.append(key = 'raw_data',
+                     value = telem_dat, 
+                     format = 'table', 
+                     index = False,
+                     min_itemsize = {'freq_code':20,
+                                     'rec_type':20,
+                                     'rec_id':20},
+                     append = True, 
+                     chunksize = 1000000)
+
 
 def orion_import(file_name, 
                  db_dir, 

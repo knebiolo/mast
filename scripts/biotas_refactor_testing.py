@@ -31,39 +31,39 @@ project = radio_project(project_dir,
                         nodes_data)
 
 #%%  import data
-rec_id = 'R001'
-rec_type = 'srx1200'
-training_dir = r"C:\Users\knebiolo\Desktop\BIOTAS_Refactor\Data\Training_Files"
-db_dir = os.path.join(project_dir,'%s.h5'%(db_name))
-scan_time = 2.5
-channels = 2
-antenna_to_rec_dict = {'Antenna 1':'R001'}
+# rec_id = 'R009'
+# rec_type = 'ares'
+# training_dir = r"C:\Users\knebiolo\Desktop\BIOTAS_Refactor\Data\Training_Files"
+# db_dir = os.path.join(project_dir,'%s.h5'%(db_name))
+# scan_time = 1
+# channels = 1
+# antenna_to_rec_dict = {'1':'R001'}
 
-project.telem_data_import(rec_id,
-                          rec_type,
-                          training_dir,
-                          db_dir,
-                          scan_time,
-                          channels,
-                          antenna_to_rec_dict)
+# project.telem_data_import(rec_id,
+#                           rec_type,
+#                           training_dir,
+#                           db_dir,
+#                           scan_time,
+#                           channels)#,
+#                           #antenna_to_rec_dict)
 
-#%%  train data
-# set parameters and get a list of fish to iterate over
-rec_id = 'R001'
-rec_type = 'srx1200'
-fishes = project.get_fish(rec_id = rec_id)
+# #%%  train data
+# # set parameters and get a list of fish to iterate over
+# rec_id = 'R009'
+# rec_type = 'ares'
+# fishes = project.get_fish(rec_id = rec_id)
 
-# iterate over fish and train
-for fish in fishes:
-    project.train(fish, rec_id)
+# # iterate over fish and train
+# for fish in fishes:
+#     project.train(fish, rec_id)
 
-# generate summary statistics
-project.training_summary(rec_type, site = [rec_id])
+# # generate summary statistics
+# project.training_summary(rec_type, site = [rec_id])
 
 #%% classify data
 # set parameters and get a list of fish to iterate over
-rec_id = 'R001'
-rec_type = 'srx1200'
+rec_id = 'R009'
+rec_type = 'ares'
 class_iter = None
 fishes = project.get_fish(rec_id = rec_id)
 threshold_ratio = 1.0 # 1.0 = MAP Hypothesis

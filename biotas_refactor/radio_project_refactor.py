@@ -155,19 +155,22 @@ class radio_project():
             f_dir = os.path.join(file_dir,f)
             
             if rec_type == 'srx600' :
-                parsers.srx600(f_dir, db_dir, rec_id, self.tags, scan_time = scan_time, channels = channels, ant_to_rec_dict = ant_to_rec_dict)
+                parsers.srx600(f_dir, db_dir, rec_id, self.study_tags, scan_time = scan_time, channels = channels, ant_to_rec_dict = ant_to_rec_dict)
             
             elif rec_type == 'srx800':
-                parsers.srx800(f_dir, db_dir, rec_id, self.tags, scan_time = scan_time, channels = channels, ant_to_rec_dict = ant_to_rec_dict)
+                parsers.srx800(f_dir, db_dir, rec_id, self.study_tags, scan_time = scan_time, channels = channels, ant_to_rec_dict = ant_to_rec_dict)
             
             elif rec_type == 'srx1200':
-                parsers.srx1200(f_dir, db_dir, rec_id, self.tags, scan_time = scan_time, channels = channels, ant_to_rec_dict = ant_to_rec_dict)
+                parsers.srx1200(f_dir, db_dir, rec_id, self.study_tags, scan_time = scan_time, channels = channels, ant_to_rec_dict = ant_to_rec_dict)
             
             elif rec_type == 'orion':
-                parsers.orion_import(f_dir,db_dir,rec_id, self.tags, scan_time = scan_time, channels = channels, ant_to_rec_dict = ant_to_rec_dict)
+                parsers.orion_import(f_dir,db_dir,rec_id, self.study_tags, scan_time = scan_time, channels = channels, ant_to_rec_dict = ant_to_rec_dict)
             
             elif rec_type == 'vr2':
                 parsers.vr2_import(f_dir,db_dir,rec_id)
+                
+            elif rec_type == 'ares':
+                parsers.ares(f_dir,db_dir,rec_id, self.study_tags, scan_time = scan_time, channels = channels, ant_to_rec_dict = ant_to_rec_dict)
             else:
                 print ("There currently is not an import routine created for this receiver type.  Please try again")
             
@@ -645,7 +648,7 @@ class radio_project():
             # export
             class_dat.to_csv(os.path.join(self.output_dir,'freq_code_%s_rec_%s_class_%s.csv'%(freq_code, rec_id, reclass_iter)))
             
-            #print ('Fish %s at receiver %s classified'%(freq_code,rec_id))
+            print ('Fish %s at receiver %s classified'%(freq_code,rec_id))
             # next step looks at results
         
         # else:

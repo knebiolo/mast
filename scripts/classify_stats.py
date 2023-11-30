@@ -6,6 +6,8 @@ classification stats
 # import modules required for function dependencies
 import time
 import os
+import sys
+sys.path.append(r'C:\Users\knebiolo\OneDrive - Kleinschmidt Associates, Inc\Software\biotas')
 import biotas
 import warnings
 warnings.filterwarnings('ignore')

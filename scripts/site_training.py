@@ -13,15 +13,15 @@ warnings.filterwarnings('ignore')
 
 
 # what is the site/receiver ID?
-site = 2
+site = 'R001'
 # what is the receiver type?
-recType = 'srx800'
+recType = 'srx1200'
 # what is the project directory?
-proj_dir = r'C:\Users\knebiolo\Desktop\Nuyakuk BIOTAS'
+proj_dir = r'C:\Users\knebiolo\Desktop\York Haven BIOTIS'
 # what did you call the database?
-dbName = 'nuya_test.db'
+dbName = 'YH_1200_test.db'
 # antenna to location, default project set up 1 Antenna, 1 Location, 1 Receiver
-ant_to_rec_dict = {'A0':site}
+ant_to_rec_dict = {'Antenna 1':site}
 
 # set up workspaces
 file_dir = os.path.join(proj_dir,'Data','Training_Files')
@@ -41,8 +41,8 @@ biotas.telemDataImport(site,
                         recType,
                         file_dir,
                         projectDB,
-                        scanTime = 1,
-                        channels = 1,
+                        scanTime = 5,
+                        channels = 2,
                         ant_to_rec_dict = ant_to_rec_dict)
 
 print ("Raw data imported, proceed to training")
