@@ -33,7 +33,10 @@ def ares(file_name,
                                 index_col = False)
         
         telem_dat['time_stamp'] = pd.to_datetime(telem_dat['Date'] + ' ' + telem_dat['Time'],errors = 'coerce')
-        telem_dat['Freq'] = np.round(telem_dat.Freq,1)
+        kHz = telem_dat.Freq * 1000
+        kHz = np.round(kHz / 5.0, 0) * 5
+        MHz = np.round(kHz / 1000.,3)
+        telem_dat['Freq'] = MHz
         telem_dat['Freq'] = telem_dat['Freq'].apply(lambda x: f"{x:.3f}" )
         telem_dat['freq_code'] = telem_dat['Freq'].astype(str) + ' ' + telem_dat['Code'].astype(str)
         telem_dat.rename(columns = {'Power':'power'}, inplace = True)
@@ -52,7 +55,10 @@ def ares(file_name,
                                 index_col = None)
         
         telem_dat['decodeTimeUTC-05:00'] = pd.to_datetime(telem_dat['decodeTimeUTC-05:00'])
-        telem_dat['frequency'] = np.round(telem_dat.frequency,1)
+        kHz = telem_dat.frequency * 1000
+        kHz = np.round(kHz / 5.0,0) * 5
+        MHz = np.round(kHz / 1000., 3)
+        telem_dat['frequency'] = MHz
         telem_dat['frequency'] = telem_dat['frequency'].apply(lambda x: f"{x:.3f}" )
         telem_dat['freq_code'] = telem_dat['frequency'].astype(str) + ' ' + telem_dat['codeNumber'].astype(str)
         telem_dat.rename(columns = {'decodeTimeUTC-05:00':'time_stamp'}, inplace = True)
