@@ -22,8 +22,6 @@ font = {'family': 'serif','size': 6}
 rcParams['font.size'] = 6
 rcParams['font.family'] = 'serif'
 
-
-
 class radio_project():
     '''
     A class to manage and organize data and parameters for a Radio Telemetry project.
@@ -70,7 +68,7 @@ class radio_project():
         self.db = os.path.join(project_dir,'%s.h5'%(db_name))
         self.tags = tag_data
         self.tags.set_index('freq_code', drop = False, inplace = True)
-        self.study_tags = self.tags[self.tags.tag_type == 'STUDY'].freq_code.values
+        self.study_tags = self.tags[self.tags.tag_type == 'study'].freq_code.values
         self.receivers = receiver_data
         self.receivers.set_index('rec_id', drop = False, inplace = True)
         self.nodes = nodes_data
@@ -126,9 +124,6 @@ class radio_project():
         if 'presence' not in hdf5:
             hdf5.create_group("presence")
             
-        if 'bouts' not in hdf5:
-            hdf5.create_group('bouts')
-            
         if 'overlapping' not in hdf5:
             hdf5.create_group('overlapping')
             
@@ -181,17 +176,18 @@ class radio_project():
     def get_fish(self, rec_id, reclass_iter = 0):
         
         if reclass_iter == 0:
-            dat = pd.read_hdf(self.db,'raw_data')
-            dat = dat[dat.rec_id == rec_id]      
+            dat = pd.read_hdf(self.db, key = 'raw_data', where = f'rec_id = "{rec_id}"')
+            #dat = dat[dat.rec_id == rec_id]      
         
         else:
-            dat = pd.read_hdf(self.db,'classified')
-            dat = dat[(dat.rec_id == rec_id) * (dat.iter ==  reclass_iter - 1)]     
+            itr = reclass_iter -1 
+            dat = pd.read_hdf(self.db, key = 'classified', where = f'(rec_id = "{rec_id}") & (iter == {itr})')
+            #dat = dat[(dat.rec_id == rec_id) * (dat.iter ==  reclass_iter - 1)]     
             
         tags_no_idx = self.tags.reset_index(drop = True)
         dat = pd.merge(dat, tags_no_idx, on='freq_code', how='left')
         #TODO - make this smart so case doesn't matter...
-        dat = dat[(dat.tag_type != 'BEACON') & (dat.tag_type != 'TEST')]
+        dat = dat[(dat.tag_type != 'beacon') & (dat.tag_type != 'test')]
     
         return dat.freq_code.unique()
     
@@ -204,20 +200,18 @@ class radio_project():
         at reciever (site) from the project database (projectDB).
             '''
         # pull raw data 
-        train_dat = pd.read_hdf(self.db,'raw_data')
-        train_dat = train_dat[(train_dat.freq_code == freq_code) & 
-                     (train_dat.rec_id == rec_id)]
-        #train_dat.drop(columns = 'index', inplace = True)
+        train_dat = pd.read_hdf(self.db,
+                                'raw_data',
+                                where = f'(freq_code == "{freq_code}") & (rec_id == "{rec_id}")')
     
-
         # do some data management when importing training dataframe
         train_dat['time_stamp'] = pd.to_datetime(train_dat.time_stamp)
+        train_dat['epoch'] = train_dat.epoch.values.astype(np.int32)
+        train_dat.sort_values(by = 'epoch', inplace = True)
         
-        #train_dat.sort_values(by = 'Epoch', inplace = True)
         train_dat = train_dat.drop_duplicates(subset = 'time_stamp')
         
         # set some object variables
-
         rec_type = self.receivers.at[rec_id,'rec_type']
 
         # for training data, we know the tag's detection class ahead of time,
@@ -240,42 +234,70 @@ class radio_project():
         mort_rate = 8888.
         # calculate predictors
         train_dat['detection'] = np.repeat(plausible,len(train_dat))
-        train_dat['lag'] = train_dat.Epoch.diff().abs()
+        train_dat['lag'] = train_dat.epoch.diff()
         train_dat['lag_diff'] = train_dat.lag.diff()
-        det_hist_string, hit_ratio, cons_det, max_count = predictors.detection_history(train_dat.Epoch.values,
-                                                                           pulse_rate,
-                                                                           self.det_count,
-                                                                           2,
-                                                                           train_dat.scan_time.values,
-                                                                           train_dat.channels.values)
-        train_dat['det_hist'] = det_hist_string
-        train_dat['hit_ratio'] = hit_ratio
-        train_dat['cons_det'] = cons_det
-        train_dat['cons_length'] = max_count
+        
+        det_hist_dict = {}
+        hit_ratio_dict = {}
+        cons_det_dict = {}
+        max_count_dict = {}
+        
+        for ch in train_dat.channels.unique():
+            train_dat_sub = train_dat[train_dat.channels == ch]
+            det_hist_string, hit_ratio, cons_det, max_count \
+                = predictors.detection_history(train_dat_sub.epoch.values,
+                                               pulse_rate,
+                                               self.det_count,
+                                               ch,
+                                               train_dat_sub.scan_time.values,
+                                               train_dat_sub.channels.values)
+                
+            det_hist_dict[ch] = det_hist_string
+            hit_ratio_dict[ch] = hit_ratio
+            cons_det_dict[ch] = cons_det
+            max_count_dict[ch] = max_count
+        
+        det_hist_string_arrs = list(det_hist_dict.values())
+        det_hist_string_arr = np.hstack(det_hist_string_arrs)
+        hit_ratio_arrs = list(hit_ratio_dict.values())
+        hit_ratio_arr = np.hstack(hit_ratio_arrs)
+        cons_det_arrs = list(cons_det_dict.values())
+        cons_det_arr = np.hstack(cons_det_arrs)
+        max_count_arrs = list(max_count_dict.values())
+        max_count_arr = np.hstack(max_count_arrs)
+        
+        train_dat['det_hist'] = det_hist_string_arr
+        train_dat['hit_ratio'] = hit_ratio_arr
+        train_dat['cons_det'] = cons_det_arr
+        train_dat['cons_length'] = max_count_arr
         # train_dat['series_hit'] = predictors.series_hit(train_dat.lag.values,
         #                                           pulse_rate,
         #                                           mort_rate,
         #                                           'A')
-        
+        # if plausible == 1:
+        #     print ('debug why det hist not right?')
         train_dat.fillna(value=9999999, inplace=True)      
         
         # make sure data types are correct - these next steps are critical
-        train_dat = train_dat.astype({'power': 'float32', 
-                                      'time_stamp': 'datetime64',
-                                      'Epoch': 'float32',
-                                      'freq_code': 'object',
-                                      'noise_ratio': 'float32',
-                                      'scan_time': 'int32',
-                                      'channels': 'int32',
-                                      'rec_type': 'object',
-                                      'rec_id': 'object',
-                                      'detection': 'int32',
-                                      'lag': 'float32',
-                                      'lag_diff': 'float32',
-                                      'det_hist': 'object',
-                                      'hit_ratio': 'float32',
-                                      'cons_det': 'int32',
-                                      'cons_length': 'float32'})
+        try:
+            train_dat = train_dat.astype({'power': 'float32', 
+                                          'time_stamp': 'datetime64',
+                                          'epoch': 'float32',
+                                          'freq_code': 'object',
+                                          'noise_ratio': 'float32',
+                                          'scan_time': 'int32',
+                                          'channels': 'int32',
+                                          'rec_type': 'object',
+                                          'rec_id': 'object',
+                                          'detection': 'int32',
+                                          'lag': 'float32',
+                                          'lag_diff': 'float32',
+                                          'det_hist': 'object',
+                                          'hit_ratio': 'float32',
+                                          'cons_det': 'int32',
+                                          'cons_length': 'float32'})
+        except ValueError:
+            print ('debug - check datatypes')
 
         # append to hdf5
         with pd.HDFStore(self.db, mode='a') as store:
@@ -422,7 +444,35 @@ class radio_project():
         
 
         plt.savefig(os.path.join(self.figure_ws,"%s_lattice_train.png"%(rec_type)),bbox_inches = 'tight', dpi = 900)
+        
+    def undo_training(self, rec_id, freq_code=None):
+        # Read the table from the HDF5 file
+        with pd.HDFStore(self.db, 'r+') as store:
+            if 'trained' in store:
+                df = store['trained']  # Replace with your table name
+        
+                # Build the condition based on provided arguments
+                condition = (df['rec_id'] == rec_id)
+                if freq_code is not None:
+                    condition &= (df['freq_code'] == freq_code)
 
+                # Update or delete the rows based on your requirement
+                # For deletion:
+                df = df[~condition]
+                
+                # Delete the existing table
+                store.remove('trained')
+        
+                # Save the modified DataFrame back to the HDF5 file
+                store.put('trained',
+                          df,
+                          format='table',
+                          data_columns=True, 
+                          append = False,
+                          min_itemsize = {'freq_code':20,
+                                          'rec_type':20,
+                                          'rec_id':20,
+                                          'det_hist':20})      
         
     def create_training_data(self, rec_type, reclass_iter = None, rec_list = None):
         '''Function creates training dataset for current round of classification -
@@ -432,11 +482,10 @@ class radio_project():
         '''
         Reclassification code contributed by T Castro-Santos
         '''
-        # get training data
-        train_dat = pd.read_hdf(self.db,'trained')
-        
-        # first restrict it to the receiver type - we can't have orion's diagnose srx800's now can we?
-        train_dat = train_dat[train_dat.rec_type == rec_type]
+        # get training data and restrict it to the receiver type - we can't have orion's diagnose srx800's now can we?
+        train_dat = pd.read_hdf(self.db,
+                                'trained', 
+                                where = f'rec_type == "{rec_type}"')
         
         # then if we are further restricting to a subset of that receiver type
         if rec_list != None:
@@ -446,13 +495,15 @@ class radio_project():
             if reclass_iter != None:
                 last_class = reclass_iter - 1
                 
-                class_dat = pd.read_hdf(self.db, 'classified')
+                class_dat = pd.read_hdf(self.db, 
+                                        'classified', 
+                                        where = f'iter == "{last_class}"')
+                
                 class_dat = class_dat[class_dat['rec_id'].isin(rec_list)]
                 class_dat = class_dat[class_dat.iter == last_class]
                 
                 columns = ['test', 'freq_code','power','noise_ratio','lag', 'lag_diff', 
-                           'cons_length','cons_det','det_hist','hit_ratio',
-                           'series_hit','rec_type','Epoch']
+                           'cons_length','cons_det','det_hist','hit_ratio','rec_type','epoch']
                 
                 class_dat = class_dat[columns]
                 
@@ -487,54 +538,57 @@ class radio_project():
         
         # get data
         if reclass_iter == None:
-            class_dat = pd.read_hdf(self.db, 'raw_data')
-            class_dat = class_dat[(class_dat.freq_code == freq_code) & 
-                                  (class_dat.rec_id == rec_id)]
+            class_dat = pd.read_hdf(self.db, 
+                                    'raw_data',
+                                    where = f'(freq_code == "{freq_code}") & (rec_id == "{rec_id}")')
             
-            columns = ['freq_code','Epoch','rec_id','time_stamp','power','noise_ratio','scan_time','channels','rec_type']
+            columns = ['freq_code','epoch','rec_id','time_stamp','power','noise_ratio','scan_time','channels','rec_type']
             class_dat = class_dat[columns]
 
         else:
-            class_dat = pd.read_hdf(self.db, 'classified')
-            class_dat = class_dat[(class_dat.freq_code == freq_code) &
-                                  (class_dat.rec_id == rec_id) & 
-                                  (class_dat.iter == (reclass_iter - 1)) &
-                                  (class_dat.test == 1)]
+            last_class = reclass_iter - 1
+            class_dat = pd.read_hdf(self.db,
+                                    'classified',
+                                    where = f'(freq_code == "{freq_code}") & (rec_id == "{rec_id}") & (iter == {last_class} & (test == 1))')
 
-            columns = ['freq_code','Epoch','rec_id','time_stamp','power','noise_ratio','scan_time','channels','rec_type']
+            columns = ['freq_code','epoch','rec_id','time_stamp','power','noise_ratio','scan_time','channels','rec_type']
             class_dat = class_dat[columns]
 
         if len(class_dat) > 0:
             # do some data management when importing training dataframe
             class_dat['time_stamp'] = pd.to_datetime(class_dat['time_stamp'])
-            class_dat.sort_values(by = 'Epoch', inplace = True)
-            #class_dat = class_dat.drop_duplicates(subset = 'time_stamp')
+            class_dat.sort_values(by = 'time_stamp', inplace = True)
+            class_dat['epoch'] = class_dat.epoch.values.astype(np.int32)
+            class_dat = class_dat.drop_duplicates(subset = 'time_stamp')
             
             # calculate predictors
-            class_dat['lag'] = class_dat.Epoch.diff().abs()
+            class_dat['lag'] = class_dat.epoch.diff()
             class_dat['lag_diff'] = class_dat.lag.diff()
             class_dat.fillna(value = 99999999, inplace = True)
-            det_hist_string, det_hist, cons_det, max_count = predictors.detection_history(class_dat.Epoch.values,
-                                                                               pulse_rate,
-                                                                               self.det_count,
-                                                                               2,
-                                                                               class_dat.scan_time.values,
-                                                                               class_dat.channels)
+            det_hist_string, det_hist, cons_det, max_count \
+                = predictors.detection_history(class_dat.epoch.values,
+                                               pulse_rate,
+                                               self.det_count,
+                                               2,
+                                               class_dat.scan_time.values,
+                                               class_dat.channels)
             class_dat['det_hist'] = det_hist_string
             class_dat['hit_ratio'] = det_hist
             class_dat['cons_det'] = cons_det
             class_dat['cons_length'] = max_count
-            class_dat['series_hit'] = predictors.series_hit(class_dat.lag.values,
-                                                            pulse_rate,
-                                                            mort_rate,
-                                                            'A')
+            # class_dat['series_hit'] = predictors.series_hit(class_dat.lag.values,
+            #                                                 pulse_rate,
+            #                                                 mort_rate,
+            #                                                 'A')
             
             # categorize predictors
-            hit_ratio, power, lag, con_len, noise = naive_bayes.bin_predictors(class_dat.hit_ratio,
-                                                                       class_dat.power,
-                                                                       class_dat.lag_diff,
-                                                                       class_dat.cons_length,
-                                                                       class_dat.noise_ratio)
+            hit_ratio, power, lag, con_len, noise \
+                = naive_bayes.bin_predictors(class_dat.hit_ratio,
+                                             class_dat.power,
+                                             class_dat.lag_diff,
+                                             class_dat.cons_length,
+                                             class_dat.noise_ratio)
+                
             binned_predictors = {'hit_ratio':hit_ratio,
                                  'power':power,
                                  'lag_diff':lag,
@@ -612,7 +666,7 @@ class radio_project():
     
             # keep it tidy cuz hdf is fragile
             class_dat = class_dat.astype({'freq_code': 'object',
-                                          'Epoch': 'float32',
+                                          'epoch': 'float32',
                                           'rec_id': 'object',
                                           'time_stamp': 'datetime64',
                                           'power': 'float32', 
@@ -643,6 +697,7 @@ class radio_project():
                                              'rec_id':20,
                                              'det_hist':20},
                              append = True, 
+                             data_columns = True,
                              chunksize = 1000000)
             
             # export
@@ -660,15 +715,13 @@ class radio_project():
                 
         if reclass_iter == None:
             classified_dat = pd.read_hdf(self.db,
-                                         key = 'classified')
-            classified_dat = classified_dat[classified_dat.iter == 1]
+                                         key = 'classified',
+                                         where = f'(iter == 1) & (rec_id == "{rec_id}")')
         else:
             classified_dat = pd.read_hdf(self.db,
-                                         key = 'classified')
-            classified_dat = classified_dat[classified_dat.iter == reclass_iter]  
-            
-        classified_dat = classified_dat[classified_dat.rec_id == rec_id]
-        
+                                         key = 'classified',
+                                         where = f'(iter == {reclass_iter}) & (rec_id == "{rec_id}")')
+                    
         print ("")
         print ("Classification summary statistics report %s"%(rec_id))
         print ("----------------------------------------------------------------------------------")
@@ -697,160 +750,299 @@ class radio_project():
 
             # print ("Compiling Figures")
 
-            # # plot the log likelihood ratio
-            # classified_dat['log_likelihood_ratio'] = classified_dat.likelihood_T / classified_dat.likelihood_F
-            # minLogRatio = classified_dat.log_likelihood_ratio.min()//1 * 1
-            # maxLogRatio = classified_dat.log_likelihood_ratio.max()//1 * 1
-            # ratio_bins =np.arange(minLogRatio,maxLogRatio+1,2)
+            # plot the log likelihood ratio
+            classified_dat['log_posterior_ratio'] = np.log10(classified_dat.posterior_T / classified_dat.posterior_F)
+            minLogRatio = classified_dat.log_posterior_ratio.min()//1 * 1
+            maxLogRatio = classified_dat.log_posterior_ratio.max()//1 * 1
+            ratio_range = maxLogRatio - minLogRatio
+            ratio_bins =np.linspace(minLogRatio,maxLogRatio+1,100)
             
-            # # hit ratio bins
-            # hit_ratio_bins =np.linspace(0,1.0,11)
+            # hit ratio bins
+            hit_ratio_bins =np.linspace(0,1.0,11)
 
-            # # plot signal power histograms by detection class
-            # min_power = classified_dat.power.min()//5 * 5
-            # max_power = classified_dat.power.max()//5 * 5
-            # power_bins =np.arange(min_power,max_power+20,10)
+            # plot signal power histograms by detection class
+            min_power = classified_dat.power.min()//5 * 5
+            max_power = classified_dat.power.max()//5 * 5
+            power_bins =np.arange(min_power,max_power+20,10)
 
-            # # Lag Back Differences - how steady are detection lags?
-            # lag_bins =np.arange(-100,110,20)
+            # Lag Back Differences - how steady are detection lags?
+            lag_bins =np.arange(-100,110,20)
 
-            # # Consecutive Record Length
-            # con_length_bins =np.arange(1,12,1)
+            # Consecutive Record Length
+            con_length_bins =np.arange(1,12,1)
 
-            # # Noise Ratio
-            # noise_bins =np.arange(0,1.1,0.1)
+            # Noise Ratio
+            noise_bins =np.arange(0,1.1,0.1)
     
-            # # plot the log of the posterior ratio
-            # classified_dat['log_post_ratio'] = np.log(classified_dat.posterior_T/classified_dat.posterior_F)
-            # minPostRatio = classified_dat.log_post_ratio.min()
-            # maxPostRatio = classified_dat.log_post_ratio.max()
-            # post_ratio_bins = np.linspace(minPostRatio,maxPostRatio,10)
+            # plot the log of the posterior ratio
+            classified_dat['log_post_ratio'] = np.log(classified_dat.posterior_T/classified_dat.posterior_F)
+            minPostRatio = classified_dat.log_post_ratio.min()
+            maxPostRatio = classified_dat.log_post_ratio.max()
+            post_ratio_bins = np.linspace(minPostRatio,maxPostRatio,10)
 
+            trues = classified_dat[classified_dat.test == 1]
+            falses = classified_dat[classified_dat.test == 0]
+
+            # make lattice plot for pubs
             
-            # trues = classified_dat[classified_dat.test == 1]
-            # falses = classified_dat[classified_dat.test == 0]
+            # hit ratio
+            fig = plt.figure(figsize = (4, 2), dpi = 300, layout = 'tight')
+            
+            ax1 = fig.add_subplot(1,2,1)
+            ax1.hist(falses.hit_ratio.values,
+                     hit_ratio_bins,
+                     density = True,
+                     color = 'grey',
+                     edgecolor='black',
+                     linewidth=1.2)
+            ax1.set_xlabel('Hit Ratio')            
+            ax1.set_title('False Positive')
+            ax1.set_ylabel('Probability Density')
+            
+            ax2 = fig.add_subplot(1,2,2)
+            ax2.hist(trues.hit_ratio.values,
+                      hit_ratio_bins,
+                      density = True,
+                      color = 'grey',
+                      edgecolor='black',
+                      linewidth=1.2)
+            ax2.set_title('Valid')
+            ax2.set_xlabel('Hit Ratio')
 
-            # # make lattice plot for pubs
-            # figSize = (8,6)
-            # plt.figure()
-            # fig, axs = plt.subplots(3,4,tight_layout = True,figsize = figSize)
-            # # hit ratio
-            # axs[0,1].hist(trues.hit_ratio.values,
-            #               hit_ratio_bins,
-            #               density = True,
-            #               color = 'grey',
-            #               edgecolor='black',
-            #               linewidth=1.2)
-            # axs[0,0].hist(falses.hit_ratio.values,
-            #               hit_ratio_bins,
-            #               density = True,
-            #               color = 'grey',
-            #               edgecolor='black',
-            #               linewidth=1.2)
-            # axs[0,0].set_xlabel('Hit Ratio')
-            # axs[0,1].set_title('Valid')
-            # axs[0,1].set_xlabel('Hit Ratio')
-            # axs[0,0].set_title('False Positive')
-            # axs[0,0].set_title('A',loc = 'left')
+            plt.show()
+            
+            # consecutive record length
+            fig = plt.figure(figsize = (4, 2), dpi = 300, layout = 'tight')
+            
+            ax1 = fig.add_subplot(1,2,1)
+            ax1.hist(falses.cons_length.values,
+                     con_length_bins,
+                     density = True,
+                     color = 'grey',
+                     edgecolor='black',
+                     linewidth=1.2)
+            ax1.set_xlabel('Consecutive Hit Length')
+            ax1.set_title('False Positive')
+            ax1.set_ylabel('Probability Density')
+            
+            ax2 = fig.add_subplot(1,2,2)
+            ax2.hist(trues.cons_length.values,
+                      con_length_bins,
+                      density = True,
+                      color = 'grey',
+                      edgecolor='black',
+                      linewidth=1.2)
+            ax2.set_title('Valid')
+            ax2.set_xlabel('Consecutive Hit Length')
+            
+            plt.show()
+            
+            # power
+            fig = plt.figure(figsize = (4, 2), dpi = 300, layout = 'tight')
+            
+            ax1 = fig.add_subplot(1,2,1)
+            ax1.hist(falses.power.values,
+                     power_bins,
+                     density = True,
+                     color = 'grey',
+                     edgecolor='black',
+                     linewidth=1.2)
+            ax1.set_xlabel('Signal Power')
+            ax1.set_ylabel('Probability Density')
+            ax1.set_title('False Positive')
+            
+            ax2 = fig.add_subplot(1,2,2)
+            ax2.hist(trues.power.values,
+                     power_bins,
+                     density = True,
+                     color = 'grey',
+                     edgecolor='black',
+                     linewidth=1.2)
+            ax2.set_xlabel('Signal Power')
+            ax2.set_title('Valid')
+            
+            plt.show()
 
-            # # consecutive record length
-            # axs[0,3].hist(trues.cons_length.values,
-            #               con_length_bins,
-            #               density = True,
-            #               color = 'grey',
-            #               edgecolor='black',
-            #               linewidth=1.2)
-            # axs[0,2].hist(falses.cons_length.values,
-            #               con_length_bins,
-            #               density = True,
-            #               color = 'grey',
-            #               edgecolor='black',
-            #               linewidth=1.2)
-            # axs[0,2].set_xlabel('Consecutive Hit Length')
-            # axs[0,3].set_title('Valid')
-            # axs[0,3].set_xlabel('Consecutive Hit Length')
-            # axs[0,2].set_title('False Positive')
-            # axs[0,2].set_title('B',loc = 'left')
+            # noise ratio
+            fig = plt.figure(figsize = (4, 2), dpi = 300, layout = 'tight')
+            
+            ax1 = fig.add_subplot(1,2,1)
+            ax1.hist(falses.noise_ratio.values,
+                     noise_bins,
+                     density = True,
+                     color = 'grey',
+                     edgecolor='black',
+                     linewidth=1.2)
+            ax1.set_xlabel('Noise Ratio')
+            ax1.set_ylabel('Probability Density')
+            ax1.set_title('False Positive')
+            
+            ax2 = fig.add_subplot(1,2,2)
+            ax2.hist(trues.noise_ratio.values,
+                     noise_bins,
+                     density = True,
+                     color = 'grey',
+                     edgecolor='black',
+                     linewidth=1.2)
+            ax2.set_xlabel('Noise Ratio')
+            ax2.set_title('Valid')
+            
+            plt.show()
 
-            # # power
-            # axs[1,1].hist(trues.power.values,
-            #               power_bins,
-            #               density = True,
-            #               color = 'grey',
-            #               edgecolor='black',
-            #               linewidth=1.2)
-            # axs[1,0].hist(falses.power.values,
-            #               power_bins,
-            #               density = True,
-            #               color = 'grey',
-            #               edgecolor='black',
-            #               linewidth=1.2)
-            # axs[1,0].set_xlabel('Signal Power')
-            # axs[1,1].set_xlabel('Signal Power')
-            # axs[1,0].set_ylabel('Probability Density')
-            # axs[1,0].set_title('C',loc = 'left')
+            # lag diff
+            fig = plt.figure(figsize = (4, 2), dpi = 300, layout = 'tight')
+            
+            ax1 = fig.add_subplot(1,2,1)
+            ax1.hist(falses.lag_diff.values,
+                     lag_bins,
+                     density = True,
+                     color = 'grey',
+                     edgecolor='black',
+                     linewidth=1.2)
+            ax1.set_xlabel('Lag Differences')
+            ax1.set_ylabel('Probability Density')
+            ax1.set_title('False Positive')
+            
+            ax2 = fig.add_subplot(1,2,2)
+            ax2.hist(trues.lag_diff.values,
+                     lag_bins,
+                     density = True,
+                     color = 'grey',
+                     edgecolor='black',
+                     linewidth=1.2)
+            ax2.set_xlabel('Lag Differences')
+            ax2.set_title('Valid')
+            
+            plt.show()
 
-            # # noise ratio
-            # axs[1,3].hist(trues.noise_ratio.values,
-            #               noise_bins,
-            #               density = True,
-            #               color = 'grey',
-            #               edgecolor='black',
-            #               linewidth=1.2)
-            # axs[1,2].hist(falses.noise_ratio.values,
-            #               noise_bins,
-            #               density = True,
-            #               color = 'grey',
-            #               edgecolor='black',
-            #               linewidth=1.2)
-            # axs[1,2].set_xlabel('Noise Ratio')
-            # axs[1,3].set_xlabel('Noise Ratio')
-            # axs[1,2].set_title('D',loc = 'left')
+            # log posterior ratio
+            fig = plt.figure(figsize = (4, 2), dpi = 300, layout = 'tight')
+            
+            ax1 = fig.add_subplot(1,2,1)
+            ax1.hist(falses.log_posterior_ratio.values,
+                      bins = 20,
+                      density = True,
+                      color = 'grey',
+                      edgecolor='black',
+                      linewidth=1.2)
+            ax1.set_xlabel('Log Posterior Ratio')
+            ax1.set_ylabel('Probability Density')
+            ax1.set_title('False Positive')
+            
+            ax2 = fig.add_subplot(1,2,2)
+            ax2.hist(trues.log_posterior_ratio.values,
+                      bins = 20,
+                      density = True,
+                      color = 'grey',
+                      edgecolor='black',
+                      linewidth=1.2)
+            ax2.set_xlabel('Log Posterior Ratio')
+            ax2.set_title('Valid')
+            
+            plt.show()
 
-            # # lag diff
-            # axs[2,1].hist(trues.lag_diff.values,
-            #               lag_bins,
-            #               density = True,
-            #               color = 'grey',
-            #               edgecolor='black',
-            #               linewidth=1.2)
-            # axs[2,0].hist(falses.lag_diff.values,
-            #               lag_bins,
-            #               density = True,
-            #               color = 'grey',
-            #               edgecolor='black',
-            #               linewidth=1.2)
-            # axs[2,0].set_xlabel('Lag Differences')
-            # axs[2,1].set_xlabel('Lag Differences')
-            # axs[2,0].set_title('E',loc = 'left')
-
-            # # log posterior ratio
-            # axs[2,3].hist(trues.log_likelihood_ratio.values,
-            #               ratio_bins,
-            #               density = True,
-            #               color = 'grey',
-            #               edgecolor='black',
-            #               linewidth=1.2)
-            # axs[2,2].hist(falses.log_likelihood_ratio.values,
-            #               ratio_bins,
-            #               density = True,
-            #               color = 'grey',
-            #               edgecolor='black',
-            #               linewidth=1.2)
-            # axs[2,2].set_xlabel('Log Likelihood Ratio')
-            # axs[2,3].set_xlabel('Log Likelihood Ratio')
-            # axs[2,2].set_title('F',loc = 'left')
-
-            # if self.figureWS != None:
-            #     if self.rec_list != None:
-            #        plt.savefig(os.path.join(self.figureWS,"%s_lattice_class.png"%(self.recType)),
-            #                    bbox_inches = 'tight',
-            #                    dpi = 900)
-            #     else:
-            #        plt.savefig(os.path.join(self.figureWS,"%s_%s_lattice_class.png"%(self.recType,self.site)),
-            #                    bbox_inches = 'tight',
-            #                    dpi = 900)
         else:
            print("There were insufficient data to quantify summary statistics")
            print("All remaining were classified as %s suggesting there is no more improvement in the model"%(det_class_count.index[0]))
-                         
+
+    def undo_classification(self, rec_id, freq_code=None, class_iter=None):
+        # Read the table from the HDF5 file
+        with pd.HDFStore(self.db, 'r+') as store:
+            if 'classified' in store:
+                df = store['classified']  # Replace with your table name
+        
+                # Build the condition based on provided arguments
+                condition = (df['rec_id'] == rec_id)
+                if freq_code is not None:
+                    condition &= (df['freq_code'] == freq_code)
+                if class_iter is not None:
+                    condition &= (df['class_iter'] == class_iter)
+        
+                # Update or delete the rows based on your requirement
+                # For deletion:
+                df = df[~condition]
+                
+                # Delete the existing table
+                store.remove('classified')
+        
+                # Save the modified DataFrame back to the HDF5 file
+                store.put('classified', df, format='table', data_columns=True, append = False)       
+
+
+    def make_recaptures_table(self):
+        '''method creates a recaptures key in the hdf file'''
+        
+        # iterate over fish, get last classificaiton, presences, and overlapping detections
+        for fish in self.tags[self.tags.tag_type == 'study']:
+            fish_dat = self.tags[self.tags.freq_code == fish]
+            # get the receivers associated with this particular network node
+            receivers = fish_dat.rec_id.unique()
+            
+            for rec in receivers:
+                # get this receivers data from the classified key
+                rec_dat = pd.read_hdf(self.db,'classified', 
+                                      where = 'freq_code = %s and rec_id = %s'%(fish,rec))
+                rec_dat = rec_dat[rec_dat.iter == rec_dat.iter.max()]
+                rec_dat = rec_dat[rec_dat.test == 1]
+                rec_dat.set_index('epoch')
+                
+                # get data from overlapping associated with this fish and receiver
+                overlap_dat = pd.read_hdf(self.db,'overlapping', 
+                                          where = 'freq_code = %s and rec_id = %s'%(fish,rec))
+                overlap_dat.set_index('epoch')
+                
+                # join on epoch
+                recaps = pd.merge(rec_dat,overlap_dat, how = 'left')
+                recaps.reset_index(inplace = True)
+                recaps = recaps[recaps.overlapping == 0]
+                
+                # keep certain columns and write to hdf
+                recaps = recaps['freq_code',
+                                'rec_id',
+                                'epoch',
+                                'time_stamp',
+                                'power',
+                                'noise_ratio',
+                                'lag',
+                                'det_hist',
+                                'hit_ratio',
+                                'cons_det',
+                                'cons_length',
+                                'likelihood_T',
+                                'likelihood_F',
+                                'bout_no']
+                
+                # keep it tidy cuz hdf is fragile
+                recaps = recaps.astype({'freq_code': 'object',
+                                        'epoch': 'float32',
+                                        'rec_id': 'object',
+                                        'time_stamp': 'datetime64',
+                                        'power': 'float32', 
+                                        'noise_ratio': 'float32',
+                                        'lag': 'float32',
+                                        'det_hist': 'object',
+                                        'hit_ratio': 'float32',
+                                        'cons_det': 'int32',
+                                        'cons_length': 'float32',
+                                        'likelihood_T': 'float32',
+                                        'likelihood_F': 'float32',
+                                        'posterior_T': 'float32',
+                                        'bout_no':'int32'})
+                
+                with pd.HDFStore(self.db, mode='a') as store:
+                    store.append(key = 'recaptures',
+                                 value = recaps, 
+                                 format = 'table', 
+                                 index = False,
+                                 min_itemsize = {'freq_code':20,
+                                                 'rec_type':20,
+                                                 'rec_id':20,
+                                                 'det_hist':20},
+                                 append = True, 
+                                 chunksize = 1000000)
+                
+                
+                
+
+            
+                    
