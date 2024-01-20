@@ -8,4 +8,4 @@ from .naive_bayes import *
 from .parsers import *
 
 # Finally, import the radio_project class, which depends on parsers, predictor, and naive_bayes
-from .radio_project_refactor import *
+from .radio_project import *

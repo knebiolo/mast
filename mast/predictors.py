@@ -71,7 +71,7 @@ def series_hit (lags, pulse_rate, mort_rate, status,):
                                    0)
                           )
     
-def detection_history (Epoch, pulse_rate, num_detects, num_channels, scan_time, channels, status = 'A'):
+def detection_history (epoch, pulse_rate, num_detects, num_channels, scan_time, channels, status = 'A'):
     '''
     Calculate detection history for multi-channel switching receivers.
 
@@ -117,19 +117,24 @@ def detection_history (Epoch, pulse_rate, num_detects, num_channels, scan_time, 
     # build detection history ushing shifts
     if num_channels > 1:
         for i in np.arange(num_detects * -1 , num_detects + 1, 1):
-            epoch_shift_dict[i] = pd.Series(Epoch).shift(i * -1).to_numpy().astype(np.int32)
-            lower_limit_dict[i] = np.round(Epoch + ((scan_time * channels * i) - 1),0).astype(np.int32)
-            upper_limit_dict[i] = np.round(Epoch + ((scan_time * channels * i) + 1),0).astype(np.int32)
+            epoch_shift_dict[i] = pd.Series(epoch).shift(i * -1).to_numpy().astype(np.float32)
+            if scan_time > pulse_rate: 
+                lower_limit_dict[i] = np.round(epoch + (pulse_rate * i - 1),0).astype(np.float32)
+                upper_limit_dict[i] = np.round(epoch + (pulse_rate * i + 1),0).astype(np.float32)
+            
+            else:
+                lower_limit_dict[i] = np.round(epoch + ((scan_time * channels * i) - 1),0).astype(np.float32)
+                upper_limit_dict[i] = np.round(epoch + ((scan_time * channels * i) + 1),0).astype(np.float32)
 
     else:
         for i in np.arange(num_detects * -1 , num_detects + 1, 1):
-            epoch_shift_dict[i] = pd.Series(Epoch).shift(i * -1).to_numpy().astype(np.int32)
-            lower_limit_dict[i] = np.round(Epoch + (pulse_rate * i - 1),0).astype(np.int32)
-            upper_limit_dict[i] = np.round(Epoch + (pulse_rate * i + 1),0).astype(np.int32)
+            epoch_shift_dict[i] = pd.Series(epoch).shift(i * -1).to_numpy().astype(np.float32)
+            lower_limit_dict[i] = np.round(epoch + (pulse_rate * i - 1),0).astype(np.float32)
+            upper_limit_dict[i] = np.round(epoch + (pulse_rate * i + 1),0).astype(np.float32)
 
     for i in np.arange(num_detects * -1 , num_detects + 1, 1):
         if i == 0:
-            detection_history_dict[i] = np.repeat('1',len(Epoch))
+            detection_history_dict[i] = np.repeat('1',len(epoch))
 
         else:
             detection_history_dict[i] = np.where(np.logical_and(epoch_shift_dict[i] >= lower_limit_dict[i],
@@ -151,8 +156,8 @@ def detection_history (Epoch, pulse_rate, num_detects, num_channels, scan_time, 
     det_hist = row_sums/det_hist_length
 
     # calculate consecutive record length
-    max_count = np.zeros(Epoch.shape)
-    current_count = np.repeat(1,len(Epoch.shape))
+    max_count = np.zeros(epoch.shape)
+    current_count = np.repeat(1,len(epoch.shape))
     for i in np.arange(num_detects * -1 , num_detects + 1, 1):
         current_col = detection_history_dict[i]
         current_count = np.where(current_col == '1', current_count + 1, 0)

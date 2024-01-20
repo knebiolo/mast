@@ -9,9 +9,9 @@ import pandas as pd
 import os
 import h5py
 import datetime
-import biotas_refactor.naive_bayes as naive_bayes
-import biotas_refactor.parsers as  parsers
-import biotas_refactor.predictors as predictors
+import mast.naive_bayes as naive_bayes
+import mast.parsers as  parsers
+import mast.predictors as predictors
 import matplotlib.pyplot as plt
 from matplotlib import rcParams
 from scipy import interpolate
@@ -473,6 +473,32 @@ class radio_project():
                                           'rec_type':20,
                                           'rec_id':20,
                                           'det_hist':20})      
+                
+    def undo_import(self, rec_id):
+        # Read the table from the HDF5 file
+        with pd.HDFStore(self.db, 'r+') as store:
+            if 'raw_data' in store:
+                df = store['raw_data']  # Replace with your table name
+        
+                # Build the condition based on provided arguments
+                condition = (df['rec_id'] == rec_id)
+
+                # Update or delete the rows based on your requirement
+                # For deletion:
+                df = df[~condition]
+                
+                # Delete the existing table
+                store.remove('raw_data')
+        
+                # Save the modified DataFrame back to the HDF5 file
+                store.put('raw_data',
+                          df,
+                          format='table',
+                          data_columns=True, 
+                          append = False,
+                          min_itemsize = {'freq_code':20,
+                                          'rec_type':20,
+                                          'rec_id':20})  
         
     def create_training_data(self, rec_type, reclass_iter = None, rec_list = None):
         '''Function creates training dataset for current round of classification -
