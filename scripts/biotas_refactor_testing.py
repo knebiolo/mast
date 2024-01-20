@@ -32,13 +32,13 @@ project = radio_project(project_dir,
                         nodes_data)
 
 #%%  import data
-rec_id = 'R001'
-rec_type = 'srx1200'
+rec_id = 'R004'
+rec_type = 'srx800'
 training_dir = os.path.join(project_dir,'Data','Training_Files')
 db_dir = os.path.join(project_dir,'%s.h5'%(db_name))
 scan_time = 5.0         
 channels = 2
-antenna_to_rec_dict = {'A0':'R001'}
+antenna_to_rec_dict = {'A0':rec_id}
 
 project.telem_data_import(rec_id,
                           rec_type,
@@ -52,8 +52,8 @@ project.telem_data_import(rec_id,
 
 #%%  train data
 # set parameters and get a list of fish to iterate over
-rec_id = 'R001'
-rec_type = 'srx1200'
+rec_id = 'R004'
+rec_type = 'srx800'
 fishes = project.get_fish(rec_id = rec_id)
 
 # iterate over fish and train
@@ -64,7 +64,7 @@ for fish in fishes:
 project.training_summary(rec_type, site = [rec_id])
 
 # undo training
-#project.undo_training(rec_id)
+# project.undo_training(rec_id)
 
 #%% classify data
 #set parameters and get a list of fish to iterate over

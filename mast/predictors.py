@@ -117,20 +117,19 @@ def detection_history (epoch, pulse_rate, num_detects, num_channels, scan_time, 
     # build detection history ushing shifts
     if num_channels > 1:
         for i in np.arange(num_detects * -1 , num_detects + 1, 1):
-            epoch_shift_dict[i] = pd.Series(epoch).shift(i * -1).to_numpy().astype(np.float32)
-            if scan_time > pulse_rate: 
-                lower_limit_dict[i] = np.round(epoch + (pulse_rate * i - 1),0).astype(np.float32)
-                upper_limit_dict[i] = np.round(epoch + (pulse_rate * i + 1),0).astype(np.float32)
-            
-            else:
-                lower_limit_dict[i] = np.round(epoch + ((scan_time * channels * i) - 1),0).astype(np.float32)
-                upper_limit_dict[i] = np.round(epoch + ((scan_time * channels * i) + 1),0).astype(np.float32)
+            epoch_shift_dict[i] = np.round(pd.Series(epoch).shift(i * -1).to_numpy().astype(np.float32),6)
+            lower_limit_dict[i] = np.where(scan_time > 2 * pulse_rate,
+                                           epoch + (pulse_rate * i - 1),
+                                           epoch + ((scan_time * channels * i) - 1))
+            upper_limit_dict[i] = np.where(scan_time > 2 * pulse_rate, 
+                                           epoch + (pulse_rate * i + 1),
+                                           epoch + ((scan_time * channels * i) + 1))
 
     else:
         for i in np.arange(num_detects * -1 , num_detects + 1, 1):
             epoch_shift_dict[i] = pd.Series(epoch).shift(i * -1).to_numpy().astype(np.float32)
-            lower_limit_dict[i] = np.round(epoch + (pulse_rate * i - 1),0).astype(np.float32)
-            upper_limit_dict[i] = np.round(epoch + (pulse_rate * i + 1),0).astype(np.float32)
+            lower_limit_dict[i] = epoch + (pulse_rate * i - 1)
+            upper_limit_dict[i] = epoch + (pulse_rate * i + 1)
 
     for i in np.arange(num_detects * -1 , num_detects + 1, 1):
         if i == 0:

@@ -67,7 +67,7 @@ def ares(file_name,
                        inplace = True)
         
     # now do this stuff to files regardless of type
-    telem_dat['epoch'] = (telem_dat['time_stamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()        
+    telem_dat['epoch'] = np.round((telem_dat.time_stamp - pd.Timestamp("1970-01-01")) / pd.Timedelta('1s'),6)
     telem_dat['rec_type'] = np.repeat(rec_type,len(telem_dat))
     telem_dat['rec_id'] = np.repeat(rec_id,len(telem_dat))
     telem_dat['channels'] = np.repeat(channels,len(telem_dat))
@@ -154,7 +154,7 @@ def orion_import(file_name,
             print ("Invalid timestamps in raw data, cannot import")
         else:
             # create epoch
-            telem_dat['epoch'] = (telem_dat['time_stamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()
+            telem_dat['epoch'] = np.round((telem_dat.time_stamp - pd.Timestamp("1970-01-01")) / pd.Timedelta('1s'),6)
             
             # drop unnecessary columns 
             telem_dat.drop (['Date','Time','Freq','Code','Site'],axis = 1, inplace = True)
@@ -281,7 +281,7 @@ def vr2_import(file_name,db_dir,study_tags, rec_id):
         telem_dat['transmitter'] = telem_dat['transmitter'].str.split("-", n = 2, expand = True)[2]
         telem_dat['transmitter'] = telem_dat.transmitter.astype(str)
         telem_dat.rename(columns = {'Receiver':'rec_id','transmitter':'freq_code'}, inplace = True)
-        telem_dat['epoch'] = (telem_dat['time_stamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()
+        telem_dat['epoch'] = np.round((telem_dat.time_stamp - pd.Timestamp("1970-01-01")) / pd.Timedelta('1s'),6)
         try:
             telem_dat.drop (['Date and Time (UTC)', 'Transmitter Name','Transmitter Serial','Sensor Value','Sensor Unit','Station Name','Latitude','Longitude','Transmitter Type','Sensor Precision'],axis = 1, inplace = True)
         except KeyError:
@@ -437,7 +437,7 @@ def srx1200(file_name,
                                           orient = 'index', 
                                           columns = ['change_date'])
         setup_df['change_date'] = pd.to_datetime(setup_df.change_date)
-        setup_df['epoch'] = (setup_df['change_date'] - datetime.datetime(1970,1,1)).dt.total_seconds()
+        setup_df['epoch'] = (setup_df.change_date - pd.Timestamp("1970-01-01")) / pd.Timedelta('1s')        
         setup_df.reset_index(inplace = True, drop = False)
         setup_df.rename(columns = {'index':'setup'}, inplace = True)
     
@@ -490,7 +490,7 @@ def srx1200(file_name,
         telem_dat['time_stamp'] = pd.to_datetime(telem_dat.time_stamp)
         
         # calculate Epoch
-        telem_dat['epoch'] = (telem_dat['time_stamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()       
+        telem_dat['epoch'] = (telem_dat.time_stamp - pd.Timestamp("1970-01-01")) / pd.Timedelta('1s')
         
         # format frequency code
         telem_dat['FreqNo'] = telem_dat['Freq [MHz]'].apply(lambda x: f"{x:.3f}" )
@@ -566,8 +566,8 @@ def srx1200(file_name,
         telem_dat['time_stamp'] = pd.to_datetime(telem_dat.time_stamp)
         
         # calculate Epoch
-        telem_dat['epoch'] = (telem_dat['time_stamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()       
-        
+        telem_dat['epoch'] = np.round((telem_dat.time_stamp - pd.Timestamp("1970-01-01")) / pd.Timedelta('1s'),6)
+                
         # format frequency code
         telem_dat['FreqNo'] = telem_dat['Freq [MHz]'].apply(lambda x: f"{x:.3f}" )
         telem_dat = telem_dat[telem_dat['TagID/BPM'] != 999]
@@ -707,7 +707,14 @@ def srx800(file_name,
             scanTimeSplit = scanTimeStr.split(':')
             scan_time = float(scanTimeSplit[1])
             scan_times[scan_time_number] = scan_time
-            scan_time_number = scan_time_number + 1
+            scan_time_number = scan_time_number + 1  
+            
+        if 'scan time' in row[1][0]:
+            scanTimeStr = row[1]['line'][-7:-1]
+            scanTimeSplit = scanTimeStr.split(':')
+            scan_time = float(scanTimeSplit[1])
+            scan_times[scan_time_number] = scan_time
+            scan_time_number = scan_time_number + 1             
             
         if 'Active scan_table:' in row[1][0]:
             idx0 = row[0] + 2
@@ -730,6 +737,13 @@ def srx800(file_name,
     setup_df = pd.DataFrame.from_dict(setups, 
                                       orient = 'index', 
                                       columns = ['change_date'])
+    if data_format == 'alternate':
+        split = setup_df['change_date'].str.split(' ', expand=True)
+        setup_df['day0'] = np.repeat(pd.to_datetime("1900-01-01"),len(setup_df))
+        setup_df['Date'] = setup_df['day0'] + pd.to_timedelta(split[1].astype(int), unit='d')
+        setup_df['change_date'] = setup_df.Date.astype(np.str) + ' ' + split[2]
+        
+
     setup_df['change_date'] = pd.to_datetime(setup_df.change_date)
     setup_df['epoch'] = (setup_df['change_date'] - datetime.datetime(1970,1,1)).dt.total_seconds()
     setup_df.reset_index(inplace = True, drop = False)
@@ -834,7 +848,7 @@ def srx800(file_name,
             telem_dat_sub['time_stamp'] = pd.to_datetime(telem_dat_sub['Date'] + ' ' + telem_dat_sub['Time'])
             
             # get UNIX epoch
-            telem_dat_sub['epoch'] = (telem_dat_sub['time_stamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()
+            telem_dat_sub['epoch'] = np.round((telem_dat_sub.time_stamp - pd.Timestamp("1970-01-01")) / pd.Timedelta('1s'),6)
             
             # get setup number for every row
             telem_dat_sub['setup'] = get_setup(telem_dat_sub.epoch.values,
@@ -1079,7 +1093,7 @@ def srx600(file_name,
                 telem_dat_sub.drop(['day0','DayNumber'],axis = 1, inplace = True)
                 
                 # calculate unix epoch
-                telem_dat_sub['epoch'] = (telem_dat_sub['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()
+                telem_dat['epoch'] = np.round((telem_dat.time_stamp - pd.Timestamp("1970-01-01")) / pd.Timedelta('1s'),6)
                 
                 # clean up some more
                 telem_dat_sub.drop (['Date','Time','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
@@ -1161,7 +1175,7 @@ def srx600(file_name,
                 telem_dat_sub['time_stamp'] = pd.to_datetime(telem_dat_sub['Date'] + ' ' + telem_dat_sub['Time'])# create timestamp field from date and time and apply to index
                 
                 # calculate UNIX epoch 
-                telem_dat_sub['epoch'] = (telem_dat_sub['timeStamp'] - datetime.datetime(1970,1,1)).dt.total_seconds()
+                telem_dat_sub['epoch'] = np.round((telem_dat_sub.time_stamp - pd.Timestamp("1970-01-01")) / pd.Timedelta('1s'),6)
                 
                 # calculate noise ratio
                 telem_dat_sub = predictors.noise_ratio(5.0,

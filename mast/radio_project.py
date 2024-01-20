@@ -206,10 +206,12 @@ class radio_project():
     
         # do some data management when importing training dataframe
         train_dat['time_stamp'] = pd.to_datetime(train_dat.time_stamp)
-        train_dat['epoch'] = train_dat.epoch.values.astype(np.int32)
+        train_dat['epoch'] = np.round((train_dat.time_stamp - pd.Timestamp("1970-01-01")) / pd.Timedelta('1s'),6)
         train_dat.sort_values(by = 'epoch', inplace = True)
         
-        train_dat = train_dat.drop_duplicates(subset = 'time_stamp')
+        train_dat.drop_duplicates(subset = 'time_stamp', 
+                                  keep = 'first', 
+                                  inplace = True)
         
         # set some object variables
         rec_type = self.receivers.at[rec_id,'rec_type']
@@ -233,6 +235,8 @@ class radio_project():
         
         mort_rate = 8888.
         # calculate predictors
+        # if plausible == 1:
+        #     print ('debug check det hist')
         train_dat['detection'] = np.repeat(plausible,len(train_dat))
         train_dat['lag'] = train_dat.epoch.diff()
         train_dat['lag_diff'] = train_dat.lag.diff()
