@@ -173,21 +173,31 @@ class radio_project():
         
         print ("Raw Telemetry Data Import Completed")
     
-    def get_fish(self, rec_id, reclass_iter = 0):
+    def get_fish(self, rec_id, train = True, reclass_iter = None):
         
-        if reclass_iter == 0:
-            dat = pd.read_hdf(self.db, key = 'raw_data', where = f'rec_id = "{rec_id}"')
-            #dat = dat[dat.rec_id == rec_id]      
-        
+        tags_no_idx = self.tags.reset_index(drop = True)
+
+        if reclass_iter == None and train == True:
+            dat = pd.read_hdf(self.db, 
+                              key = 'raw_data',
+                              where = f'rec_id = "{rec_id}"')
+            dat = pd.merge(dat, tags_no_idx, on='freq_code', how='left')
+            dat = dat[(dat.tag_type != 'beacon') & (dat.tag_type != 'test')]
+            
+        elif reclass_iter == None and train == False:
+            dat = pd.read_hdf(self.db, 
+                              key = 'raw_data',
+                              where = f'rec_id = "{rec_id}"')
+            dat = pd.merge(dat, tags_no_idx, on='freq_code', how='left')
+            dat = dat[dat.tag_type == 'study']
+
         else:
             itr = reclass_iter -1 
-            dat = pd.read_hdf(self.db, key = 'classified', where = f'(rec_id = "{rec_id}") & (iter == {itr})')
-            #dat = dat[(dat.rec_id == rec_id) * (dat.iter ==  reclass_iter - 1)]     
-            
-        tags_no_idx = self.tags.reset_index(drop = True)
-        dat = pd.merge(dat, tags_no_idx, on='freq_code', how='left')
-        #TODO - make this smart so case doesn't matter...
-        dat = dat[(dat.tag_type != 'beacon') & (dat.tag_type != 'test')]
+            dat = pd.read_hdf(self.db, 
+                              key = 'classified',
+                              where = f'(rec_id = "{rec_id}") & (iter == {itr})')
+            dat = pd.merge(dat, tags_no_idx, on='freq_code', how='left')
+            dat = dat[dat.tag_type == 'study']
     
         return dat.freq_code.unique()
     
@@ -1003,73 +1013,80 @@ class radio_project():
         '''method creates a recaptures key in the hdf file'''
         
         # iterate over fish, get last classificaiton, presences, and overlapping detections
-        for fish in self.tags[self.tags.tag_type == 'study']:
+        for fish in self.tags[self.tags.tag_type == 'study'].freq_code.values:
             fish_dat = self.tags[self.tags.freq_code == fish]
             # get the receivers associated with this particular network node
-            receivers = fish_dat.rec_id.unique()
+            receivers = self.receivers.rec_id.unique()
             
             for rec in receivers:
                 # get this receivers data from the classified key
-                rec_dat = pd.read_hdf(self.db,'classified', 
-                                      where = 'freq_code = %s and rec_id = %s'%(fish,rec))
-                rec_dat = rec_dat[rec_dat.iter == rec_dat.iter.max()]
-                rec_dat = rec_dat[rec_dat.test == 1]
-                rec_dat.set_index('epoch')
-                
+                rec_dat = pd.read_hdf(self.db,
+                                      key = 'classified',
+                                      where = f'(freq_code == "{fish}") & (rec_id == "{rec}")')
+
                 # get data from overlapping associated with this fish and receiver
-                overlap_dat = pd.read_hdf(self.db,'overlapping', 
-                                          where = 'freq_code = %s and rec_id = %s'%(fish,rec))
-                overlap_dat.set_index('epoch')
+                overlap_dat = pd.read_hdf(self.db,
+                                          key = 'overlapping', 
+                                          where = f'(freq_code == "{fish}") & (rec_id == "{rec}")')
                 
-                # join on epoch
-                recaps = pd.merge(rec_dat,overlap_dat, how = 'left')
-                recaps.reset_index(inplace = True)
-                recaps = recaps[recaps.overlapping == 0]
-                
-                # keep certain columns and write to hdf
-                recaps = recaps['freq_code',
-                                'rec_id',
-                                'epoch',
-                                'time_stamp',
-                                'power',
-                                'noise_ratio',
-                                'lag',
-                                'det_hist',
-                                'hit_ratio',
-                                'cons_det',
-                                'cons_length',
-                                'likelihood_T',
-                                'likelihood_F',
-                                'bout_no']
-                
-                # keep it tidy cuz hdf is fragile
-                recaps = recaps.astype({'freq_code': 'object',
-                                        'epoch': 'float32',
-                                        'rec_id': 'object',
-                                        'time_stamp': 'datetime64',
-                                        'power': 'float32', 
-                                        'noise_ratio': 'float32',
-                                        'lag': 'float32',
-                                        'det_hist': 'object',
-                                        'hit_ratio': 'float32',
-                                        'cons_det': 'int32',
-                                        'cons_length': 'float32',
-                                        'likelihood_T': 'float32',
-                                        'likelihood_F': 'float32',
-                                        'posterior_T': 'float32',
-                                        'bout_no':'int32'})
-                
-                with pd.HDFStore(self.db, mode='a') as store:
-                    store.append(key = 'recaptures',
-                                 value = recaps, 
-                                 format = 'table', 
-                                 index = False,
-                                 min_itemsize = {'freq_code':20,
-                                                 'rec_type':20,
-                                                 'rec_id':20,
-                                                 'det_hist':20},
-                                 append = True, 
-                                 chunksize = 1000000)
+                if len(rec_dat) > 0:
+                    rec_dat = rec_dat[rec_dat.iter == rec_dat.iter.max()]
+                    rec_dat = rec_dat[rec_dat.test == 1]
+                    rec_dat.set_index('epoch')
+                    
+                    if len(overlap_dat) > 0:
+                        overlap_dat.set_index('epoch')
+                        rec_dat = pd.merge(rec_dat,overlap_dat, how = 'left')
+                        rec_dat.reset_index(inplace = True)
+                        rec_dat = rec_dat[rec_dat.overlapping == 0]
+
+                    
+                    # keep certain columns and write to hdf
+                    rec_dat = rec_dat[['freq_code',
+                                    'rec_id',
+                                    'epoch',
+                                    'time_stamp',
+                                    'power',
+                                    'noise_ratio',
+                                    'lag',
+                                    'det_hist',
+                                    'hit_ratio',
+                                    'cons_det',
+                                    'cons_length',
+                                    'likelihood_T',
+                                    'likelihood_F']]
+                    
+                    # keep it tidy cuz hdf is fragile
+                    rec_dat = rec_dat.astype({'freq_code': 'object',
+                                            'epoch': 'float32',
+                                            'rec_id': 'object',
+                                            'time_stamp': 'datetime64',
+                                            'power': 'float32', 
+                                            'noise_ratio': 'float32',
+                                            'lag': 'float32',
+                                            'det_hist': 'object',
+                                            'hit_ratio': 'float32',
+                                            'cons_det': 'int32',
+                                            'cons_length': 'float32',
+                                            'likelihood_T': 'float32',
+                                            'likelihood_F': 'float32'})
+                    
+                    with pd.HDFStore(self.db, mode='a') as store:
+                        store.append(key = 'recaptures',
+                                     value = rec_dat, 
+                                     format = 'table', 
+                                     index = False,
+                                     min_itemsize = {'freq_code':20,
+                                                     'rec_id':20,
+                                                     'det_hist':20},
+                                     append = True, 
+                                     chunksize = 1000000,
+                                     data_columns = True)
+                        
+                    print ('recaps for fish %s at receiver %s compiled' %(fish,rec))
+        
+        tbl_recaptures = pd.read_hdf(self.db,key = 'recaptures')
+        tbl_recaptures.to_csv(os.path.join(self.output_dir,'recaptures.csv'))
                 
                 
                 

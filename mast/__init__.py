@@ -4,6 +4,9 @@ from .predictors import *
 # Import the naive_bayes submodule next
 from .naive_bayes import *
 
+# Import the overlap removal submodule
+from .overlap_removal import *
+
 # Import the parsers submodule, which depends on predictor
 from .parsers import *
 

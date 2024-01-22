@@ -68,10 +68,12 @@ project.training_summary(rec_type, site = [rec_id])
 
 #%% classify data
 #set parameters and get a list of fish to iterate over
-rec_id = 'T7'
-rec_type = 'orion'
+rec_id = 'R004'
+rec_type = 'srx1200'
 class_iter = None # start with none - if we need more classifications then 2
-fishes = project.get_fish(rec_id = rec_id)
+fishes = project.get_fish(rec_id = rec_id, 
+                          train = False, 
+                          reclass_iter = class_iter)
 threshold_ratio = 1.0 # 1.0 = MAP Hypothesis
 
 # then generate training data for the classifier
@@ -88,7 +90,7 @@ for fish in fishes:
 # generate summary statistics
 project.classification_summary(rec_id, class_iter)
 
-#project.undo_classification(rec_id, class_iter = class_iter)
+# project.undo_classification(rec_id, class_iter = class_iter)
 
 #%% cross validate
 
@@ -96,7 +98,7 @@ project.classification_summary(rec_id, class_iter)
 #%% calculate bouts
 # get nodes
 #nodes = project.nodes.node
-nodes = ['S2']
+nodes = ['R001','R002','R003','R004']
 
 # for each node determine the bout threshold and enumerate presence
 for node in nodes:
@@ -106,13 +108,14 @@ for node in nodes:
     # Find the knot by minimizing the objective function as before, now also passing spline_der
     threshold = bout.fit_processes()
     
+    # calculate presences
     bout.presence(threshold)
     
     
 #%% reduce overlap
 # create edges showing parent:child relationships for nodes in network
-edges = [('T5','S2')]
-nodes = ['T5','S2']
+edges = [('R001','R002'),('R003','R004')]
+nodes = ['R001','R002','R003','R004']
     
 # create an overlap object and apply nested doll algorithm
 doll = mast.overlap_reduction(nodes, edges, project)
