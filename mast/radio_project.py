@@ -1014,20 +1014,23 @@ class radio_project():
         
         # iterate over fish, get last classificaiton, presences, and overlapping detections
         for fish in self.tags[self.tags.tag_type == 'study'].freq_code.values:
-            fish_dat = self.tags[self.tags.freq_code == fish]
             # get the receivers associated with this particular network node
             receivers = self.receivers.rec_id.unique()
             
-            for rec in receivers:
+            for rec in self.receivers.rec_id.unique():
                 # get this receivers data from the classified key
                 rec_dat = pd.read_hdf(self.db,
                                       key = 'classified',
                                       where = f'(freq_code == "{fish}") & (rec_id == "{rec}")')
 
-                # get data from overlapping associated with this fish and receiver
-                overlap_dat = pd.read_hdf(self.db,
-                                          key = 'overlapping', 
-                                          where = f'(freq_code == "{fish}") & (rec_id == "{rec}")')
+                try:
+                    # get data from overlapping associated with this fish and receiver
+                    overlap_dat = pd.read_hdf(self.db,
+                                              key = 'overlapping', 
+                                              where = f'(freq_code == "{fish}") & (rec_id == "{rec}")')
+                    
+                except:
+                    overlap_dat = []
                 
                 if len(rec_dat) > 0:
                     rec_dat = rec_dat[rec_dat.iter == rec_dat.iter.max()]
