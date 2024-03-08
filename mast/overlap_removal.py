@@ -25,7 +25,8 @@ class bout():
         self.db = radio_project.db
 
         # get the receivers associated with this particular network node
-        self.receivers = radio_project.receivers[radio_project.receivers.node == node].rec_id.unique()           # get the unique receivers associated with this node
+        recs = radio_project.receivers[radio_project.receivers.node == node]
+        self.receivers = recs.index  # get the unique receivers associated with this node
         self.data = pd.DataFrame(columns = ['freq_code','epoch','rec_id'])            # set up an empty data frame
 
         # for every receiver
@@ -38,7 +39,7 @@ class bout():
             rec_dat = rec_dat[rec_dat.test == 1]
             rec_dat = rec_dat[['freq_code','epoch','rec_id']]
             rec_dat = rec_dat.astype({'freq_code':'object',
-                            'epoch':'int32',
+                            'epoch':'float32',
                             'rec_id':'object'})
             
             self.data = self.data.append(rec_dat)
@@ -46,7 +47,6 @@ class bout():
         # clean up and bin the lengths
         self.data.drop_duplicates(keep = 'first', inplace = True)
         self.data.sort_values(by = ['freq_code','epoch'], inplace = True)
-        self.data.reset_index(drop=True, inplace=True)
         self.data['det_lag'] = self.data.groupby('freq_code')['epoch'].diff().abs() // lag_window * lag_window
         self.data.dropna(axis = 0, inplace = True)   # drop Nan from the data
         self.node = node
@@ -230,6 +230,7 @@ class bout():
         bounds_upper = [np.inf, np.inf, np.inf, np.inf, np.inf, np.inf, initial_knot_guesses[1], bins.max()]
     
         # Define a three-segment exponential decay function
+        #TODO - is the math correct?
         def three_exp_decay(x, a1, b1, a2, b2, a3, b3, k1, k2):
             condlist = [x < k1, (k1 <= x) & (x < k2), x >= k2]
             funclist = [
@@ -252,7 +253,7 @@ class bout():
                                   log_freqs,
                                   p0=p0, 
                                   bounds=(bounds_lower, bounds_upper))            # Calculate the errors
-            
+            #TODO - AIC or BIC possible expansion?
             y_fit = three_exp_decay(bins, *params)
             error = np.sum((log_freqs - y_fit) ** 2)
             return error
@@ -389,7 +390,7 @@ class bout():
             fish_dat['bout_no'] = bout_no 
             
             fish_dat = fish_dat.astype({'freq_code': 'object',
-                                        'epoch': 'int32',
+                                        'epoch': 'float32',
                                         'rec_id': 'object',
                                         'class': 'object',
                                         'bout_no':'int32',
@@ -438,7 +439,7 @@ class overlap_reduction():
 
         Nodes must be a list of nodes and edges must be a list of tuples.
         Edge example: [(1,2),(2,3)],
-        Edges always in format of [(from,to)] or [(outer,inner)] or [(child,parent)]'''
+        Edges always in format of [(from,to)] or [(outer,inner)] or [(parent,child)]'''
         self.db = radio_project.db
 
         # Step 1, create a directed graph from list of edges
@@ -451,7 +452,8 @@ class overlap_reduction():
         
         for i in nodes:
             #import data and add to node dict
-            node_recs = radio_project.receivers[radio_project.receivers.node == i].rec_id.unique()          # get the unique receivers associated with this node
+            node_recs = radio_project.receivers[radio_project.receivers.node == i]
+            node_recs = node_recs.index         # get the unique receivers associated with this node
             pres_data = pd.DataFrame(columns = ['freq_code','epoch','node','rec_id','presence'])        # set up an empty data frame
             recap_data = pd.DataFrame(columns = ['freq_code','epoch','node','rec_id'])
             
