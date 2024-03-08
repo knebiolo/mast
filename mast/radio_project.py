@@ -486,7 +486,11 @@ class radio_project():
                           min_itemsize = {'freq_code':20,
                                           'rec_type':20,
                                           'rec_id':20,
+<<<<<<< Updated upstream:mast/radio_project.py
                                           'det_hist':20})      
+=======
+                                          'det_hist':20})  
+>>>>>>> Stashed changes:biotas_refactor/radio_project.py
                 
     def undo_import(self, rec_id):
         # Read the table from the HDF5 file

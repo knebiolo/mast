@@ -9,8 +9,13 @@ Created on Thu Nov 16 09:42:22 2023
 import os
 import sys
 sys.path.append(r"C:\Users\knebiolo\OneDrive - Kleinschmidt Associates, Inc\Software\mast")
+<<<<<<< Updated upstream
 from mast.radio_project import radio_project
 import mast
+=======
+from biotas_refactor.radio_project import radio_project
+import biotas_refactor as biotas
+>>>>>>> Stashed changes
 import pandas as pd
 
 #%% set up project
@@ -32,6 +37,7 @@ project = radio_project(project_dir,
                         nodes_data)
 
 #%%  import data
+<<<<<<< Updated upstream
 rec_id = 'R004'
 rec_type = 'srx800'
 training_dir = os.path.join(project_dir,'Data','Training_Files')
@@ -39,6 +45,15 @@ db_dir = os.path.join(project_dir,'%s.h5'%(db_name))
 scan_time = 5.0         
 channels = 2
 antenna_to_rec_dict = {'A0':rec_id}
+=======
+rec_id = 'T7'
+rec_type = 'orion'
+training_dir = os.path.join(project_dir,'Data','Training_Files')
+db_dir = os.path.join(project_dir,'%s.h5'%(db_name))
+scan_time = 1         
+channels = 1
+antenna_to_rec_dict = {'1':'T7'}
+>>>>>>> Stashed changes
 
 project.telem_data_import(rec_id,
                           rec_type,
@@ -48,12 +63,21 @@ project.telem_data_import(rec_id,
                           channels,
                           antenna_to_rec_dict)
 
+<<<<<<< Updated upstream
 # project.undo_import(rec_id)
 
 #%%  train data
 # set parameters and get a list of fish to iterate over
 rec_id = 'R004'
 rec_type = 'srx800'
+=======
+#project.undo_import(rec_id)
+
+#%%  train data
+# set parameters and get a list of fish to iterate over
+rec_id = 'T7'
+rec_type = 'orion'
+>>>>>>> Stashed changes
 fishes = project.get_fish(rec_id = rec_id)
 
 # iterate over fish and train
@@ -64,6 +88,7 @@ for fish in fishes:
 project.training_summary(rec_type, site = [rec_id])
 
 # undo training
+<<<<<<< Updated upstream
 # project.undo_training(rec_id)
 
 #%% classify data
@@ -74,6 +99,16 @@ class_iter = None # start with none - if we need more classifications then 2
 fishes = project.get_fish(rec_id = rec_id, 
                           train = False, 
                           reclass_iter = class_iter)
+=======
+#project.undo_training(rec_id)
+
+#%% classify data
+#set parameters and get a list of fish to iterate over
+rec_id = 'T7'
+rec_type = 'orion'
+class_iter = None # start with none - if we need more classifications then 2
+fishes = project.get_fish(rec_id = rec_id)
+>>>>>>> Stashed changes
 threshold_ratio = 1.0 # 1.0 = MAP Hypothesis
 
 # then generate training data for the classifier
@@ -90,7 +125,11 @@ for fish in fishes:
 # generate summary statistics
 project.classification_summary(rec_id, class_iter)
 
+<<<<<<< Updated upstream
 # project.undo_classification(rec_id, class_iter = class_iter)
+=======
+#project.undo_classification(rec_id, class_iter = class_iter)
+>>>>>>> Stashed changes
 
 #%% cross validate
 
@@ -98,17 +137,28 @@ project.classification_summary(rec_id, class_iter)
 #%% calculate bouts
 # get nodes
 #nodes = project.nodes.node
+<<<<<<< Updated upstream
 nodes = ['R001','R002','R003','R004']
+=======
+nodes = ['S2']
+>>>>>>> Stashed changes
 
 # for each node determine the bout threshold and enumerate presence
 for node in nodes:
     # determine bout thresholds
+<<<<<<< Updated upstream
     bout = mast.bout(project, node, 2, 21600)
+=======
+    bout = biotas.bout(project, node, 2, 21600)
+>>>>>>> Stashed changes
     
     # Find the knot by minimizing the objective function as before, now also passing spline_der
     threshold = bout.fit_processes()
     
+<<<<<<< Updated upstream
     # calculate presences
+=======
+>>>>>>> Stashed changes
     bout.presence(threshold)
     
     
