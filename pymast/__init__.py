@@ -14,9 +14,8 @@ from .overlap_removal import *
 from .parsers import *
 
 # Finally, import the radio_project class, which depends on parsers, predictor, and naive_bayes
-<<<<<<< Updated upstream:mast/__init__.py
-from .radio_project import *
-=======
+
 from .radio_project import *
 
->>>>>>> Stashed changes:biotas_refactor/__init__.py
+
+

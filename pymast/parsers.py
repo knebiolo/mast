@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 import datetime
 import os
-import mast.predictors as predictors
+import pymast.predictors as predictors
 
 def ares(file_name, 
                  db_dir, 

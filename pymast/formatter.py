@@ -15,7 +15,7 @@ import sqlite3
 import datetime
 from matplotlib import rcParams
 from scipy import interpolate
-from mast.radio_project import radio_project
+from pymast.radio_project import radio_project
 
 
 font = {'family': 'serif','size': 6}

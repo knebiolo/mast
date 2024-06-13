@@ -9,9 +9,9 @@ import pandas as pd
 import os
 import h5py
 import datetime
-import mast.naive_bayes as naive_bayes
-import mast.parsers as  parsers
-import mast.predictors as predictors
+import pymast.naive_bayes as naive_bayes
+import pymast.parsers as  parsers
+import pymast.predictors as predictors
 import matplotlib.pyplot as plt
 from matplotlib import rcParams
 from scipy import interpolate
@@ -486,12 +486,8 @@ class radio_project():
                           min_itemsize = {'freq_code':20,
                                           'rec_type':20,
                                           'rec_id':20,
-<<<<<<< Updated upstream:mast/radio_project.py
                                           'det_hist':20})      
-=======
-                                          'det_hist':20})  
->>>>>>> Stashed changes:biotas_refactor/radio_project.py
-                
+
     def undo_import(self, rec_id):
         # Read the table from the HDF5 file
         with pd.HDFStore(self.db, 'r+') as store:
