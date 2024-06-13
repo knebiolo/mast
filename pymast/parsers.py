@@ -890,7 +890,7 @@ def srx800(file_name,
             # write to hdf
             telem_dat_sub = telem_dat_sub.astype({'power':'float32',
                                                   'freq_code':'object',
-                                                  'time_stamp':'datetime64',
+                                                  'time_stamp':'datetime64[ns]',
                                                   'scan_time':'float32',
                                                   'channels':'int32',
                                                   'rec_type':'object',
