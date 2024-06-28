@@ -121,6 +121,7 @@ def detection_history (epoch, pulse_rate, num_detects, num_channels, scan_time, 
             lower_limit_dict[i] = np.where(scan_time > 2 * pulse_rate,
                                            epoch + (pulse_rate * i - 1),
                                            epoch + ((scan_time * channels * i) - 1))
+
             upper_limit_dict[i] = np.where(scan_time > 2 * pulse_rate, 
                                            epoch + (pulse_rate * i + 1),
                                            epoch + ((scan_time * channels * i) + 1))

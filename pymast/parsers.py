@@ -222,7 +222,7 @@ def orion_import(file_name,
                     
                     telem_dat_sub = telem_dat_sub.astype({'power':'float32',
                                                           'freq_code':'object',
-                                                          'time_stamp':'datetime64',
+                                                          'time_stamp':'datetime64[ns]',
                                                           'scan_time':'float32',
                                                           'channels':'int32',
                                                           'rec_type':'object',
@@ -851,8 +851,11 @@ def srx800(file_name,
             telem_dat_sub['epoch'] = np.round((telem_dat_sub.time_stamp - pd.Timestamp("1970-01-01")) / pd.Timedelta('1s'),6)
             
             # get setup number for every row
-            telem_dat_sub['setup'] = get_setup(telem_dat_sub.epoch.values,
-                                               setup_df.epoch.values)
+            try:
+                telem_dat_sub['setup'] = get_setup(telem_dat_sub.epoch.values,
+                                                   setup_df.epoch.values)
+            except:
+                print ('why you fail?')
             
             # get frequency from channel
             telem_dat_sub['Frequency'] = get_frequency(telem_dat_sub.setup.values,

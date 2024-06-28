@@ -295,7 +295,7 @@ class radio_project():
         # make sure data types are correct - these next steps are critical
         try:
             train_dat = train_dat.astype({'power': 'float32', 
-                                          'time_stamp': 'datetime64',
+                                          'time_stamp': 'datetime64[ns]',
                                           'epoch': 'float32',
                                           'freq_code': 'object',
                                           'noise_ratio': 'float32',

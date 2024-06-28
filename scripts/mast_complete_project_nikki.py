@@ -8,15 +8,15 @@ Created on Thu Nov 16 09:42:22 2023
 # import modules
 import os
 import sys
-sys.path.append(r"C:\Users\knebiolo\OneDrive - Kleinschmidt Associates, Inc\Software\mast\pymast")
+sys.path.append(r"C:\Users\Nicole Haibach\Kleinschmidt Associates, Inc\Kevin Nebiolo - mast\pymast")
 from pymast.radio_project import radio_project
 from pymast import formatter as formatter
 import pymast
 import pandas as pd
 
 #%% set up project
-project_dir = r"C:\Users\knebiolo\OneDrive - Kleinschmidt Associates, Inc\Personal\Articles for Submission\MAST Part 2"
-db_name = 'MAST_Part2_kpn3'
+project_dir = r"C:\Users\Nicole Haibach\OneDrive - Kleinschmidt Associates, Inc\Desktop\MAST"
+db_name = 'MAST_Part2_nsh'
 detection_count = 5
 duration = 1
 tag_data = pd.read_csv(os.path.join(project_dir,'tblMasterTag.csv'))
@@ -33,7 +33,7 @@ project = radio_project(project_dir,
                         nodes_data)
 
 #%%  import data
-rec_id = 'T6'
+rec_id = 'T3'
 rec_type = 'srx800'
 #TODO - remove these directory arguments - the project is smart
 training_dir = os.path.join(project_dir,'Data','Training_Files')
@@ -55,7 +55,7 @@ project.telem_data_import(rec_id,
 
 #%%  train data
 # set parameters and get a list of fish to iterate over
-rec_id = 'T6'
+rec_id = 'T03'
 rec_type = 'srx800'
 fishes = project.get_fish(rec_id = rec_id)
 
