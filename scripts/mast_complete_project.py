@@ -15,8 +15,8 @@ import pymast
 import pandas as pd
 
 #%% set up project
-project_dir = r"C:\Users\knebiolo\OneDrive - Kleinschmidt Associates, Inc\Personal\Articles for Submission\MAST Part 2"
-db_name = 'MAST_Part2_kpn3'
+project_dir = r"J:\1871\201\Calcs\York Haven"
+db_name = 'york_haven'
 detection_count = 5
 duration = 1
 tag_data = pd.read_csv(os.path.join(project_dir,'tblMasterTag.csv'))
@@ -71,9 +71,9 @@ project.training_summary(rec_type, site = [rec_id])
 
 #%% classify data
 #set parameters and get a list of fish to iterate over
-rec_id = 'R020'
+rec_id = 'R015'
 rec_type = 'orion'
-class_iter = 2 # start with none - if we need more classifications then 2
+class_iter = None # start with none - if we need more classifications then 2
 fishes = project.get_fish(rec_id = rec_id, 
                           train = False, 
                           reclass_iter = class_iter)
@@ -104,7 +104,7 @@ project.classification_summary(rec_id, class_iter)
 node = 'R020'
 
 # create a bout object
-bout = mast.bout(project, node, 2, 21600)
+bout = pymast.bout(project, node, 2, 21600)
     
 # Find the threshold
 threshold = bout.fit_processes()
@@ -124,7 +124,7 @@ edges = [('R010','R013'),('R010','R014'),('R010','R015'),('R010','R016'),('R010'
 nodes = ['R010','R019','R020','R013','R014','R015','R016','R017','R018']
     
 # create an overlap object and apply nested doll algorithm
-doll = mast.overlap_reduction(nodes, edges, project)
+doll = pymast.overlap_reduction(nodes, edges, project)
 doll.nested_doll()
 
 #%% create a recaptures table
