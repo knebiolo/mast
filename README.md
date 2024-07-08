@@ -55,7 +55,7 @@ The receiver file must contain the following fields and should be saved as a com
 | Field      | Data Type |                                      Comment                             |
 |------------|-----------|--------------------------------------------------------------------------|
 |Name        |String     |(not required) - common name of reciever location,  e.g. 'Norse Farms'    |
-|RecType     |String     |(required) - acceptable inputs are either **'lotek'** or **'orion'**      |
+|RecType     |String     |(required) - acceptable inputs are either **'srx600'**, **'srx800'**, **'srx1200'**, **'orion'**, or **'ares'**|      |
 |recID       |String     |(required) - alphanumeric ID for receiver, e.g. 'T01'                     |
 |Node        |String     |(required) - alphanumeric ID for network node, e.g. 'S01'.                |
 
