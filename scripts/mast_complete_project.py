@@ -71,7 +71,7 @@ project.training_summary(rec_type, site = [rec_id])
 
 #%% classify data
 #set parameters and get a list of fish to iterate over
-rec_id = 'R015'
+rec_id = 'R020'
 rec_type = 'orion'
 class_iter = None # start with none - if we need more classifications then 2
 fishes = project.get_fish(rec_id = rec_id, 
@@ -163,3 +163,28 @@ tte.data_prep(project,
                                   ('R020','R013'),('R020','R014'),('R020','R015'),('R020','R016'),('R020','R017'),('R020','R018')])
 # Step 4, generate a summary
 tte.summary()
+
+#%% create a Cormack-Jolly-Seber Mark Recapture model
+# what is the output directory?
+output_ws = os.path.join(project_dir,'Output')
+model_name = "ds_canal"
+
+# what is the Node to State relationship - use Python dictionary
+receiver_to_recap = {'R001':'R01','R002':'R01',
+                     'R003':'R02','R004':'R02','R005':'R02','R006':'R02',
+                     'R007':'R02','R008':'R02','R009':'R02','R010':'R02',
+                     'R011':'R02','R012':'R02','R013':'R02','R014':'R02',
+                     'R015':'R02','R016':'R02','R017':'R02','R018':'R02',
+                     'R019':'R02','R020':'R02',}
+
+# Step 1, create time to event data class - we only need to feed it the directory and file name of input data
+cjs = formatter.cjs_data_prep(receiver_to_recap, project, species = 'Shad', initial_recap_release = True)
+print ("Step 1 Completed, Data Class Finished")
+
+# Step 2, Create input file for MARK
+cjs.input_file(model_name,output_ws)
+cjs.inp.to_csv(os.path.join(output_ws,'ds_canal_2.csv'), index = False)
+
+print ("Step 2 Completed, MARK Input file created")
+print ("Data formatting complete, proceed to MARK for live recapture modeling (CJS)")
+

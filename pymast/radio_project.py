@@ -1129,7 +1129,7 @@ class radio_project():
                         rec_dat = rec_dat.astype({'freq_code': 'object',
                                                 'epoch': 'float32',
                                                 'rec_id': 'object',
-                                                'time_stamp': 'datetime64',
+                                                'time_stamp': 'datetime64[ns]',
                                                 'power': 'float32', 
                                                 'noise_ratio': 'float32',
                                                 'lag': 'float32',
