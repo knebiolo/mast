@@ -134,16 +134,16 @@ project.make_recaptures_table()
     
 # what is the Node to State relationship - use Python dictionary
 node_to_state = {'R001':1,'R002':1,                   # upstream
-                 'R012':2,                            # forebay
-                 'R013':3,'R015':3,'R016':3,'R017':3, # powerhouse
-                 'R018':4,                            # sluice
-                 'R003':5,                            # east channel up
-                 'R007':6,                            # east channel down
-                 'R008':7,                            # east channel dam
-                 'R009':8,                            # NLF
-                 'R010':9,'R019':19,                  # tailrace
-                 'R011':10,                           # downstream
-                 'R004':11,'R005':11}                 # downstream 2
+                  'R012':2,                            # forebay
+                  'R013':3,'R015':3,'R016':3,'R017':3, # powerhouse
+                  'R018':4,                            # sluice
+                  'R003':5,                            # east channel up
+                  'R007':6,                            # east channel down
+                  'R008':7,                            # east channel dam
+                  'R009':8,                            # NLF
+                  'R010':9,'R019':19,                  # tailrace
+                  'R011':10,                           # downstream
+                  'R004':11,'R005':11}                 # downstream 2
 
 # Step 1, create time to event data class 
 tte = formatter.time_to_event(node_to_state,
@@ -167,18 +167,18 @@ tte.summary()
 #%% create a Cormack-Jolly-Seber Mark Recapture model
 # what is the output directory?
 output_ws = os.path.join(project_dir,'Output')
-model_name = "ds_canal"
+model_name = "york_haven"
 
 # what is the Node to State relationship - use Python dictionary
 receiver_to_recap = {'R001':'R01','R002':'R01',
                      'R003':'R02','R004':'R02','R005':'R02','R006':'R02',
                      'R007':'R02','R008':'R02','R009':'R02','R010':'R02',
                      'R011':'R02','R012':'R02','R013':'R02','R014':'R02',
-                     'R015':'R02','R016':'R02','R017':'R02','R018':'R02',
-                     'R019':'R02','R020':'R02',}
+                     'R015':'R02','R016':'R02','R017':'R02',#'R018':'R02',
+                     'R019':'R03','R020':'R04',}
 
 # Step 1, create time to event data class - we only need to feed it the directory and file name of input data
-cjs = formatter.cjs_data_prep(receiver_to_recap, project, species = 'Shad', initial_recap_release = True)
+cjs = formatter.cjs_data_prep(receiver_to_recap, project, initial_recap_release = False)
 print ("Step 1 Completed, Data Class Finished")
 
 # Step 2, Create input file for MARK
