@@ -43,15 +43,19 @@ class cjs_data_prep():
             query_parts.append(f"rec_id == '{key}'")   
         qry = " & ".join(query_parts)
 
-        recap_data = pd.read_hdf(project.db,
-                             'recaptures',
-                             where = qry)
+        self.recap_data = pd.read_hdf(project.db,
+                             'recaptures')#, 
+                             #where = qry)
         
-        self.recap_data.set_index('freq_code', inplace = True)
-        project.tags.set_index('freq_code', inplace = True)
-        self.recap_data = pd.merge(recap_data, project.tags, how = 'left')
+        #self.recap_data.set_index('freq_code', inplace = True)
+        project.tags.reset_index('freq_code', inplace = True)
+        self.recap_data = pd.merge(self.recap_data, 
+                                   project.tags,
+                                   left_on = 'freq_code', 
+                                   right_on = 'freq_code',
+                                   how = 'left')
         self.recap_data.reset_index(drop = False, inplace = True)
-        project.tags.reset_index(drop = False, inplace = True)
+        #project.tags.reset_index(drop = False, inplace = True)
         
         # filter out tag data we don't want mucking up our staistical model
         if species != None:
@@ -102,7 +106,7 @@ class cjs_data_prep():
 
                 if fish not in start_times.index.values:
                     # fish never made it to the initial state
-                    self.recap_dat.drop(self.recap_dat[self.recap_data.freq_code == fish].index, inplace = True)
+                    self.recap_data.drop(self.recap_data[self.recap_data.freq_code == fish].index, inplace = True)
                 else:
                     # fish arrived at the initial state but their may be recaptures before arrival at initial state
                     t = start_times.at[fish,'first_recapture']
