@@ -38,26 +38,26 @@ The tag table must match the following schema and be saved as a comma delimited 
 
 | Field      | Data Type |                                      Comment                             |
 |------------|-----------|--------------------------------------------------------------------------|
-|FreqCode    |String     |(required) combination of radio frequency and tag code.  **must be unique**|
-|PIT_ID      |Integer    |(not required) if tagged with RFID tag indicate ID                        |
-|PulseRate   |Float      |(required) seconds between tag pulses                                     |
-|MortRate    |Float      |(not required) if equipped, seconds between tag pulses if fish has died   |
-|CapLoc      |String     |(required) capture location of fish                                       |
-|RelLoc      |String     |(required) release location of fish                                       |
-|TagType     |String     |(required) either 'study' or 'beacon'                                     |
-|Length      |Integer    |(not required) - mm                                                       |
-|Sex         |String     |(not required) - either 'M' or 'F'                                        |
-|RelDate     |DateTime   |(required) - Date and time of release                                     |
+|freq_code   |String     |(required) combination of radio frequency and tag code.  **must be unique**|
+|pit_id      |Integer    |(not required) if tagged with RFID tag indicate ID                        |
+|pulse_rate  |Float      |(required) seconds between tag pulses                                     |
+|mort_rate   |Float      |(not required) if equipped, seconds between tag pulses if fish has died   |
+|cap_loc     |String     |(required) capture location of fish                                       |
+|rel_loc     |String     |(required) release location of fish                                       |
+|tag_type    |String     |(required) either 'study' or 'beacon'                                     |
+|length      |Integer    |(not required) - mm                                                       |
+|sex         |String     |(not required) - either 'M' or 'F'                                        |
+|rel_date    |DateTime   |(required) - Date and time of release                                     |
 
 ## Master Receiver Table
 The receiver file must contain the following fields and should be saved as a comma delimited text file.  Please see the schema below.  As with the master tag file, please save the master receiver file to the ‘Data’ folder.    A good name for this file is “tblMasterReceiver.csv”.  
 
 | Field      | Data Type |                                      Comment                             |
 |------------|-----------|--------------------------------------------------------------------------|
-|Name        |String     |(not required) - common name of reciever location,  e.g. 'Norse Farms'    |
-|RecType     |String     |(required) - acceptable inputs are either **'srx600'**, **'srx800'**, **'srx1200'**, **'orion'**, or **'ares'**|      |
-|recID       |String     |(required) - alphanumeric ID for receiver, e.g. 'T01'                     |
-|Node        |String     |(required) - alphanumeric ID for network node, e.g. 'S01'.                |
+|name        |String     |(not required) - common name of reciever location,  e.g. 'Norse Farms'    |
+|rec_type    |String     |(required) - acceptable inputs are either **'srx600'**, **'srx800'**, **'srx1200'**, **'orion'**, or **'ares'**|      |
+|rec_id      |String     |(required) - alphanumeric ID for receiver, e.g. 'T01'                     |
+|node        |String     |(required) - alphanumeric ID for network node, e.g. 'S01'.                |
 
 ## Telemetry network
 If one of your objectives is to analyze how fish move through a study area, you will need to create a table that describes relationships between receivers (single receivers or groupings) by identifying the logical pathways that exist between them.  Figure 1 depicts a telemetry network of a recent project completed by Kleinschmidt Associates.  Each point on the picture is either a single telemetry receiver or group of receivers.  These points are known as nodes and represent telemetered river reaches.  The receiver-to-node relationship is mapped in the master receiver table with the ‘Node’ column.  The lines, or edges in Figure 1 depict the relationships between nodes.  Some are double headed while others are one way.  Some edges are one way because it is impossible for a fish to swim up through a hydroelectric turbine.  This type of graph is known as a directed acyclic graph.  For now, we only need to identify the nodes and give them arbitrary XY coordinates.  
@@ -68,8 +68,8 @@ Like the tag and receiver tables, the node table will be saved as a comma delimi
 
 | Field      | Data Type |                                      Comment                             |
 |------------|-----------|--------------------------------------------------------------------------|
-|Node        |String     |(required) - alphanumeric ID for network node **must be unique**          |
-|Reach       |String     |(not required) - common name of reach monitored by node, e.g. 'Cabot Tailrace'|
+|node        |String     |(required) - alphanumeric ID for network node **must be unique**          |
+|reach       |String     |(not required) - common name of reach monitored by node, e.g. 'Cabot Tailrace'|
 |X           |Integer    |(required) - arbitrary X coordinate point                                 |
 |Y           |Integer    |(required) - arbitrary Y coordinate point                                 |
 
