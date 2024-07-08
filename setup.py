@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(name = 'pymast',
-      version = '0.0.3',
+      version = '0.0.5',
       description = '''Movement Analysis Software for Telemetry (MAST) for
 use in removing false positive and overlap detections from radio telemetry
 projects and assessing 1D movement patterns.''',
@@ -17,7 +17,7 @@ projects and assessing 1D movement patterns.''',
                         "statsmodels >= 0.10.1",
                         "networkx >= 2.2",
                         "scipy >= 1.7.1",
-                        "sklearn",
+                        "scikit-learn",
                         "h5py"],
       zip_safe = False
       )

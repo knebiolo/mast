@@ -1,6 +1,6 @@
 Metadata-Version: 2.1
 Name: pymast
-Version: 0.0.3
+Version: 0.0.5
 Summary: Movement Analysis Software for Telemetry (MAST) for
 Home-page: https://github.com/knebiolo/mast
 Author: Kevin P. Nebiolo and Theodore Castro-Santos
@@ -14,5 +14,5 @@ Requires-Dist: matplotlib>=3.1.1
 Requires-Dist: statsmodels>=0.10.1
 Requires-Dist: networkx>=2.2
 Requires-Dist: scipy>=1.7.1
-Requires-Dist: sklearn
+Requires-Dist: scikit-learn
 Requires-Dist: h5py
