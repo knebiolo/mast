@@ -495,7 +495,7 @@ def srx1200(file_name,
         # format frequency code
         telem_dat['FreqNo'] = telem_dat['Freq [MHz]'].apply(lambda x: f"{x:.3f}" )
         telem_dat = telem_dat[telem_dat['Tag/BPM'] != 999]
-        telem_dat['freq_code'] = telem_dat['FreqNo'] + ' ' + telem_dat['Tag/BPM'].astype(str)
+        telem_dat['freq_code'] = telem_dat['FreqNo'] + ' ' + telem_dat['Tag/BPM'].astype(np.str)
         
         # calculate 
         telem_dat['noise_ratio'] = predictors.noise_ratio(600,
@@ -572,7 +572,7 @@ def srx1200(file_name,
         telem_dat['FreqNo'] = telem_dat['Freq [MHz]'].apply(lambda x: f"{x:.3f}" )
         telem_dat = telem_dat[telem_dat['TagID/BPM'] != 999]
 
-        telem_dat['freq_code'] = telem_dat['FreqNo'] + ' ' + telem_dat['TagID/BPM'].astype(str)
+        telem_dat['freq_code'] = telem_dat['FreqNo'] + ' ' + telem_dat['TagID/BPM'].astype(np.str)
         
         # calculate 
         telem_dat['noise_ratio'] = predictors.noise_ratio(600,
@@ -741,7 +741,7 @@ def srx800(file_name,
         split = setup_df['change_date'].str.split(' ', expand=True)
         setup_df['day0'] = np.repeat(pd.to_datetime("1900-01-01"),len(setup_df))
         setup_df['Date'] = setup_df['day0'] + pd.to_timedelta(split[1].astype(int), unit='d')
-        setup_df['change_date'] = setup_df.Date.astype(str) + ' ' + split[2]
+        setup_df['change_date'] = setup_df.Date.astype(np.str) + ' ' + split[2]
         
 
     setup_df['change_date'] = pd.to_datetime(setup_df.change_date)
