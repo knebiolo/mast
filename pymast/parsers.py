@@ -468,8 +468,8 @@ def srx1200(file_name,
         # read in telemetry data
         if new_split == None:
             telem_dat = pd.read_fwf(file_name,
-                                   colspecs = [(0,6),(6,20),(20,32),(32,40),(40,55),(55,64),(64,72),(72,85),(85,93),(93,102)],
-                                   names = ['Index','Date','Time','[uSec]','Tag/BPM','Freq [MHz]','Codeset','Antenna','Gain','RSSI'],
+                                   colspecs = [(0,7),(7,25),(25,35),(35,46),(46,57),(57,68),(68,80),(80,90),(90,102),(102,110),(110,130),(130,143),(143,153)],
+                                   names = ['Index','Rx Serial Number','Date','Time','[uSec]','Tag/BPM','Freq [MHz]','Codeset','Antenna','Gain','RSSI','Latitude','Longitude'],
                                    skiprows = dataRow, 
                                    skipfooter = eof - dataEnd)
             telem_dat.drop(columns = ['Index'], inplace = True)
