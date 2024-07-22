@@ -224,6 +224,8 @@ class radio_project():
                                   inplace = True)
         
         # set some object variables
+        if self.receivers.index.dtype != 'object':
+            rec_id = np.int64(rec_id)
         rec_type = self.receivers.at[rec_id,'rec_type']
 
         # for training data, we know the tag's detection class ahead of time,
