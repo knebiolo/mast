@@ -5,6 +5,7 @@ import numpy as np
 import datetime
 import os
 import pymast.predictors as predictors
+import sys
 
 def ares(file_name, 
                  db_dir, 
@@ -251,7 +252,10 @@ def orion_import(file_name,
                                      append = True, 
                                      chunksize = 1000000,
                                      data_columns = True)  
-
+    else:
+        raise ValueError("Invalid import parameters, no data returned")
+        sys.exit()
+        
                     
                     
 def vr2_import(file_name,db_dir,study_tags, rec_id):
