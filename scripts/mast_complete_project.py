@@ -13,10 +13,11 @@ from pymast.radio_project import radio_project
 from pymast import formatter as formatter
 import pymast
 import pandas as pd
+import matplotlib.pyplot as plt
 
 #%% set up project
-project_dir = r"J:\1871\201\Calcs\York Haven"
-db_name = 'york_haven'
+project_dir = r"C:\Users\knebiolo\Desktop\York Haven"
+db_name = 'york_haven_2'
 detection_count = 5
 duration = 1
 tag_data = pd.read_csv(os.path.join(project_dir,'tblMasterTag.csv'))
@@ -33,8 +34,8 @@ project = radio_project(project_dir,
                         nodes_data)
 
 #%%  import data
-rec_id = 'T6'
-rec_type = 'srx800'
+rec_id = 'R003'
+rec_type = 'srx1200'
 #TODO - remove these directory arguments - the project is smart
 training_dir = os.path.join(project_dir,'Data','Training_Files')
 db_dir = os.path.join(project_dir,'%s.h5'%(db_name))
@@ -48,15 +49,16 @@ project.telem_data_import(rec_id,
                           db_dir,
                           scan_time,
                           channels,
-                          antenna_to_rec_dict)
+                          antenna_to_rec_dict,
+                          True)
 
 # undo import
 # project.undo_import(rec_id)
 
 #%%  train data
 # set parameters and get a list of fish to iterate over
-rec_id = 'T6'
-rec_type = 'srx800'
+rec_id = 'R020'
+rec_type = 'orion'
 fishes = project.get_fish(rec_id = rec_id)
 
 # iterate over fish and train
@@ -69,29 +71,14 @@ project.training_summary(rec_type, site = [rec_id])
 # undo training
 # project.undo_training(rec_id)
 
-#%% classify data
-#set parameters and get a list of fish to iterate over
+# %% classify data
+
+# Set initial parameters
 rec_id = 'R020'
 rec_type = 'orion'
-class_iter = None # start with none - if we need more classifications then 2
-fishes = project.get_fish(rec_id = rec_id, 
-                          train = False, 
-                          reclass_iter = class_iter)
-threshold_ratio = 1.0 # 1.0 = MAP Hypothesis
+threshold_ratio = 1.0  # 1.0 = MAP Hypothesis
 
-# then generate training data for the classifier
-training_data = project.create_training_data(rec_type,class_iter)#,[rec_id])
-
-# next, create your A-La Carte Likelihood function
-# fields = ['cons_length','cons_length','hit_ratio','noise_ratio','series_hit','power','lag_diff']
-fields = ['hit_ratio','cons_length','noise_ratio','power','lag_diff']
-
-# iterate over fish and classify
-for fish in fishes:
-    project.classify(fish,rec_id,fields,training_data,class_iter,threshold_ratio)
-
-# generate summary statistics
-project.classification_summary(rec_id, class_iter)
+project.reclassify(project, rec_id, rec_type, threshold_ratio)
 
 # undo classification 
 # project.undo_classification(rec_id, class_iter = class_iter)
@@ -127,9 +114,11 @@ nodes = ['R010','R019','R020','R013','R014','R015','R016','R017','R018']
 doll = pymast.overlap_reduction(nodes, edges, project)
 doll.nested_doll()
 
+# project.undo_overlap()
 #%% create a recaptures table
 project.make_recaptures_table()
 
+# project.undo_recaptures()
 #%% create models using a Time to Event Framework
     
 # what is the Node to State relationship - use Python dictionary
@@ -171,11 +160,11 @@ model_name = "york_haven"
 
 # what is the Node to State relationship - use Python dictionary
 receiver_to_recap = {'R001':'R01','R002':'R01',
-                     'R003':'R02','R004':'R02','R005':'R02','R006':'R02',
+                     'R003':'R02','R004':'R04','R005':'R04','R006':'R02',
                      'R007':'R02','R008':'R02','R009':'R02','R010':'R02',
-                     'R011':'R02','R012':'R02','R013':'R02','R014':'R02',
+                     'R011':'R03','R012':'R02','R013':'R02','R014':'R02',
                      'R015':'R02','R016':'R02','R017':'R02',#'R018':'R02',
-                     'R019':'R03','R020':'R04',}
+                     'R019':'R03','R020':'R03',}
 
 # Step 1, create time to event data class - we only need to feed it the directory and file name of input data
 cjs = formatter.cjs_data_prep(receiver_to_recap, project, initial_recap_release = False)
@@ -183,7 +172,7 @@ print ("Step 1 Completed, Data Class Finished")
 
 # Step 2, Create input file for MARK
 cjs.input_file(model_name,output_ws)
-cjs.inp.to_csv(os.path.join(output_ws,'ds_canal_2.csv'), index = False)
+cjs.inp.to_csv(os.path.join(output_ws,model_name + '.csv'), index = False)
 
 print ("Step 2 Completed, MARK Input file created")
 print ("Data formatting complete, proceed to MARK for live recapture modeling (CJS)")

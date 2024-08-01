@@ -42,7 +42,7 @@ class bout():
                             'epoch':'float32',
                             'rec_id':'object'})
             
-            self.data = self.data.append(rec_dat)
+            self.data = pd.concat([self.data,rec_dat])
 
         # clean up and bin the lengths
         self.data.drop_duplicates(keep = 'first', inplace = True)
@@ -333,7 +333,7 @@ class bout():
         plt.xlabel('Bins')
         plt.ylabel('Log Frequencies')
         plt.legend()
-        plt.show()
+        plt.show(block=True)
     
         # Step 2: Ask user for initial knots
         num_knots = int(input("Enter the number of knots (1 for two-process, 2 for three-process): "))
@@ -467,8 +467,8 @@ class overlap_reduction():
                 class_dat = class_dat[['freq_code', 'epoch', 'rec_id']]
                 class_dat['node'] = np.repeat(i,len(class_dat))
                 # append to node specific dataframe
-                pres_data = pres_data.append(presence_dat)
-                recap_data = recap_data.append(class_dat)
+                pres_data = pd.concat([pres_data,presence_dat])
+                recap_data = pd.concat([recap_data,class_dat])
 
             # now that we have data, we need to summarize it, use group by to get min ans max epoch by freq code, recID and presence_number
             dat = pres_data.groupby(['freq_code','bout_no','node','rec_id'])['epoch'].agg(['min','max'])
@@ -496,53 +496,59 @@ class overlap_reduction():
         plt.show()
 
     def nested_doll(self):
-        '''Function iterates through matching recap data from successors to see if
-        current recapture row at predeccesor overlaps with successor presence.'''
-        # create function that we can vectorize over list of epochs (i)
-        def overlap_check(i, min_epoch, max_epoch):
-            return np.logical_and(min_epoch >= i, max_epoch < i).any()
+        '''Identify and mark overlapping detections.'''
+        overlaps_found = False
+        overlap_count = 0
+        
         for i in self.node_recap_dict:
             fishes = self.node_recap_dict[i].freq_code.unique()
 
             for j in fishes:
-                children = self.G.succ[i]
-                fish_dat = self.node_recap_dict[i][self.node_recap_dict[i].freq_code == j]
-                fish_dat['overlapping'] = np.zeros(len(fish_dat))
-                fish_dat['parent'] = np.repeat('',len(fish_dat))
-                fish_dat.set_index('epoch', inplace = True, drop = False)
-                if len(children) > 0:                                            # if there is no child node, who cares? there is no overlapping detections, we are at the middle doll
+                children = list(self.G.successors(i))
+                fish_dat = self.node_recap_dict[i][self.node_recap_dict[i].freq_code == j].copy()
+                fish_dat['overlapping'] = 0
+                fish_dat['parent'] = ''
+
+                if len(children) > 0:
                     for k in children:
-                        child_dat = self.node_pres_dict[i][self.node_pres_dict[i].freq_code == j]
+                        child_dat = self.node_pres_dict[k][self.node_pres_dict[k].freq_code == j]
                         if len(child_dat) > 0:
-                            for l in child_dat.rec_id.unique():
-                                while l != i:
-                                    rec_dat = child_dat[child_dat.rec_id == l]
-                                    min_epochs = child_dat.min_epoch.values
-                                    max_epochs = child_dat.max_epoch.values
-                                    for m in fish_dat.epoch.values:                          # for every row in the fish data
-                                        if np.logical_and(min_epochs <= m, max_epochs >m).any(): # if the current epoch is within a presence at a child receiver
-                                            print ("Overlap Found, at %s fish %s was recaptured at both %s and %s"%(m,j,i,l))
-                                            fish_dat.at[m,'overlapping'] = 1
-                                            fish_dat.at[m,'parent'] = i
-                                            
-                fish_dat.reset_index(inplace = True, drop = True)
-                
-                fish_dat = fish_dat.astype({'freq_code': 'object',
-                                            'epoch': 'int32',
-                                            'rec_id': 'object',
-                                            'node': 'object',
-                                            'overlapping':'int32',
-                                            'parent':'object'})
-                
-                # append to hdf5
+                            min_epochs = child_dat.min_epoch.values
+                            max_epochs = child_dat.max_epoch.values
+                            
+                            fish_epochs = fish_dat.epoch.values
+                            overlaps = np.any(
+                                (min_epochs[:, None] <= fish_epochs) & (max_epochs[:, None] > fish_epochs), axis=0
+                            )
+                            overlap_indices = np.where(overlaps)[0]
+                            if overlap_indices.size > 0:
+                                overlaps_found = True
+                                overlap_count += overlap_indices.size
+                                fish_dat.loc[overlaps, 'overlapping'] = 1
+                                fish_dat.loc[overlaps, 'parent'] = i
+
+                fish_dat = fish_dat.astype({
+                    'freq_code': 'object',
+                    'epoch': 'int32',
+                    'rec_id': 'object',
+                    'node': 'object',
+                    'overlapping': 'int32',
+                    'parent': 'object'
+                })
+
                 with pd.HDFStore(self.db, mode='a') as store:
-                    store.append(key = 'overlapping',
-                                 value = fish_dat, 
-                                 format = 'table', 
-                                 index = False,
-                                 min_itemsize = {'freq_code':20,
-                                                 'rec_id':20,
-                                                 'parent':20},
-                                 append = True, 
-                                 data_columns = True,
-                                 chunksize = 1000000)
+                    store.append(key='overlapping',
+                                 value=fish_dat,
+                                 format='table',
+                                 index=False,
+                                 min_itemsize={'freq_code': 20,
+                                               'rec_id': 20,
+                                               'parent': 20},
+                                 append=True,
+                                 data_columns=True,
+                                 chunksize=1000000)
+
+        if overlaps_found:
+            print(f"Overlaps were found and processed. Total number of overlaps: {overlap_count}.")
+        else:
+            print("No overlaps were found.")

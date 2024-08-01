@@ -104,7 +104,7 @@ def orion_import(file_name,
                  db_dir, 
                  rec_id, 
                  study_tags, 
-                 scan_time = 1, 
+                 scan_time = 1., 
                  channels = 1, 
                  ant_to_rec_dict = None):
     '''Function imports raw Sigma Eight orion data.
@@ -125,17 +125,24 @@ def orion_import(file_name,
         # with our data row, extract information using pandas fwf import procedure
         telem_dat = pd.read_fwf(file_name,colspecs = [(0,12),(13,23),(24,30),(31,35),(36,45),(46,54),(55,60),(61,65)],
                                 names = ['Date','Time','Site','Ant','Freq','Type','Code','power'],
-                                skiprows = 1,
-                                dtype = {'Date':str,'Time':str,'Site':np.int32,'Ant':str,'Freq':str,'Type':str,'Code':str,'power':np.float64})
+                                skiprows = 1)#,
+                                #dtype = {'Date':str,'Time':str,'Site':np.int32,'Ant':str,'Freq':str,'Type':str,'Code':str,'power':np.float64})
         telem_dat = telem_dat[telem_dat.Type != 'STATUS']
+        telem_dat['Freq'] = telem_dat.Freq.astype('float32')
+        telem_dat['Freq'] = telem_dat['Freq'].apply(lambda x: f"{x:.3f}")
+        telem_dat['Ant'] = telem_dat.Ant.astype('object')
         telem_dat.drop(['Type'], axis = 1, inplace = True)
 
     else:
         # with our data row, extract information using pandas fwf import procedure
         telem_dat = pd.read_fwf(file_name,colspecs = [(0,11),(11,20),(20,26),(26,30),(30,37),(37,42),(42,48)],
                                 names = ['Date','Time','Site','Ant','Freq','Code','power'],
-                                skiprows = 1,
-                                dtype = {'Date':str,'Time':str,'Site':str,'Ant':str,'Freq':str,'Code':str,'power':str})
+                                skiprows = 1)#,
+                                #dtype = {'Date':str,'Time':str,'Site':str,'Ant':str,'Freq':str,'Code':str,'power':str})
+        telem_dat['Ant'] = telem_dat.Ant.astype('object')
+        telem_dat['Freq'] = telem_dat.Freq.astype('float32')
+        telem_dat['Freq'] = telem_dat['Freq'].apply(lambda x: f"{x:.3f}")
+
 
     if len(telem_dat) > 0:
         # add file name to data
@@ -208,12 +215,12 @@ def orion_import(file_name,
                 
             # if there is an antenna to receiver dictionary
             else:
-                for i in ant_to_rec_dict:
+                for i in ant_to_rec_dict.keys():
                     # get site from dictionary
                     site = ant_to_rec_dict[i]
                     
                     # get telemetryt data associated with this site
-                    telem_dat_sub = telem_dat[telem_dat.Ant == str(i)]
+                    telem_dat_sub = telem_dat[telem_dat.Ant == 1]
                     
                     # add receiver ID
                     telem_dat_sub['rec_id'] = np.repeat(site,len(telem_dat_sub))
@@ -321,7 +328,8 @@ def srx1200(file_name,
              study_tags, 
              scan_time = 1, 
              channels = 1, 
-             ant_to_rec_dict = None):
+             ant_to_rec_dict = None,
+             ka_format = False):
     rec_type = 'srx1200'
     
     # create empty dictionary to hold Lotek header data indexed by line number - to be imported to Pandas dataframe
@@ -471,12 +479,20 @@ def srx1200(file_name,
 
         # read in telemetry data
         if new_split == None:
-            telem_dat = pd.read_fwf(file_name,
-                                   colspecs = [(0,7),(7,25),(25,35),(35,46),(46,57),(57,68),(68,80),(80,90),(90,102),(102,110),(110,130),(130,143),(143,153)],
-                                   names = ['Index','Rx Serial Number','Date','Time','[uSec]','Tag/BPM','Freq [MHz]','Codeset','Antenna','Gain','RSSI','Latitude','Longitude'],
-                                   skiprows = dataRow, 
-                                   skipfooter = eof - dataEnd)
-            telem_dat.drop(columns = ['Index'], inplace = True)
+            if ka_format == False:
+                telem_dat = pd.read_fwf(file_name,
+                                       colspecs = [(0,7),(7,25),(25,35),(35,46),(46,57),(57,68),(68,80),(80,90),(90,102),(102,110),(110,130),(130,143),(143,153)],
+                                       names = ['Index','Rx Serial Number','Date','Time','[uSec]','Tag/BPM','Freq [MHz]','Codeset','Antenna','Gain','RSSI','Latitude','Longitude'],
+                                       skiprows = dataRow, 
+                                       skipfooter = eof - dataEnd)
+                telem_dat.drop(columns = ['Index'], inplace = True)
+            else:
+                telem_dat = pd.read_fwf(file_name,
+                                       colspecs = [(0,5),(6,20),(20,32),(32,43),(43,53),(53,65),(65,72),(72,85),(85,93),(93,101)],
+                                       names = ['Index','Date','Time','[uSec]','Tag/BPM','Freq [MHz]','Codeset','Antenna','Gain','RSSI'],
+                                       skiprows = dataRow, 
+                                       skipfooter = eof - dataEnd)
+                telem_dat.drop(columns = ['Index'], inplace = True)
 
         else:
             telem_dat = pd.read_csv(file_name,
@@ -525,28 +541,35 @@ def srx1200(file_name,
         telem_dat = telem_dat.astype({'power':'float32',
                                       'freq_code':'object',
                                       'time_stamp':'datetime64[ns]',
-                                      'scan_time':'int32',
+                                      'scan_time':'float32',
                                       'channels':'int32',
                                       'rec_type':'object',
                                       'epoch':'float32',
                                       'noise_ratio':'float32',
                                       'rec_id':'object'})
         
-        if new_split != None:
-            telem_dat.drop(columns = ['index'], inplace = True)
-            print ('fuck')
-                
+        telem_dat = telem_dat[['power', 
+                                'time_stamp',
+                                'epoch',
+                                'freq_code',
+                                'noise_ratio',
+                                'scan_time',
+                                'channels', 
+                                'rec_id',
+                                'rec_type']]
+        
+        # Write the DataFrame to the HDF5 file without the index
         with pd.HDFStore(db_dir, mode='a') as store:
-            store.append(key = 'raw_data',
-                         value = telem_dat, 
-                         format = 'table', 
-                         index = False, 
-                         append = True, 
-                         min_itemsize = {'freq_code':20,
-                                         'rec_type':20,
-                                         'rec_id':20},
-                         chunksize = 1000000, 
-                         data_columns = True,)
+            store.append(key='raw_data',
+                         value=telem_dat,
+                         format='table',
+                         index=False,  # Ensure index is not written
+                         min_itemsize={'freq_code': 20,
+                                       'rec_type': 20,
+                                       'rec_id': 20},
+                         append=True,
+                         chunksize=1000000,
+                         data_columns=True)
         
     # if the data doesn't have a header
     else:
@@ -607,18 +630,29 @@ def srx1200(file_name,
                                       'epoch':'float32',
                                       'noise_ratio':'float32',
                                       'rec_id':'object'})
-                
+        
+        telem_dat = telem_dat[['power', 
+                                'time_stamp',
+                                'epoch',
+                                'freq_code',
+                                'noise_ratio',
+                                'scan_time',
+                                'channels', 
+                                'rec_id',
+                                'rec_type']]
+        
+        # Write the DataFrame to the HDF5 file without the index
         with pd.HDFStore(db_dir, mode='a') as store:
-            store.append(key = 'raw_data',
-                         value = telem_dat, 
-                         format = 'table', 
-                         index = False, 
-                         min_itemsize = {'freq_code':20,
-                                         'rec_type':20,
-                                         'rec_id':20},
-                         append = True, 
-                         chunksize = 1000000,
-                         data_columns = True)   
+            store.append(key='raw_data',
+                         value=telem_dat,
+                         format='table',
+                         index=False,  # Ensure index is not written
+                         min_itemsize={'freq_code': 20,
+                                       'rec_type': 20,
+                                       'rec_id': 20},
+                         append=True,
+                         chunksize=1000000,
+                         data_columns=True)
             
 def srx800(file_name,
              db_dir,
@@ -790,6 +824,7 @@ def srx800(file_name,
                                names = ['DayNumber','Time','ChannelID','TagID','Antenna','power'],
                                skiprows = dataRow,
                                dtype = {'ChannelID':str,'TagID':str,'Antenna':str})
+        telem_dat = telem_dat.iloc[:-1]
         telem_dat['day0'] = np.repeat(pd.to_datetime("1900-01-01"),len(telem_dat))
         telem_dat['Date'] = telem_dat['day0'] + pd.to_timedelta(telem_dat['DayNumber'].astype(int), unit='d')
         telem_dat['Date'] = telem_dat.Date.astype('str')

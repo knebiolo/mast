@@ -139,7 +139,8 @@ class radio_project():
                           db_dir,
                           scan_time = 1, 
                           channels = 1, 
-                          ant_to_rec_dict = None):
+                          ant_to_rec_dict = None,
+                          ka_format = False):
         # list raw data files
         tFiles = os.listdir(file_dir)
         
@@ -156,7 +157,7 @@ class radio_project():
                 parsers.srx800(f_dir, db_dir, rec_id, self.study_tags, scan_time = scan_time, channels = channels, ant_to_rec_dict = ant_to_rec_dict)
             
             elif rec_type == 'srx1200':
-                parsers.srx1200(f_dir, db_dir, rec_id, self.study_tags, scan_time = scan_time, channels = channels, ant_to_rec_dict = ant_to_rec_dict)
+                parsers.srx1200(f_dir, db_dir, rec_id, self.study_tags, scan_time = scan_time, channels = channels, ant_to_rec_dict = ant_to_rec_dict, ka_format = 'True')
             
             elif rec_type == 'orion':
                 parsers.orion_import(f_dir,db_dir,rec_id, self.study_tags, scan_time = scan_time, channels = channels, ant_to_rec_dict = ant_to_rec_dict)
@@ -560,6 +561,46 @@ class radio_project():
     
         return train_dat
     
+    def reclassify(self, project, rec_id, rec_type, threshold_ratio):
+        class_iter = None
+        
+        while True:
+            # Get a list of fish to iterate over
+            fishes = project.get_fish(rec_id=rec_id, train=False, reclass_iter=class_iter)
+            
+            # Generate training data for the classifier
+            training_data = project.create_training_data(rec_type, class_iter)
+            
+            # Define the fields
+            fields = ['hit_ratio', 'cons_length', 'noise_ratio', 'power', 'lag_diff']
+            
+            # Iterate over fish and classify
+            for fish in fishes:
+                project.classify(fish, rec_id, fields, training_data, class_iter, threshold_ratio)
+            
+            # Generate summary statistics
+            project.classification_summary(rec_id, class_iter)
+            
+            # Show the figures and block execution until they are closed
+            plt.show(block=True)
+            
+            # Ask the user if they need another iteration
+            user_input = input("Do you need another classification iteration? (yes/no): ").strip().lower()
+            
+            if user_input in ['yes', 'y']:
+                # If yes, increase class_iter and reclassify
+                if class_iter is None:
+                    class_iter = 2
+                else:
+                    class_iter += 1
+            elif user_input in ['no', 'n']:
+                # If no, break the loop
+                print("Classification process completed.")
+                break
+            else:
+                print("Invalid input. Please enter 'yes' or 'no'.")
+    
+    
     def classify(self,
                  freq_code,
                  rec_id,
@@ -790,199 +831,106 @@ class radio_project():
             print ("----------------------------------------------------------------------------------")
             print ("----------------------------------------------------------------------------------")
 
-            # print ("Compiling Figures")
-
-            # plot the log likelihood ratio
+            # Plot the log likelihood ratio
             classified_dat['log_posterior_ratio'] = np.log10(classified_dat.posterior_T / classified_dat.posterior_F)
-            minLogRatio = classified_dat.log_posterior_ratio.min()//1 * 1
-            maxLogRatio = classified_dat.log_posterior_ratio.max()//1 * 1
-            ratio_range = maxLogRatio - minLogRatio
-            ratio_bins =np.linspace(minLogRatio,maxLogRatio+1,100)
             
-            # hit ratio bins
-            hit_ratio_bins =np.linspace(0,1.0,11)
-
-            # plot signal power histograms by detection class
-            min_power = classified_dat.power.min()//5 * 5
-            max_power = classified_dat.power.max()//5 * 5
-            power_bins =np.arange(min_power,max_power+20,10)
-
-            # Lag Back Differences - how steady are detection lags?
-            lag_bins =np.arange(-100,110,20)
-
-            # Consecutive Record Length
-            con_length_bins =np.arange(1,12,1)
-
-            # Noise Ratio
-            noise_bins =np.arange(0,1.1,0.1)
-    
-            # plot the log of the posterior ratio
-            classified_dat['log_post_ratio'] = np.log(classified_dat.posterior_T/classified_dat.posterior_F)
-            minPostRatio = classified_dat.log_post_ratio.min()
-            maxPostRatio = classified_dat.log_post_ratio.max()
-            post_ratio_bins = np.linspace(minPostRatio,maxPostRatio,10)
-
+            # Binning and other parameters
+            hit_ratio_bins = np.linspace(0, 1.0, 11)
+            con_length_bins = np.arange(1, 12, 1)
+            power_bins = np.arange(50, 110, 10)
+            noise_bins = np.linspace(0, 1.1, 11)
+            lag_bins = np.arange(-100, 110, 20)
+            post_ratio_bins = np.linspace(classified_dat.log_posterior_ratio.min(), classified_dat.log_posterior_ratio.max(), 10)
+            
             trues = classified_dat[classified_dat.test == 1]
             falses = classified_dat[classified_dat.test == 0]
+            
+            # Create a grid of subplots (3 rows x 4 columns)
+            fig, axes = plt.subplots(nrows=3, ncols=4, figsize=(15, 10), dpi=300)
+            
+            # Function to set font sizes
+            def set_fontsize(ax, fontsize=6):
+                for item in ([ax.title, ax.xaxis.label, ax.yaxis.label] +
+                             ax.get_xticklabels() + ax.get_yticklabels()):
+                    item.set_fontsize(fontsize)
+            
+            # Plot hit ratio
+            axes[0, 0].hist(falses.hit_ratio.values, hit_ratio_bins, density=True, color='grey', edgecolor='black', linewidth=1.2)
+            axes[0, 0].set_xlabel('Hit Ratio')
+            axes[0, 0].set_ylabel('Probability Density')
+            axes[0, 0].set_title('Hit Ratio - False Positive')
+            set_fontsize(axes[0, 0])
+            
+            axes[0, 1].hist(trues.hit_ratio.values, hit_ratio_bins, density=True, color='grey', edgecolor='black', linewidth=1.2)
+            axes[0, 1].set_xlabel('Hit Ratio')
+            axes[0, 1].set_title('Hit Ratio - Valid')
+            set_fontsize(axes[0, 1])
+            
+            # Plot consecutive record length
+            axes[0, 2].hist(falses.cons_length.values, con_length_bins, density=True, color='grey', edgecolor='black', linewidth=1.2)
+            axes[0, 2].set_xlabel('Consecutive Hit Length')
+            axes[0, 2].set_ylabel('Probability Density')
+            axes[0, 2].set_title('Consecutive Hit Length - False Positive')
+            set_fontsize(axes[0, 2])
+            
+            axes[0, 3].hist(trues.cons_length.values, con_length_bins, density=True, color='grey', edgecolor='black', linewidth=1.2)
+            axes[0, 3].set_xlabel('Consecutive Hit Length')
+            axes[0, 3].set_title('Consecutive Hit Length - Valid')
+            set_fontsize(axes[0, 3])
+            
+            # Plot power
+            axes[1, 0].hist(falses.power.values, power_bins, density=True, color='grey', edgecolor='black', linewidth=1.2)
+            axes[1, 0].set_xlabel('Signal Power')
+            axes[1, 0].set_ylabel('Probability Density')
+            axes[1, 0].set_title('Signal Power - False Positive')
+            set_fontsize(axes[1, 0])
+            
+            axes[1, 1].hist(trues.power.values, power_bins, density=True, color='grey', edgecolor='black', linewidth=1.2)
+            axes[1, 1].set_xlabel('Signal Power')
+            axes[1, 1].set_title('Signal Power - Valid')
+            set_fontsize(axes[1, 1])
+            
+            # Plot noise ratio
+            axes[1, 2].hist(falses.noise_ratio.values, noise_bins, density=True, color='grey', edgecolor='black', linewidth=1.2)
+            axes[1, 2].set_xlabel('Noise Ratio')
+            axes[1, 2].set_ylabel('Probability Density')
+            axes[1, 2].set_title('Noise Ratio - False Positive')
+            set_fontsize(axes[1, 2])
+            
+            axes[1, 3].hist(trues.noise_ratio.values, noise_bins, density=True, color='grey', edgecolor='black', linewidth=1.2)
+            axes[1, 3].set_xlabel('Noise Ratio')
+            axes[1, 3].set_title('Noise Ratio - Valid')
+            set_fontsize(axes[1, 3])
+            
+            # Plot lag differences
+            axes[2, 0].hist(falses.lag_diff.values, lag_bins, density=True, color='grey', edgecolor='black', linewidth=1.2)
+            axes[2, 0].set_xlabel('Lag Differences')
+            axes[2, 0].set_ylabel('Probability Density')
+            axes[2, 0].set_title('Lag Differences - False Positive')
+            set_fontsize(axes[2, 0])
+            
+            axes[2, 1].hist(trues.lag_diff.values, lag_bins, density=True, color='grey', edgecolor='black', linewidth=1.2)
+            axes[2, 1].set_xlabel('Lag Differences')
+            axes[2, 1].set_title('Lag Differences - Valid')
+            set_fontsize(axes[2, 1])
 
-            # make lattice plot for pubs
+            # Plot log posterior ratio
+            axes[2, 2].hist(falses.log_posterior_ratio.values, bins=20, density=True, color='grey', edgecolor='black', linewidth=1.2)
+            axes[2, 2].set_xlabel('Log Posterior Ratio')
+            axes[2, 2].set_ylabel('Probability Density')
+            axes[2, 2].set_title('Log Posterior Ratio - False Positive')
+            set_fontsize(axes[2, 2])
             
-            # hit ratio
-            fig = plt.figure(figsize = (4, 2), dpi = 300, layout = 'tight')
+            axes[2, 3].hist(trues.log_posterior_ratio.values, bins=20, density=True, color='grey', edgecolor='black', linewidth=1.2)
+            axes[2, 3].set_xlabel('Log Posterior Ratio')
+            axes[2, 3].set_title('Log Posterior Ratio - Valid')
+            set_fontsize(axes[2, 3])
             
-            ax1 = fig.add_subplot(1,2,1)
-            ax1.hist(falses.hit_ratio.values,
-                     hit_ratio_bins,
-                     density = True,
-                     color = 'grey',
-                     edgecolor='black',
-                     linewidth=1.2)
-            ax1.set_xlabel('Hit Ratio')            
-            ax1.set_title('False Positive')
-            ax1.set_ylabel('Probability Density')
+            # Adjust layout
+            plt.tight_layout()
             
-            ax2 = fig.add_subplot(1,2,2)
-            ax2.hist(trues.hit_ratio.values,
-                      hit_ratio_bins,
-                      density = True,
-                      color = 'grey',
-                      edgecolor='black',
-                      linewidth=1.2)
-            ax2.set_title('Valid')
-            ax2.set_xlabel('Hit Ratio')
-
+            # Show the plot
             plt.show()
-            
-            # consecutive record length
-            fig = plt.figure(figsize = (4, 2), dpi = 300, layout = 'tight')
-            
-            ax1 = fig.add_subplot(1,2,1)
-            ax1.hist(falses.cons_length.values,
-                     con_length_bins,
-                     density = True,
-                     color = 'grey',
-                     edgecolor='black',
-                     linewidth=1.2)
-            ax1.set_xlabel('Consecutive Hit Length')
-            ax1.set_title('False Positive')
-            ax1.set_ylabel('Probability Density')
-            
-            ax2 = fig.add_subplot(1,2,2)
-            ax2.hist(trues.cons_length.values,
-                      con_length_bins,
-                      density = True,
-                      color = 'grey',
-                      edgecolor='black',
-                      linewidth=1.2)
-            ax2.set_title('Valid')
-            ax2.set_xlabel('Consecutive Hit Length')
-            
-            plt.show()
-            
-            # power
-            fig = plt.figure(figsize = (4, 2), dpi = 300, layout = 'tight')
-            
-            ax1 = fig.add_subplot(1,2,1)
-            ax1.hist(falses.power.values,
-                     power_bins,
-                     density = True,
-                     color = 'grey',
-                     edgecolor='black',
-                     linewidth=1.2)
-            ax1.set_xlabel('Signal Power')
-            ax1.set_ylabel('Probability Density')
-            ax1.set_title('False Positive')
-            
-            ax2 = fig.add_subplot(1,2,2)
-            ax2.hist(trues.power.values,
-                     power_bins,
-                     density = True,
-                     color = 'grey',
-                     edgecolor='black',
-                     linewidth=1.2)
-            ax2.set_xlabel('Signal Power')
-            ax2.set_title('Valid')
-            
-            plt.show()
-
-            # noise ratio
-            fig = plt.figure(figsize = (4, 2), dpi = 300, layout = 'tight')
-            
-            ax1 = fig.add_subplot(1,2,1)
-            ax1.hist(falses.noise_ratio.values,
-                     noise_bins,
-                     density = True,
-                     color = 'grey',
-                     edgecolor='black',
-                     linewidth=1.2)
-            ax1.set_xlabel('Noise Ratio')
-            ax1.set_ylabel('Probability Density')
-            ax1.set_title('False Positive')
-            
-            ax2 = fig.add_subplot(1,2,2)
-            ax2.hist(trues.noise_ratio.values,
-                     noise_bins,
-                     density = True,
-                     color = 'grey',
-                     edgecolor='black',
-                     linewidth=1.2)
-            ax2.set_xlabel('Noise Ratio')
-            ax2.set_title('Valid')
-            
-            plt.show()
-
-            # lag diff
-            fig = plt.figure(figsize = (4, 2), dpi = 300, layout = 'tight')
-            
-            ax1 = fig.add_subplot(1,2,1)
-            ax1.hist(falses.lag_diff.values,
-                     lag_bins,
-                     density = True,
-                     color = 'grey',
-                     edgecolor='black',
-                     linewidth=1.2)
-            ax1.set_xlabel('Lag Differences')
-            ax1.set_ylabel('Probability Density')
-            ax1.set_title('False Positive')
-            
-            ax2 = fig.add_subplot(1,2,2)
-            ax2.hist(trues.lag_diff.values,
-                     lag_bins,
-                     density = True,
-                     color = 'grey',
-                     edgecolor='black',
-                     linewidth=1.2)
-            ax2.set_xlabel('Lag Differences')
-            ax2.set_title('Valid')
-            
-            plt.show()
-
-            # log posterior ratio
-            fig = plt.figure(figsize = (4, 2), dpi = 300, layout = 'tight')
-            
-            ax1 = fig.add_subplot(1,2,1)
-            ax1.hist(falses.log_posterior_ratio.values,
-                      bins = 20,
-                      density = True,
-                      color = 'grey',
-                      edgecolor='black',
-                      linewidth=1.2)
-            ax1.set_xlabel('Log Posterior Ratio')
-            ax1.set_ylabel('Probability Density')
-            ax1.set_title('False Positive')
-            
-            ax2 = fig.add_subplot(1,2,2)
-            ax2.hist(trues.log_posterior_ratio.values,
-                      bins = 20,
-                      density = True,
-                      color = 'grey',
-                      edgecolor='black',
-                      linewidth=1.2)
-            ax2.set_xlabel('Log Posterior Ratio')
-            ax2.set_title('Valid')
-            
-            plt.show()
-
         else:
            print("There were insufficient data to quantify summary statistics")
            print("All remaining were classified as %s suggesting there is no more improvement in the model"%(det_class_count.index[0]))
@@ -1161,8 +1109,30 @@ class radio_project():
         tbl_recaptures = pd.read_hdf(self.db,key = 'recaptures')
         tbl_recaptures.to_csv(os.path.join(self.output_dir,'recaptures.csv'))
                 
-                
-                
-
+    def undo_recaptures(self):
+        """
+        Remove a specified key from an HDF5 file.
+    
+        Parameters:
+        h5file (str): The path to the HDF5 file.
+        key (str): The key to be removed from the HDF5 file.
+        """
+        with pd.HDFStore(self.db, mode='a') as store:
+            if 'recaptures' in store:
+                store.remove('recaptures')
+                print(f"Recapturesd has been removed from the HDF5 file.")
+                    
+    def undo_overlap(self):
+        """
+        Remove a specified key from an HDF5 file.
+    
+        Parameters:
+        h5file (str): The path to the HDF5 file.
+        key (str): The key to be removed from the HDF5 file.
+        """
+        with pd.HDFStore(self.db, mode='a') as store:
+            if 'overlapping' in store:
+                store.remove('overlapping')
+                print(f"Recapturesd has been removed from the HDF5 file.")
             
                     
