@@ -77,8 +77,9 @@ project.training_summary(rec_type, site = [rec_id])
 rec_id = 'R020'
 rec_type = 'orion'
 threshold_ratio = 1.0  # 1.0 = MAP Hypothesis
+likelihood = ['hit_ratio', 'cons_length', 'noise_ratio', 'power', 'lag_diff'] # a-la carte likelihood, standard fields: ['hit_ratio', 'cons_length', 'noise_ratio', 'power', 'lag_diff']
 
-project.reclassify(project, rec_id, rec_type, threshold_ratio)
+project.reclassify(project, rec_id, rec_type, threshold_ratio,likelihood)
 
 # undo classification 
 # project.undo_classification(rec_id, class_iter = class_iter)

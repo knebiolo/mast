@@ -561,7 +561,67 @@ class radio_project():
     
         return train_dat
     
-    def reclassify(self, project, rec_id, rec_type, threshold_ratio):
+    def reclassify(self, project, rec_id, rec_type, threshold_ratio, likelihood_model):
+        """
+        Reclassifies fish in a project based on user-defined criteria and threshold ratios.
+    
+        This function iteratively reclassifies fish in a given project. It allows the user to
+        specify a project, a record identifier, the type of record, and a threshold ratio for
+        classification. The process continues until the user decides to stop.
+    
+        Parameters
+        ----------
+        project : object
+            The project object that contains methods for managing and classifying fish data.
+            
+        rec_id : int or str
+            The unique identifier for the reciever to be reclassified.
+            
+        rec_type : str
+            The type of receiver being processed (e.g., 'srx1200', 'orion').
+            
+        threshold_ratio : float
+            The threshold ratio used for determining classification criteria.
+            
+        Attributes
+        ----------
+        class_iter : int, optional
+            An iteration counter for the classification process, initially set to None.
+            
+        Methods
+        -------
+        project.get_fish(rec_id, train, reclass_iter)
+            Retrieves a list of fish based on the record identifier and iteration parameters.
+            
+        project.create_training_data(rec_type, class_iter)
+            Generates the training data needed for classification based on the record type and
+            iteration counter.
+            
+        project.classify(fish, rec_id, fields, training_data, class_iter, threshold_ratio)
+            Classifies each fish based on the specified parameters and training data.
+            
+        project.classification_summary(rec_id, class_iter)
+            Generates a summary of the classification results for the given record identifier
+            and iteration.
+            
+        plt.show(block)
+            Displays figures and blocks execution until they are closed.
+    
+        Notes
+        -----
+        - The classification process involves interactive user input to determine if additional
+          iterations are needed.
+        - The function utilizes several project methods to handle fish data retrieval, training
+          data generation, classification, and summary generation.
+        - The fields used for classification are hardcoded as ['hit_ratio', 'cons_length',
+          'noise_ratio', 'power', 'lag_diff'].
+    
+        Examples
+        --------
+        >>> project = Project()
+        >>> reclassify(project, rec_id=123, rec_type='species', threshold_ratio=0.75)
+    
+        """
         class_iter = None
         
         while True:
@@ -571,12 +631,9 @@ class radio_project():
             # Generate training data for the classifier
             training_data = project.create_training_data(rec_type, class_iter)
             
-            # Define the fields
-            fields = ['hit_ratio', 'cons_length', 'noise_ratio', 'power', 'lag_diff']
-            
             # Iterate over fish and classify
             for fish in fishes:
-                project.classify(fish, rec_id, fields, training_data, class_iter, threshold_ratio)
+                project.classify(fish, rec_id, likelihood_model, training_data, class_iter, threshold_ratio)
             
             # Generate summary statistics
             project.classification_summary(rec_id, class_iter)
@@ -599,8 +656,7 @@ class radio_project():
                 break
             else:
                 print("Invalid input. Please enter 'yes' or 'no'.")
-    
-    
+
     def classify(self,
                  freq_code,
                  rec_id,
