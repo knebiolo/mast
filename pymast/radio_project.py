@@ -1061,7 +1061,8 @@ class radio_project():
         '''method creates a recaptures key in the hdf file'''
         
         # iterate over fish, get last classificaiton, presences, and overlapping detections
-        for fish in self.tags[self.tags.tag_type == 'study'].index:            
+        for fish in self.tags[self.tags.tag_type == 'study'].index: 
+            rel_date = pd.to_datetime(self.tags.loc[fish,'rel_date'])
             for rec in self.receivers.index:
                 # get this receivers data from the classified key
                 rec_dat = pd.read_hdf(self.db,
@@ -1082,6 +1083,8 @@ class radio_project():
                     
                 except:
                     overlap_dat = []
+                
+                rec_dat = rec_dat[rec_dat.time_stamp >= rel_date]
                 
                 if len(rec_dat) > 0:
                     rec_dat = rec_dat[rec_dat.iter == rec_dat.iter.max()]

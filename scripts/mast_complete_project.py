@@ -115,44 +115,39 @@ nodes = ['R010','R019','R020','R013','R014','R015','R016','R017','R018']
 doll = pymast.overlap_reduction(nodes, edges, project)
 doll.nested_doll()
 
-# project.undo_overlap()
+# #project.undo_overlap()
+
 #%% create a recaptures table
 project.make_recaptures_table()
 
-# project.undo_recaptures()
-#%% create models using a Time to Event Framework
+# #project.undo_recaptures()
+
+#%% create Time to Event Model
     
 # what is the Node to State relationship - use Python dictionary
 node_to_state = {'R001':1,'R002':1,                   # upstream
                   'R012':2,                            # forebay
-                  'R013':3,'R015':3,'R016':3,'R017':3, # powerhouse
+                  'R013':3,'R015':3,'R016':3,'R017':3,'R010':3, # powerhouse
                   'R018':4,                            # sluice
                   'R003':5,                            # east channel up
-                  'R007':6,                            # east channel down
-                  'R008':7,                            # east channel dam
-                  'R009':8,                            # NLF
-                  'R010':9,'R019':19,                  # tailrace
-                  'R011':10,                           # downstream
-                  'R004':11,'R005':11}                 # downstream 2
+                  'R007':7,                            # east channel down
+                  'R008':5,                            # east channel dam
+                  'R009':6,                            # NLF
+                  'R020':7,'R019':7,                  # tailrace
+                  'R011':7,                           # downstream
+                  'R004':7,'R005':7}                 # downstream 2
 
 # Step 1, create time to event data class 
 tte = formatter.time_to_event(node_to_state,
                               project,
                               initial_state_release = True)
 
-# Step 2, format data - with covariates
-# tte.data_prep(project,
-#               time_dependent_covariates = True,
-#               adjacency_filter = [('R010','R013'),('R010','R014'),('R010','R015'),('R010','R016'),('R010','R017'),('R010','R018'),
-#                                   ('R019','R013'),('R019','R014'),('R019','R015'),('R019','R016'),('R019','R017'),('R019','R018'),
-#                                   ('R020','R013'),('R020','R014'),('R020','R015'),('R020','R016'),('R020','R017'),('R020','R018')])
-# Step 3, format data - without covariates
+# Step 2, format data - without covariates
 tte.data_prep(project,
-              adjacency_filter = [('R010','R013'),('R010','R014'),('R010','R015'),('R010','R016'),('R010','R017'),('R010','R018'),
-                                  ('R019','R013'),('R019','R014'),('R019','R015'),('R019','R016'),('R019','R017'),('R019','R018'),
-                                  ('R020','R013'),('R020','R014'),('R020','R015'),('R020','R016'),('R020','R017'),('R020','R018')])
-# Step 4, generate a summary
-tte.summary()
+              adjacency_filter = [(7, 1),(7, 2),(7, 5),(7, 6)])
+# Step 3, generate a summary
+stats = tte.summary()
+tte.master_state_table.to_csv(os.path.join(project_dir,'Output','york_haven_tte.csv'))
 
 #%% create a Cormack-Jolly-Seber Mark Recapture model
 # what is the output directory?
@@ -161,11 +156,12 @@ model_name = "york_haven"
 
 # what is the Node to State relationship - use Python dictionary
 receiver_to_recap = {'R001':'R01','R002':'R01',
-                     'R003':'R02','R004':'R04','R005':'R04','R006':'R02',
-                     'R007':'R02','R008':'R02','R009':'R02','R010':'R02',
-                     'R011':'R03','R012':'R02','R013':'R02','R014':'R02',
-                     'R015':'R02','R016':'R02','R017':'R02',#'R018':'R02',
-                     'R019':'R03','R020':'R03',}
+                      'R003':'R02','R006':'R02',
+                      'R007':'R02','R008':'R02','R009':'R02','R010':'R02',
+                      'R011':'R03','R012':'R02','R013':'R02','R014':'R02',
+                      'R015':'R02','R016':'R02','R017':'R02',#'R018':'R02',
+                      'R019':'R03','R020':'R03',
+                      'R004':'R04','R005':'R04',}
 
 # Step 1, create time to event data class - we only need to feed it the directory and file name of input data
 cjs = formatter.cjs_data_prep(receiver_to_recap, project, initial_recap_release = False)
