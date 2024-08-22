@@ -12,6 +12,7 @@ from scipy.interpolate import UnivariateSpline
 import matplotlib.pyplot as plt
 import networkx as nx
 from matplotlib import rcParams
+from sklearn.cluster import KMeans
 
 font = {'family': 'serif','size': 6}
 rcParams['font.size'] = 6
@@ -27,7 +28,7 @@ class bout():
         # get the receivers associated with this particular network node
         recs = radio_project.receivers[radio_project.receivers.node == node]
         self.receivers = recs.index  # get the unique receivers associated with this node
-        self.data = pd.DataFrame(columns = ['freq_code','epoch','rec_id'])            # set up an empty data frame
+        self.data = pd.DataFrame(columns = ['freq_code','epoch','power','rec_id'])            # set up an empty data frame
 
         # for every receiver
         for i in self.receivers:
@@ -37,9 +38,10 @@ class bout():
                                   where = 'rec_id = %s'%(i))
             rec_dat = rec_dat[rec_dat.iter == rec_dat.iter.max()]
             rec_dat = rec_dat[rec_dat.test == 1]
-            rec_dat = rec_dat[['freq_code','epoch','rec_id']]
+            rec_dat = rec_dat[['freq_code','epoch','power','rec_id']]
             rec_dat = rec_dat.astype({'freq_code':'object',
                             'epoch':'float32',
+                            'power':'float32',
                             'rec_id':'object'})
             
             self.data = pd.concat([self.data,rec_dat])
@@ -391,6 +393,7 @@ class bout():
             
             fish_dat = fish_dat.astype({'freq_code': 'object',
                                         'epoch': 'float32',
+                                        'power': 'float32',
                                         'rec_id': 'object',
                                         'class': 'object',
                                         'bout_no':'int32',
@@ -454,8 +457,8 @@ class overlap_reduction():
             #import data and add to node dict
             node_recs = radio_project.receivers[radio_project.receivers.node == i]
             node_recs = node_recs.index         # get the unique receivers associated with this node
-            pres_data = pd.DataFrame(columns = ['freq_code','epoch','node','rec_id','presence'])        # set up an empty data frame
-            recap_data = pd.DataFrame(columns = ['freq_code','epoch','node','rec_id'])
+            pres_data = pd.DataFrame(columns = ['freq_code','epoch','power','node','rec_id','presence'])        # set up an empty data frame
+            recap_data = pd.DataFrame(columns = ['freq_code','epoch','power','node','rec_id'])
             
             for j in node_recs:
                 # get presence data and final classifications for this receiver
@@ -464,16 +467,22 @@ class overlap_reduction():
                 class_dat = pd.read_hdf(radio_project.db,'classified', where = 'rec_id = %s'%(j))
                 class_dat = class_dat[class_dat.iter == class_dat.iter.max()]
                 class_dat = class_dat[class_dat.test == 1]
-                class_dat = class_dat[['freq_code', 'epoch', 'rec_id']]
+                class_dat = class_dat[['freq_code', 'epoch','power','rec_id']]
                 class_dat['node'] = np.repeat(i,len(class_dat))
                 # append to node specific dataframe
                 pres_data = pd.concat([pres_data,presence_dat])
                 recap_data = pd.concat([recap_data,class_dat])
 
             # now that we have data, we need to summarize it, use group by to get min ans max epoch by freq code, recID and presence_number
-            dat = pres_data.groupby(['freq_code','bout_no','node','rec_id'])['epoch'].agg(['min','max'])
-            dat.reset_index(inplace = True, drop = False)
-            dat.rename(columns = {'min':'min_epoch','max':'max_epoch'},inplace = True)
+            dat = pres_data.groupby(['freq_code', 'bout_no', 'node', 'rec_id']).agg(
+                min_epoch=('epoch', 'min'),
+                median_epoch=('epoch', 'median'),
+                max_epoch=('epoch', 'max'),
+                min_power=('power', 'min'),
+                median_power=('power', 'median'),
+                max_power=('power', 'max')
+            ).reset_index()
+
             self.node_pres_dict[i] = dat
             self.node_recap_dict[i] = recap_data
             
@@ -552,3 +561,113 @@ class overlap_reduction():
             print(f"Overlaps were found and processed. Total number of overlaps: {overlap_count}.")
         else:
             print("No overlaps were found.")
+            
+    def unsupervised_removal(self):
+        '''If a single fish appears at two different receivers at once, we can use 
+        overlapping bouts to determine presence.  If we assume that power will be 
+        higher at the actual receiver rather than the overlapping receiver, the 
+        bout with the higher median power determines site presence. 
+        
+        Plot all the average power of each bout
+        Perform k-means or some other unsupervised algorithm to put average powers 
+        into one of two bins, actual or overlapping.  If the bout is in the overlapping
+        bin, those records are not used for analysis
+        
+        data we need for this is in self.node_pres_dict where each key is a node
+        '''
+
+        overlaps_found = False
+        overlap_count = 0
+        
+        for i in self.node_pres_dict:
+            fishes = self.node_pres_dict[i].freq_code.unique()
+            
+            # get parent data - aka this node
+            parent_dat = self.node_pres_dict[i].copy()
+            parent_dat['overlapping'] = 0
+            parent_dat['parent'] = ''
+            children = list(self.G.successors(i))
+
+            print ('start processing receiver %s'%(i))
+            
+            if len(children) > 0:
+                for j in children:
+                    child_dat = self.node_pres_dict[j]
+                    if len(child_dat) > 0:
+                        # get power observations of child data bouts
+                        med_power_child = child_dat.med_power.values
+
+                        # get power observations of parent data bouts
+                        med_power_parent = parent_dat.med_power.values
+
+                        # do a k-means
+                        # Combine child and parent median power values
+                        combined_power = np.concatenate([med_power_child, med_power_parent])
+                        
+                        # Perform k-means clustering with 2 clusters
+                        kmeans = KMeans(n_clusters=2, random_state=42).fit(combined_power.reshape(-1, 1))
+                        
+                        # Retrieve the cluster centers
+                        centers = kmeans.cluster_centers_.flatten()
+                        
+                        # Determine which cluster corresponds to "near" (higher power) and "far" (lower power)
+                        near_cluster = np.argmax(centers)
+                        far_cluster = np.argmin(centers)
+                        
+                        # Assign labels to child and parent power observations
+                        child_labels = kmeans.predict(med_power_child.reshape(-1, 1))
+                        parent_labels = kmeans.predict(med_power_parent.reshape(-1, 1))
+                        
+                        # Map the cluster labels to "near", "far", or "none"
+                        def assign_group(label):
+                            if label == near_cluster:
+                                return 'near'
+                            elif label == far_cluster:
+                                return 'far'
+                            else:
+                                return 'none'
+                        
+                        # Apply the mapping to the child and parent labels
+                        child_group = np.array([assign_group(label) for label in child_labels])
+                        parent_group = np.array([assign_group(label) for label in parent_labels])
+                        
+                        threshold = 0.05 * (max(combined_power) - min(combined_power))  # 5% of the range
+
+                        # Check for cases where k-means can't distinguish well (difference between centers is small)
+                        if np.abs(centers[near_cluster] - centers[far_cluster]) < threshold:
+                            child_group[:] = 'none'
+                            parent_group[:] = 'none'
+
+                        plt.hist(combined_power, bins=30, alpha=0.5, label='Combined Power')
+                        plt.axvline(centers[0], color='r', linestyle='dashed', linewidth=2, label='Cluster Center 1')
+                        plt.axvline(centers[1], color='b', linestyle='dashed', linewidth=2, label='Cluster Center 2')
+                        plt.legend()
+                        plt.show()
+
+                        # child_group and parent_group now contain the assigned groups for each observation
+                        overlapping = np.where(parent_group == 'far', 1, 0)
+                        parent_dat['overlapping'] = overlapping
+                        parent_dat = parent_dat.astype({
+                            'freq_code': 'object',
+                            'epoch': 'int32',
+                            'rec_id': 'object',
+                            'node': 'object',
+                            'overlapping': 'int32',
+                            'parent': 'object'
+                        })
+            
+                        with pd.HDFStore(self.db, mode='a') as store:
+                            store.append(key='overlapping',
+                                         value=parent_dat,
+                                         format='table',
+                                         index=False,
+                                         min_itemsize={'freq_code': 20,
+                                                       'rec_id': 20,
+                                                       'parent': 20},
+                                         append=True,
+                                         data_columns=True,
+                                         chunksize=1000000)
+
+                        print ('processed overlap at receiver parent receiver %s and child receiver %s'%(i,j))
+
+        

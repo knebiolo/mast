@@ -1,7 +1,7 @@
 # Import the submodules first that have no dependencies
 from .predictors import *
 from .overlap_removal import *
-from .table_merge import *
+#from .table_merge import *
 from .formatter import *
 
 # Import the naive_bayes submodule next
