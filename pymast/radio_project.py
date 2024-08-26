@@ -15,6 +15,7 @@ import pymast.predictors as predictors
 import matplotlib.pyplot as plt
 from matplotlib import rcParams
 from scipy import interpolate
+import shutil
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -68,6 +69,8 @@ class radio_project():
         self.db = os.path.join(project_dir,'%s.h5'%(db_name))
         self.tags = tag_data
         self.study_tags = self.tags[self.tags.tag_type == 'study'].freq_code.values
+        self.test_tags = self.tags[self.tags.tag_type == 'TEST'].freq_code.values
+        self.beacon_tags = self.tags[self.tags.tag_type == 'BEACON'].freq_code.values
         self.tags.set_index('freq_code', inplace = True)
         self.receivers = receiver_data
         self.receivers.set_index('rec_id', inplace = True)
@@ -183,6 +186,7 @@ class radio_project():
                               key = 'raw_data',
                               where = f'rec_id = "{rec_id}"')
             dat = pd.merge(dat, tags_no_idx, on='freq_code', how='left')
+            dat = dat[(dat.tag_type != 'TEST') & (dat.tag_type != 'BEACON')]
             dat = dat[(dat.tag_type != 'beacon') & (dat.tag_type != 'test')]
             
         elif reclass_iter == None and train == False:
@@ -190,7 +194,7 @@ class radio_project():
                               key = 'raw_data',
                               where = f'rec_id = "{rec_id}"')
             dat = pd.merge(dat, tags_no_idx, on='freq_code', how='left')
-            dat = dat[dat.tag_type == 'study']
+            dat = dat[(dat.tag_type == 'study') | (dat.tag_type == 'STUDY')]
 
         else:
             itr = reclass_iter -1 
@@ -203,99 +207,64 @@ class radio_project():
         return dat.freq_code.unique()
     
     def train(self, freq_code, rec_id):
-        '''A class object for a training dataframe and related data objects.
+        '''A class object for a training dataframe and related data objects.'''
     
-        This class object creates a training dataframe for animal i at site j.
-    
-        when class is initialized, we will extract information for this animal (i)
-        at reciever (site) from the project database (projectDB).
-            '''
-        # pull raw data 
+        # Pull raw data 
         train_dat = pd.read_hdf(self.db,
                                 'raw_data',
-                                where = f'(freq_code == "{freq_code}") & (rec_id == "{rec_id}")')
-    
-        # do some data management when importing training dataframe
+                                where=f'(freq_code == "{freq_code}") & (rec_id == "{rec_id}")')
+        
+        # Data management
         train_dat['time_stamp'] = pd.to_datetime(train_dat.time_stamp)
-        train_dat['epoch'] = np.round((train_dat.time_stamp - pd.Timestamp("1970-01-01")) / pd.Timedelta('1s'),6)
-        train_dat.sort_values(by = 'epoch', inplace = True)
+        train_dat['epoch'] = np.round((train_dat.time_stamp - pd.Timestamp("1970-01-01")) / pd.Timedelta('1s'), 6)
+        train_dat.sort_values(by='epoch', inplace=True)
         
-        train_dat.drop_duplicates(subset = 'time_stamp', 
-                                  keep = 'first', 
-                                  inplace = True)
+        train_dat.drop_duplicates(subset='time_stamp', keep='first', inplace=True)
         
-        # set some object variables
+        # Object variables
         if self.receivers.index.dtype != 'object':
             rec_id = np.int64(rec_id)
-        rec_type = self.receivers.at[rec_id,'rec_type']
-
-        # for training data, we know the tag's detection class ahead of time,
-        # if the tag is in the study tag list, it is a known detection class, if
-        # it is a beacon tag, it is definite, if it is a study tag, it's plausible
+        rec_type = self.receivers.at[rec_id, 'rec_type']
+    
+        # Detection class
         if freq_code in self.study_tags:
             plausible = 1
         else:
             plausible = 0
-        # get rate
+    
+        # Get rate
         if freq_code in self.tags.index:
-            pulse_rate = self.tags.at[freq_code,'pulse_rate']
+            pulse_rate = self.tags.at[freq_code, 'pulse_rate']
         else:
-            pulse_rate = 3.0
-        # if self.tags.at[freq_code,'mort_rate'] == np.nan or self.tags.at[freq_code,'mort_rate'] == 0:
-        #     mort_rate = 9999.0
-        # else:
-        #     mort_rate = self.tags.at[freq_code,'mort_rate']
-        
+            pulse_rate = 673.
+    
         mort_rate = 8888.
-        # calculate predictors
-        # if plausible == 1:
-        #     print ('debug check det hist')
-        train_dat['detection'] = np.repeat(plausible,len(train_dat))
+        train_dat['detection'] = np.repeat(plausible, len(train_dat))
         train_dat['lag'] = train_dat.epoch.diff()
         train_dat['lag_diff'] = train_dat.lag.diff()
+    
+        # Apply the optimized detection history function to the entire dataset at once
+        detection_history, hit_ratio_arr, cons_det_arr, max_count_arr = predictors.detection_history(
+            train_dat['epoch'].values,
+            pulse_rate,
+            self.det_count,
+            train_dat['channels'].values,
+            train_dat['scan_time'].values,
+            train_dat['channels'].values
+        )
+    
+        # Convert detection history arrays to concatenated strings outside Numba
+        det_hist_string_arr = np.array([''.join(row.astype(str)) for row in detection_history])
         
-        det_hist_dict = {}
-        hit_ratio_dict = {}
-        cons_det_dict = {}
-        max_count_dict = {}
-        
-        for ch in train_dat.channels.unique():
-            train_dat_sub = train_dat[train_dat.channels == ch]
-            det_hist_string, hit_ratio, cons_det, max_count \
-                = predictors.detection_history(train_dat_sub.epoch.values,
-                                               pulse_rate,
-                                               self.det_count,
-                                               ch,
-                                               train_dat_sub.scan_time.values,
-                                               train_dat_sub.channels.values)
-                
-            det_hist_dict[ch] = det_hist_string
-            hit_ratio_dict[ch] = hit_ratio
-            cons_det_dict[ch] = cons_det
-            max_count_dict[ch] = max_count
-        
-        det_hist_string_arrs = list(det_hist_dict.values())
-        det_hist_string_arr = np.hstack(det_hist_string_arrs)
-        hit_ratio_arrs = list(hit_ratio_dict.values())
-        hit_ratio_arr = np.hstack(hit_ratio_arrs)
-        cons_det_arrs = list(cons_det_dict.values())
-        cons_det_arr = np.hstack(cons_det_arrs)
-        max_count_arrs = list(max_count_dict.values())
-        max_count_arr = np.hstack(max_count_arrs)
-        
+        # Assign back to the DataFrame
         train_dat['det_hist'] = det_hist_string_arr
         train_dat['hit_ratio'] = hit_ratio_arr
         train_dat['cons_det'] = cons_det_arr
         train_dat['cons_length'] = max_count_arr
-        # train_dat['series_hit'] = predictors.series_hit(train_dat.lag.values,
-        #                                           pulse_rate,
-        #                                           mort_rate,
-        #                                           'A')
-        # if plausible == 1:
-        #     print ('debug why det hist not right?')
-        train_dat.fillna(value=9999999, inplace=True)      
-        
-        # make sure data types are correct - these next steps are critical
+    
+        train_dat.fillna(value=9999999, inplace=True)
+    
+        # Ensure data types are correct
         try:
             train_dat = train_dat.astype({'power': 'float32', 
                                           'time_stamp': 'datetime64[ns]',
@@ -314,24 +283,22 @@ class radio_project():
                                           'cons_det': 'int32',
                                           'cons_length': 'float32'})
         except ValueError:
-            print ('debug - check datatypes')
-
-        # append to hdf5
-        with pd.HDFStore(self.db, mode='a') as store:
-            store.append(key = 'trained',
-                         value = train_dat, 
-                         format = 'table', 
-                         index = False,
-                         min_itemsize = {'freq_code':20,
-                                         'rec_type':20,
-                                         'rec_id':20,
-                                         'det_hist':20},
-                         append = True, 
-                         chunksize = 1000000)
+            print('debug - check datatypes')
             
-
-        
-        print ('Fish %s trained at receiver %s, plausibiity: %s'%(freq_code, rec_id, plausible))
+        # Append to HDF5
+        with pd.HDFStore(self.db, mode='a') as store:
+            store.append(key='trained',
+                         value=train_dat, 
+                         format='table', 
+                         index=False,
+                         min_itemsize={'freq_code': 20,
+                                       'rec_type': 20,
+                                       'rec_id': 20,
+                                       'det_hist': 20},
+                         append=True, 
+                         chunksize=1000000)
+    
+        print(f'Fish {freq_code} trained at receiver {rec_id}, plausibility: {plausible}')
 
     def training_summary(self,rec_type,site = None):
         # initialize some variables
@@ -384,7 +351,11 @@ class radio_project():
             elif len(trues) == 0 and len(falses) > 0:
                 print ("%6s|   %8s   |   %8s   |"%(i,falses.det_class_count.values[0],0))
             else:
-                print ("%6s|   %8s   |   %8s   |"%(i,0,trues.det_clas_count.values[0]))
+                try:
+                    print ("%6s|   %8s   |   %8s   |"%(i,0,trues.det_clas_count.values[0]))
+
+                except AttributeError:
+                    print ("%6s|   %8s   |   %8s   |"%(i,0,0))
 
         print ("      |______________|______________|")
         print ("")
@@ -704,17 +675,26 @@ class radio_project():
             class_dat['lag'] = class_dat.epoch.diff()
             class_dat['lag_diff'] = class_dat.lag.diff()
             class_dat.fillna(value = 99999999, inplace = True)
-            det_hist_string, det_hist, cons_det, max_count \
-                = predictors.detection_history(class_dat.epoch.values,
-                                               pulse_rate,
-                                               self.det_count,
-                                               2,
-                                               class_dat.scan_time.values,
-                                               class_dat.channels)
-            class_dat['det_hist'] = det_hist_string
-            class_dat['hit_ratio'] = det_hist
-            class_dat['cons_det'] = cons_det
-            class_dat['cons_length'] = max_count
+            
+            # Apply the optimized detection history function to the entire dataset at once
+            detection_history, hit_ratio_arr, cons_det_arr, max_count_arr = predictors.detection_history(
+                class_dat['epoch'].values,
+                pulse_rate,
+                self.det_count,
+                class_dat['channels'].values,
+                class_dat['scan_time'].values,
+                class_dat['channels'].values
+            )
+        
+            # Convert detection history arrays to concatenated strings outside Numba
+            det_hist_string_arr = np.array([''.join(row.astype(str)) for row in detection_history])
+            
+            # Assign back to the DataFrame
+            class_dat['det_hist'] = det_hist_string_arr
+            class_dat['hit_ratio'] = hit_ratio_arr
+            class_dat['cons_det'] = cons_det_arr
+            class_dat['cons_length'] = max_count_arr
+            
             # class_dat['series_hit'] = predictors.series_hit(class_dat.lag.values,
             #                                                 pulse_rate,
             #                                                 mort_rate,
@@ -840,7 +820,7 @@ class radio_project():
                              chunksize = 1000000)
             
             # export
-            class_dat.to_csv(os.path.join(self.output_dir,'freq_code_%s_rec_%s_class_%s.csv'%(freq_code, rec_id, reclass_iter)))
+            #class_dat.to_csv(os.path.join(self.output_dir,'freq_code_%s_rec_%s_class_%s.csv'%(freq_code, rec_id, reclass_iter)))
             
             print ('Fish %s at receiver %s classified'%(freq_code,rec_id))
             # next step looks at results
@@ -1108,8 +1088,9 @@ class radio_project():
                             rec_dat = pd.merge(rec_dat,
                                                overlap_dat,
                                                how = 'left')
-                            
-                            rec_dat = rec_dat[rec_dat.overlapping != 0]
+                            rec_dat['overlapping'] = rec_dat['overlapping'].fillna(0)                       
+
+                            rec_dat = rec_dat[rec_dat.overlapping != 1]
                             
                         else:
                             rec_dat['overlapping'] = np.zeros(len(rec_dat))                        
@@ -1179,7 +1160,7 @@ class radio_project():
         with pd.HDFStore(self.db, mode='a') as store:
             if 'recaptures' in store:
                 store.remove('recaptures')
-                print(f"Recapturesd has been removed from the HDF5 file.")
+                print(f"Recaptures has been removed from the HDF5 file.")
                     
     def undo_overlap(self):
         """
@@ -1192,6 +1173,59 @@ class radio_project():
         with pd.HDFStore(self.db, mode='a') as store:
             if 'overlapping' in store:
                 store.remove('overlapping')
-                print(f"Recapturesd has been removed from the HDF5 file.")
+                print(f"Overlapping has been removed from the HDF5 file.")
+                
+    def new_db_version(self, output_h5):
+        """
+        Create a new version of the working HDF5 database.
+
+        This function creates a copy of the existing working database, allowing you to 
+        backtrack or branch your analysis. If there are keys that are in error or conflict 
+        with the current understanding of the system, this function helps you remove them 
+        from the new version of the database.
+
+        Parameters:
+        output_h5 (str): The file name for the new HDF5 file.
+        """
+
+        # Copy the HDF5 file
+        shutil.copyfile(self.db, output_h5)
+
+        # Open the copied HDF5 file
+        with h5py.File(output_h5, 'r+') as hdf:
+            # List all keys in the file
+            keys = list(hdf.keys())
+            print("Keys in HDF5 file:", keys)
+
+            # Ask the user to input the keys they want to modify
+            selected_keys = input("Enter the keys you want to modify, separated by commas: ").split(',')
+
+            # Clean up the input (remove whitespace)
+            selected_keys = [key.strip() for key in selected_keys]
+
+            for key in selected_keys:
+                if key in hdf:
+                    print(f"Processing key: '{key}'...")
+                    
+                    # If it's a group, recursively delete all datasets (subkeys)
+                    if isinstance(hdf[key], h5py.Group):
+                        print(f"Key '{key}' is a group. Deleting all subkeys...")
+                        for subkey in list(hdf[key].keys()):
+                            print(f"Removing subkey: '{key}/{subkey}'")
+                            del hdf[key][subkey]
+                        print(f"All subkeys under group '{key}' have been deleted.")
+                    else:
+                        # It's a dataset, clear the data in the DataFrame
+                        print(f"Clearing data for dataset key: '{key}'")
+                        df = pd.read_hdf(output_h5, key)
+                        df.drop(df.index, inplace=True)
+                        df.to_hdf(output_h5, key, mode='a', format='table', data_columns=True)
+                        print(f"Data cleared for key: '{key}'")
+                else:
+                    print(f"Key '{key}' not found in HDF5 file.")
+
+        # Update the project's database to the new copied database
+        self.db = output_h5
+
             
                     

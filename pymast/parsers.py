@@ -129,6 +129,7 @@ def orion_import(file_name,
                                 #dtype = {'Date':str,'Time':str,'Site':np.int32,'Ant':str,'Freq':str,'Type':str,'Code':str,'power':np.float64})
         telem_dat = telem_dat[telem_dat.Type != 'STATUS']
         telem_dat['Freq'] = telem_dat.Freq.astype('float32')
+
         telem_dat['Freq'] = telem_dat['Freq'].apply(lambda x: f"{x:.3f}")
         telem_dat['Ant'] = telem_dat.Ant.astype('object')
         telem_dat.drop(['Type'], axis = 1, inplace = True)

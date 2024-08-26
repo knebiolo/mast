@@ -4,8 +4,12 @@ Created on Tue Nov 14 10:52:20 2023
 
 @author: KNebiolo
 """
+import numba as nb
 import numpy as np
 import pandas as pd
+pd.set_option('display.float_format', '{:.10f}'.format)
+np.set_printoptions(suppress=True, precision=10)
+
 
 def noise_ratio (duration, freq_codes,epochs,study_tags):
 
@@ -70,101 +74,141 @@ def series_hit (lags, pulse_rate, mort_rate, status,):
                                    1,
                                    0)
                           )
+
+def max_contiguous_sequence(arr):
+    # Finds the maximum number of consecutive 1's in an array
+    return max(map(len, ''.join(map(str, arr)).split('0')))
+
+def detection_history(epoch, pulse_rate, num_detects, num_channels, scan_time, channels):
+    shifts = np.arange(-num_detects, num_detects + 1)
     
-def detection_history (epoch, pulse_rate, num_detects, num_channels, scan_time, channels, status = 'A'):
-    '''
-    Calculate detection history for multi-channel switching receivers.
-
-    This function computes the detection history based on the epoch time, pulse rate, number of detections, 
-    number of channels, scan time, and channels. It accounts for the sparseness of detection histories 
-    in multi-channel switching receivers, acknowledging that bursts may not always align with scan windows.
-
-    Parameters:
-    - Epoch (array-like): Array of epoch times.
-    - pulse_rate (int): Pulse rate of the tag.
-    - num_detects (int): Number of detections to consider.
-    - num_channels (int): Number of channels in the receiver.
-    - scan_time (int): Time taken for one scan.
-    - channels (int): Number of channels.
-    - status (str, optional): Status of the detection. Defaults to 'A'.
-
-    Returns:
-    - det_hist_conc (list of str): Concatenated string representation of detection history.
-    - det_hist (numpy.ndarray): Array representing the ratio of detections over the total number of detections.
-    - cons_det (numpy.ndarray): Array indicating consecutive detections.
-    - max_count (numpy.ndarray): Array of the longest contiguous sequence of detections for each epoch.
-
-    Example:
-    If the scan time is 2 seconds, there are two channels, and the Epoch is 100, the receiver would listen at:
-    (-3) 87-89, (-2) 91-93, (-1) 95-97, (0) 100, (1) 103-105, (2) 107-109, (3) 111-113 seconds.
-
-    A tag with a 3-second burst rate at an epoch of 100 would be heard at:
-    100, 103, 106, 109, 112 - meaning at least 1 out of 5 bursts could be missed.
-
-    Note:
-    Detection histories from multi-channel switching receivers are expected to be sparse, as they are not always listening.
-    This function helps in understanding and analyzing this sparseness.
-    '''
-
-    # create dictionaries that will hold the epoch shift and its lower and upper limits
-    epoch_shift_dict = {}
-    lower_limit_dict = {}
-    upper_limit_dict = {}
+    # Ensure epoch is at least 1D for consistent operations
+    epoch = np.atleast_1d(epoch)
     
-    # create a dictionary with key a detection and the value a boolean array of length of Epoch array
-    detection_history_dict = {}
-
-    # build detection history ushing shifts
-    if num_channels > 1:
-        for i in np.arange(num_detects * -1 , num_detects + 1, 1):
-            epoch_shift_dict[i] = np.round(pd.Series(epoch).shift(i * -1).to_numpy().astype(np.float32),6)
-            lower_limit_dict[i] = np.where(scan_time > 2 * pulse_rate,
-                                           epoch + (pulse_rate * i - 1),
-                                           epoch + ((scan_time * channels * i) - 1))
-
-            upper_limit_dict[i] = np.where(scan_time > 2 * pulse_rate, 
-                                           epoch + (pulse_rate * i + 1),
-                                           epoch + ((scan_time * channels * i) + 1))
-
-    else:
-        for i in np.arange(num_detects * -1 , num_detects + 1, 1):
-            epoch_shift_dict[i] = pd.Series(epoch).shift(i * -1).to_numpy().astype(np.float32)
-            lower_limit_dict[i] = epoch + (pulse_rate * i - 1)
-            upper_limit_dict[i] = epoch + (pulse_rate * i + 1)
-
-    for i in np.arange(num_detects * -1 , num_detects + 1, 1):
-        if i == 0:
-            detection_history_dict[i] = np.repeat('1',len(epoch))
-
-        else:
-            detection_history_dict[i] = np.where(np.logical_and(epoch_shift_dict[i] >= lower_limit_dict[i],
-                                                                epoch_shift_dict[i] < upper_limit_dict[i]),
-                                                 '1',
-                                                 '0')
+    # Create shifted epochs for each detection window
+    epoch_shifts = epoch[:, None] + shifts * pulse_rate
     
-    # create an immediate detection history around the current record to assess consecutive detections
-    cons_arr = np.column_stack((detection_history_dict[-1],detection_history_dict[0],detection_history_dict[1])).astype(np.float32)
-    cons_arr_sums = np.sum(cons_arr, axis = 1)
-    cons_det = np.where(cons_arr_sums > 1,1,0)
+    # Initialize detection history
+    detection_history = np.zeros_like(epoch_shifts, dtype=np.int32)
+    
+    # Adjust window size relative to pulse rate
+    window_size = pulse_rate
+    
+    # Compute detection history with reduced memory overhead
+    for i in range(shifts.size):
+        lower_limits = epoch_shifts[:, i] - window_size
+        upper_limits = epoch_shifts[:, i] + window_size
+        detection_history[:, i] = np.any((epoch[:, None] >= lower_limits[:, None]) & 
+                                         (epoch[:, None] <= upper_limits[:, None]), axis=1).astype(np.int32)
+    
+    # Ensure the current epoch detection is marked
+    detection_history[:, num_detects] = 1
 
-    # calculate hit ratio - return det_hist_conc, det_hist
-    det_hist_length = np.arange(num_detects * -1 , num_detects + 1, 1).shape[0]
-    det_hist_stack = np.column_stack([detection_history_dict[x] for x in np.arange(num_detects * -1, num_detects + 1, 1)])
-    det_hist_conc = [''.join(row) for row in det_hist_stack]
-    det_hist_float = det_hist_stack.astype(np.float32) 
-    row_sums = np.sum(det_hist_float, axis = 1)
-    det_hist = row_sums/det_hist_length
+    # Calculate hit ratio
+    hit_ratio = detection_history.sum(axis=1) / detection_history.shape[1]
 
-    # calculate consecutive record length
-    max_count = np.zeros(epoch.shape)
-    current_count = np.repeat(1,len(epoch.shape))
-    for i in np.arange(num_detects * -1 , num_detects + 1, 1):
-        current_col = detection_history_dict[i]
-        current_count = np.where(current_col == '1', current_count + 1, 0)
-        max_count = np.where(current_count > max_count,
-                             current_count,
-                             max_count) 
+    # Consecutive detections (1 if consecutive, otherwise 0)
+    cons_det = (detection_history[:, 1:-1].sum(axis=1) > 1).astype(np.int32)
+
+    # Max contiguous sequence (find the maximum number of consecutive 1's)
+    max_count = np.array([max_contiguous_sequence(hist) for hist in detection_history])
+
+    return detection_history, hit_ratio, cons_det, max_count
+    
+# def detection_history (epoch, pulse_rate, num_detects, num_channels, scan_time, channels, status = 'A'):
+#     '''
+#     Calculate detection history for multi-channel switching receivers.
+
+#     This function computes the detection history based on the epoch time, pulse rate, number of detections, 
+#     number of channels, scan time, and channels. It accounts for the sparseness of detection histories 
+#     in multi-channel switching receivers, acknowledging that bursts may not always align with scan windows.
+
+#     Parameters:
+#     - Epoch (array-like): scalar epoch at current detection.
+#     - pulse_rate (int): Pulse rate of the tag.
+#     - num_detects (int): Number of detections to consider.
+#     - num_channels (int): Number of channels in the receiver.
+#     - scan_time (int): Time taken for one scan.
+#     - channels (int): Number of channels.
+#     - status (str, optional): Status of the detection. Defaults to 'A'.
+
+#     Returns:
+#     - det_hist_conc (list of str): Concatenated string representation of detection history.
+#     - det_hist (numpy.ndarray): Array representing the ratio of detections over the total number of detections.
+#     - cons_det (numpy.ndarray): Array indicating consecutive detections.
+#     - max_count (numpy.ndarray): Array of the longest contiguous sequence of detections for each epoch.
+
+#     Example:
+#     If the scan time is 2 seconds, there are two channels, and the Epoch is 100, the receiver would listen at:
+#     (-3) 87-89, (-2) 91-93, (-1) 95-97, (0) 100, (1) 103-105, (2) 107-109, (3) 111-113 seconds.
+
+#     A tag with a 3-second burst rate at an epoch of 100 would be heard at:
+#     100, 103, 106, 109, 112 - meaning at least 1 out of 5 bursts could be missed.
+
+#     Note:
+#     Detection histories from multi-channel switching receivers are expected to be sparse, as they are not always listening.
+#     This function helps in understanding and analyzing this sparseness.
+#     '''
+
+#     # create dictionaries that will hold the epoch shift and its lower and upper limits
+#     epoch_shift_dict = {}
+#     lower_limit_dict = {}
+#     upper_limit_dict = {}
+    
+#     # create a dictionary with key a detection and the value a boolean array of length of Epoch array
+#     detection_history_dict = {}
+
+#     # build detection history ushing shifts
+#     if num_channels > 1:
+#         for i in np.arange(num_detects * -1 , num_detects + 1, 1):
+#             epoch_shift_dict[i] = np.round(pd.Series(epoch).shift(i * -1).to_numpy().astype(np.float32),6)
+#             lower_limit_dict[i] = np.where(scan_time > 2 * pulse_rate,
+#                                            epoch + (pulse_rate * i - 1),
+#                                            epoch + ((scan_time * channels * i) - 1))
+
+#             upper_limit_dict[i] = np.where(scan_time > 2 * pulse_rate, 
+#                                            epoch + (pulse_rate * i + 1),
+#                                            epoch + ((scan_time * channels * i) + 1))
+
+#     else:
+#         for i in np.arange(num_detects * -1 , num_detects + 1, 1):
+#             epoch_shift_dict[i] = np.round(pd.Series(epoch).shift(i * -1).to_numpy().astype(np.float32),6)
+#             lower_limit_dict[i] = np.round(epoch + (pulse_rate * i - 1),6)
+#             upper_limit_dict[i] = np.round(epoch + (pulse_rate * i + 1),6)
+
+#     for i in np.arange(num_detects * -1 , num_detects + 1, 1):
+#         if i == 0:
+#             detection_history_dict[i] = np.repeat('1',len(epoch))
+
+#         else:
+#             detection_history_dict[i] = np.where(np.logical_and(epoch_shift_dict[i] >= lower_limit_dict[i],
+#                                                                 epoch_shift_dict[i] < upper_limit_dict[i]),
+#                                                  '1',
+#                                                  '0')
+    
+#     # create an immediate detection history around the current record to assess consecutive detections
+#     cons_arr = np.column_stack((detection_history_dict[-1],detection_history_dict[0],detection_history_dict[1])).astype(np.float32)
+#     cons_arr_sums = np.sum(cons_arr, axis = 1)
+#     cons_det = np.where(cons_arr_sums > 1,1,0)
+
+#     # calculate hit ratio - return det_hist_conc, det_hist
+#     det_hist_length = np.arange(num_detects * -1 , num_detects + 1, 1).shape[0]
+#     det_hist_stack = np.column_stack([detection_history_dict[x] for x in np.arange(num_detects * -1, num_detects + 1, 1)])
+#     det_hist_conc = [''.join(row) for row in det_hist_stack]
+#     det_hist_float = det_hist_stack.astype(np.float32) 
+#     row_sums = np.sum(det_hist_float, axis = 1)
+#     det_hist = row_sums/det_hist_length
+
+#     # calculate consecutive record length
+#     max_count = np.zeros(epoch.shape)
+#     current_count = np.repeat(1,len(epoch.shape))
+#     for i in np.arange(num_detects * -1 , num_detects + 1, 1):
+#         current_col = detection_history_dict[i]
+#         current_count = np.where(current_col == '1', current_count + 1, 0)
+#         max_count = np.where(current_count > max_count,
+#                              current_count,
+#                              max_count) 
         
-    return det_hist_conc, det_hist, cons_det, max_count
+#     return det_hist_conc, det_hist, cons_det, max_count
 
                              
