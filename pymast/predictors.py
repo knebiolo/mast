@@ -79,27 +79,46 @@ def max_contiguous_sequence(arr):
     # Finds the maximum number of consecutive 1's in an array
     return max(map(len, ''.join(map(str, arr)).split('0')))
 
-def detection_history(epoch, pulse_rate, num_detects, num_channels, scan_time, channels):
+def detection_history(epoch, pulse_rate, num_detects, num_channels, scan_time):
     shifts = np.arange(-num_detects, num_detects + 1)
     
-    # Ensure epoch is at least 1D for consistent operations
-    epoch = np.atleast_1d(epoch)
-    
     # Create shifted epochs for each detection window
-    epoch_shifts = epoch[:, None] + shifts * pulse_rate
+    shifted_epochs = pd.DataFrame({f'Shift_{shift}': pd.Series(epoch).shift(shift) for shift in shifts * -1}).to_numpy()
     
-    # Initialize detection history
-    detection_history = np.zeros_like(epoch_shifts, dtype=np.int32)
+    # Expand arrays for vectorized operations
+    epoch_expanded = np.tile(epoch[:, None], (1, len(shifts)))
+    scan_time_expanded = np.tile(scan_time[:, None], (1, len(shifts)))
+    num_channels_expanded = np.tile(num_channels[:, None], (1, len(shifts)))
     
+    # Compute expected epochs based on conditions
+    expected_epoch = np.where(
+        num_channels_expanded == 1, 
+        epoch_expanded + shifts * pulse_rate,
+        np.where(scan_time_expanded > 2 * pulse_rate, 
+                 epoch_expanded + shifts * pulse_rate,
+                 epoch_expanded + shifts * scan_time_expanded * num_channels_expanded)
+    )
+
     # Adjust window size relative to pulse rate
-    window_size = pulse_rate
+    window_size = np.where(num_channels == 1, 
+                           np.where(pulse_rate > 10, 1, pulse_rate),
+                           scan_time / 2.)
+    
+    window_size_expanded = np.tile(window_size[:, None], (1, len(shifts)))
     
     # Compute detection history with reduced memory overhead
-    for i in range(shifts.size):
-        lower_limits = epoch_shifts[:, i] - window_size
-        upper_limits = epoch_shifts[:, i] + window_size
-        detection_history[:, i] = np.any((epoch[:, None] >= lower_limits[:, None]) & 
-                                         (epoch[:, None] <= upper_limits[:, None]), axis=1).astype(np.int32)
+    lower_limits = expected_epoch - window_size_expanded
+    upper_limits = expected_epoch + window_size_expanded
+    
+    # Initialize detection history
+    detection_history = np.zeros_like(expected_epoch, dtype=np.int32)
+    
+    # Check if any values in each row of shifted_epochs fall within the corresponding windows
+    detection_history = np.any(
+        (shifted_epochs[:, :, None] >= lower_limits[:, None, :]) & 
+        (shifted_epochs[:, :, None] <= upper_limits[:, None, :]),
+        axis=1
+    ).astype(np.int32)
     
     # Ensure the current epoch detection is marked
     detection_history[:, num_detects] = 1

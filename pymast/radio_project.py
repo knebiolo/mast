@@ -242,7 +242,10 @@ class radio_project():
         train_dat['detection'] = np.repeat(plausible, len(train_dat))
         train_dat['lag'] = train_dat.epoch.diff()
         train_dat['lag_diff'] = train_dat.lag.diff()
-    
+        
+        if freq_code in self.tags.index:
+            print ('check')
+            
         # Apply the optimized detection history function to the entire dataset at once
         detection_history, hit_ratio_arr, cons_det_arr, max_count_arr = predictors.detection_history(
             train_dat['epoch'].values,
@@ -250,7 +253,6 @@ class radio_project():
             self.det_count,
             train_dat['channels'].values,
             train_dat['scan_time'].values,
-            train_dat['channels'].values
         )
     
         # Convert detection history arrays to concatenated strings outside Numba
@@ -263,7 +265,7 @@ class radio_project():
         train_dat['cons_length'] = max_count_arr
     
         train_dat.fillna(value=9999999, inplace=True)
-    
+        
         # Ensure data types are correct
         try:
             train_dat = train_dat.astype({'power': 'float32', 
