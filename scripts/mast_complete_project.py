@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Created on Thu Nov 16 09:42:22 2023
 
@@ -17,7 +16,7 @@ import matplotlib.pyplot as plt
 
 #%% set up project
 project_dir = r"C:\Users\knebiolo\Desktop\York Haven"
-db_name = 'york_haven_2'
+db_name = 'york_haven_v11'
 detection_count = 5
 duration = 1
 tag_data = pd.read_csv(os.path.join(project_dir,'tblMasterTag.csv'))
@@ -33,15 +32,19 @@ project = radio_project(project_dir,
                         receiver_data,
                         nodes_data)
 
+# create a new version of an existing project 
+# project.new_db_version(os.path.join(project_dir,'york_haven_v10.h5'))
+# overlapping,presence,classified,trained
+
 #%%  import data
-rec_id = 'R003'
+rec_id = 'R02'
 rec_type = 'srx1200'
 #TODO - remove these directory arguments - the project is smart
 training_dir = os.path.join(project_dir,'Data','Training_Files')
 db_dir = os.path.join(project_dir,'%s.h5'%(db_name))
 scan_time = 1.         
 channels = 1
-antenna_to_rec_dict = {'A0':rec_id}
+antenna_to_rec_dict = {'Antenna 1':rec_id}
 
 project.telem_data_import(rec_id,
                           rec_type,
@@ -57,8 +60,8 @@ project.telem_data_import(rec_id,
 
 #%%  train data
 # set parameters and get a list of fish to iterate over
-rec_id = 'R020'
-rec_type = 'orion'
+rec_id = 'R02'
+rec_type = 'srx1200'
 fishes = project.get_fish(rec_id = rec_id)
 
 # iterate over fish and train
@@ -74,15 +77,15 @@ project.training_summary(rec_type, site = [rec_id])
 # %% classify data
 
 # Set initial parameters
-rec_id = 'R020'
-rec_type = 'orion'
-threshold_ratio = 1.0  # 1.0 = MAP Hypothesis
-likelihood = ['hit_ratio', 'cons_length', 'noise_ratio', 'power', 'lag_diff'] # a-la carte likelihood, standard fields: ['hit_ratio', 'cons_length', 'noise_ratio', 'power', 'lag_diff']
+rec_id = 'R02'
+rec_type = 'srx1200'
+threshold_ratio = 1  # 1.0 = MAP Hypothesis
+likelihood = ['hit_ratio','cons_length', 'noise_ratio', 'power', 'lag_diff'] # a-la carte likelihood, standard fields: ['hit_ratio', 'cons_length', 'noise_ratio', 'power', 'lag_diff']
 
-project.reclassify(project, rec_id, rec_type, threshold_ratio,likelihood)
+project.reclassify(project, rec_id, rec_type, threshold_ratio, likelihood)
 
 # undo classification 
-# project.undo_classification(rec_id, class_iter = class_iter)
+# project.undo_classification(rec_id)
 
 #%% cross validate
 
@@ -99,43 +102,39 @@ threshold = bout.fit_processes()
     
 # calculate presences - or pass float
 bout.presence(threshold)
+# bout.presence(5000)
 
 # undo bouts
 # project.undo_bouts(node)
     
 #%% reduce overlap
 # create edges showing parent:child relationships for nodes in network
-edges = [('R010','R013'),('R010','R014'),('R010','R015'),('R010','R016'),('R010','R017'),('R010','R018'),
-          ('R019','R013'),('R019','R014'),('R019','R015'),('R019','R016'),('R019','R017'),('R019','R018'),
-          ('R020','R013'),('R020','R014'),('R020','R015'),('R020','R016'),('R020','R017'),('R020','R018')]
-
-nodes = ['R010','R019','R020','R013','R014','R015','R016','R017','R018']
-    
-# create an overlap object and apply nested doll algorithm
+edges = []
+for i in range(1, 21):
+    for j in range(1, 21):
+        edges.append((f'R{i:03}', f'R{j:03}'))
+         
+nodes = ['R001','R002','R003','R004','R005','R006','R007','R008','R009','R010',\
+          'R011','R012','R013','R014','R015','R016','R017','R018','R019','R020']   
+# create an overlap object and apply one of the nested doll algorithms
 doll = pymast.overlap_reduction(nodes, edges, project)
-doll.nested_doll()
+# doll.nested_doll() 
+doll.unsupervised_removal(project)
 
-# #project.undo_overlap()
+#project.undo_overlap()
 
-#%% create a recaptures table
-project.make_recaptures_table()
 
-# #project.undo_recaptures()
+ #%% create a recaptures table
+project.undo_recaptures()
+project.make_recaptures_table(export = True) 
 
 #%% create Time to Event Model
     
 # what is the Node to State relationship - use Python dictionary
-node_to_state = {'R001':1,'R002':1,                   # upstream
-                  'R012':2,                            # forebay
-                  'R013':3,'R015':3,'R016':3,'R017':3,'R010':3, # powerhouse
-                  'R018':4,                            # sluice
-                  'R003':5,                            # east channel up
-                  'R007':7,                            # east channel down
-                  'R008':5,                            # east channel dam
-                  'R009':6,                            # NLF
-                  'R020':7,'R019':7,                  # tailrace
-                  'R011':7,                           # downstream
-                  'R004':7,'R005':7}                 # downstream 2
+node_to_state = {'R001':1,'R002':2,'R003':3,'R004':4,'R005':5,'R006':6,'R007':7,\
+                  'R008':8,'R009':9,'R010':10,'R011':11,'R012':12,'R013':13,'R014':14,\
+                      'R015':15,'R016':16,'R017':17,'R018':18,'R019':19,'R020':20
+                }                   
 
 # Step 1, create time to event data class 
 tte = formatter.time_to_event(node_to_state,
@@ -143,11 +142,21 @@ tte = formatter.time_to_event(node_to_state,
                               initial_state_release = True)
 
 # Step 2, format data - without covariates
-tte.data_prep(project,
-              adjacency_filter = [(7, 1),(7, 2),(7, 5),(7, 6)])
+tte.data_prep(project, 
+              adjacency_filter = [(4, 1),(4, 2),(4, 3),(4, 8), (4, 9), (4, 12), (4, 13), (4, 15),(4, 16),
+                                  (5, 1),(5, 2),(5, 9),(5, 12),(5, 13),(5, 16),
+                                  (6, 2),(6, 10),
+                                  (7, 1),(7, 8),
+                                  (8,10),(8,11),(8,12),
+                                  (9, 1),(9, 2),(9, 3),(9, 8),(9, 12),(9, 13),(9,16),
+                                  (10, 1),(10, 2),(10, 8),(10, 9),(10, 12),(10, 13),(10, 16),(10, 17),
+                                  (11, 1),(11, 2),(11, 8),(11, 9),(11, 12),(11, 13),(11, 15),(11, 16),
+                                  (19, 1),(19, 2),(19, 3),(19, 13),(19, 14),
+                                  (20, 1),(20, 2),(20, 3),(20, 13),(20, 15),(20, 16),(20, 17)]
+              )
 # Step 3, generate a summary
 stats = tte.summary()
-tte.master_state_table.to_csv(os.path.join(project_dir,'Output','york_haven_tte.csv'))
+tte.master_state_table.to_csv(os.path.join(project_dir,'Output','york_haven_simple_tte.csv'))
 
 #%% create a Cormack-Jolly-Seber Mark Recapture model
 # what is the output directory?

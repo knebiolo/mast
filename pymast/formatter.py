@@ -551,122 +551,62 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
         # identify unique fish to loop through
         self.fish = self.recap_data.freq_code.unique()
 
-    def data_prep(self, 
-                  project,
-                  unknown_state = None, 
-                  bucket_length_min = 15,
-                  adjacency_filter = None):
-        
-        if unknown_state != None:
-            '''It may be beneficial to allow fish to enter into an unknown state
-            rather than become censored at their last recapture in the initial state.
-            This way the Nelson-Aalen will match empirical expectations.  If we have
-            a lot of censored fish we lose information from the denominator and
-            numerator.  If we put fish into an unknown state rather than censoring
-            them we still have informative data.  For this to work, we only need to
-            know the last recapture of any fish in the initial state.  We will
-            assess absorbption into the unknown state with a Boolean statement later on.'''
-
+    def data_prep(self, project, unknown_state=None, bucket_length_min=15, adjacency_filter=None):
+        self.project = project
+        if unknown_state is not None:
             last_epoch = self.recap_data[self.recap_data.state == 1].epoch.max()
-
-        # produce state table for each species
-        columns = ['freq_code','start_state','end_state','presence','time_stamp',
-                   'time_delta','first_obs','time_0','time_1']    
-
+    
+        columns = ['freq_code', 'start_state', 'end_state', 'presence', 'time_stamp',
+                   'time_delta', 'first_obs', 'time_0', 'time_1', 'transition']  # Include 'transition' here
+    
         self.master_state_table = pd.DataFrame()
         self.bucket_length = bucket_length_min
-        
-        for i in self.fish:
-            # get fish and sort by epoch
-            fish_dat = self.recap_data[self.recap_data.freq_code == i]      # get data for this fish
-            fish_dat.sort_values(by = 'epoch', 
-                                 ascending = True, 
-                                 inplace = True)   # sort by exposure time
-            
-            # initialize some counters
-            presence = 0
-            first_obs = 1
-            
-            # create an empty state table 
-            state_table = pd.DataFrame(columns = columns)   
-
-            # get initial start and end times and filter dataset                 
-            time_0 = self.start_times.at[i,'first_recapture'] 
-            initial_time = time_0
-            fish_dat = fish_dat[fish_dat.epoch >= time_0]
-            time_1 = fish_dat.epoch.iloc[0]
-            
-            # identify previous state and fill in nans
-            fish_dat['prev_state'] = fish_dat['state'].shift(1)             # get previous state
-            fish_dat['prev_state'].fillna(0, inplace = True)                # fill nan with 0 for release state
-            fish_dat['prev_state'] = fish_dat.prev_state.astype('int32')
-            
-            # calculate seconds since releaes
-            time_delta = time_1 - time_0    
-
-            # create arbitrary index and get the maximum
-            fish_dat['idx'] = np.arange(0,len(fish_dat),1)                  
-            max_idx = fish_dat.idx.iloc[-1]                
-            
-            # for each row, if it's a new presence add data to state table
-            for j in fish_dat.iterrows():                                   # for every row in fish data
-                row_idx = j[1]['idx']                                       # what's the row number?
-                state_1 = int(j[1]['prev_state'])                           # what's the start state
-                state_2 = int(j[1]['state'])                                # what was the end state
-                ts = j[1]['time_stamp']
-                
-                # if it's a new state or the end add a row
-                if state_1 != state_2 or row_idx == max_idx:                # if the present state does not equal the previous state or if we reach the end of the dataframe...
-                    time_1 = j[1]['epoch']                                  # what time is it?
-                    time_delta = time_1 - time_0                            # calculate difference in seconds between current time and release                                           
-
-                    # create a row
-                    row_arr = [i,
-                               state_1,
-                               state_2,
-                               presence,
-                               ts,
-                               time_delta,
-                               first_obs,
-                               time_0,
-                               time_1]  # start a new row
-                        
-                    row = pd.DataFrame(np.array([row_arr]),
-                                       columns = columns)
-                    
-                    row = row.astype({'freq_code':'object',
-                                      'start_state':'int32',
-                                      'end_state':'int32',
-                                      'presence':'int32',
-                                      'time_stamp':'datetime64[ns]',
-                                      'time_delta':'int32',
-                                      'first_obs':'int32',
-                                      'time_0':'int32',
-                                      'time_1':'int32'}) 
-                    
-                    # add to current state table
-                    state_table = pd.concat([state_table, row], axis=0, ignore_index=True)
-                    
-                    # set some new variables 
-                    presence = presence + 1                                 # oh snap new observation for new state
-                    time_0 = j[1]['epoch']
-                    first_obs = 0
-                    
-            print ("State Table Completed for Fish %s"%(i))
-            
-            # identify transitions and write to the state table
-            from_rec = state_table['start_state']
-            to_rec = state_table['end_state']
-            
-            trans = tuple(zip(from_rec,to_rec))
-            state_table['transition'] = trans
-
-            # add in flow period for time dependent variables 
-            state_table['flow_period'] = state_table['time_stamp'].dt.round('30min')
-
-            # write state table to master state table
-            self.master_state_table = pd.concat([self.master_state_table, state_table], axis=0, ignore_index=True)
-
+    
+        # Sorting recap_data by freq_code and epoch for efficient processing
+        self.recap_data.sort_values(by=['freq_code', 'epoch'], ascending=True, inplace=True)
+    
+        # Merge start_times into recap_data based on freq_code
+        self.recap_data = self.recap_data.merge(
+            self.start_times[['first_recapture']].reset_index(),
+            on='freq_code',
+            how='left'
+        )
+    
+        # Create a boolean array to mark the start of a new fish
+        fish_start_mask = self.recap_data['freq_code'] != self.recap_data['freq_code'].shift(1)
+    
+        # Initialize state tracking columns
+        self.recap_data['prev_state'] = self.recap_data.groupby('freq_code')['state'].shift(1).fillna(0).astype(int)
+    
+        # Set time_0 to the previous epoch or first_recapture if it's the first observation
+        self.recap_data['time_0'] = self.recap_data.groupby('freq_code')['epoch'].shift(1)
+        self.recap_data['time_0'].fillna(self.recap_data['first_recapture'], inplace=True)
+    
+        self.recap_data['time_delta'] = self.recap_data['epoch'] - self.recap_data['time_0']
+    
+        # Identify the rows where state changes or the fish changes (new fish)
+        state_change_mask = self.recap_data['state'] != self.recap_data['prev_state']
+        last_recapture_mask = self.recap_data.groupby('freq_code')['epoch'].transform('max') == self.recap_data['epoch']
+        mask = state_change_mask | last_recapture_mask
+    
+        # Filter rows to keep only those where state changes or it's the last record for the fish
+        state_table = self.recap_data[mask].copy()
+    
+        # Fill in the remaining columns
+        state_table['start_state'] = state_table['prev_state']
+        state_table['end_state'] = state_table['state']
+        state_table['presence'] = state_table.groupby('freq_code').cumcount()
+        state_table['first_obs'] = fish_start_mask.astype(int)
+        state_table['time_1'] = state_table['epoch']
+    
+        # Create the 'transition' column by zipping 'start_state' and 'end_state'
+        state_table['transition'] = list(zip(state_table['start_state'], state_table['end_state']))
+    
+        # Add flow period for time-dependent variables
+        state_table['flow_period'] = state_table['time_stamp'].dt.round('30min')
+    
+        # Write state table to master state table
+        self.master_state_table = pd.concat([self.master_state_table, state_table[columns]], axis=0, ignore_index=True)
 
         if adjacency_filter is not None:
             '''When the truth value of a detection is assessed, a detection
@@ -780,7 +720,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
             self.master_state_table = filtered
             
         #self.master_stateTable = self.master_stateTable[self.master_stateTable.firstObs == 0]
-        #self.master_state_table.to_csv(os.path.join(project.output_dir,'')
+        #self.master_state_table.to_csv(os.path.join(project.output_dir,'state_table.csv')
         
     # generate summary statistics
     def summary(self, print_summary = True):
@@ -844,7 +784,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
         
         print("Movement summaries - Duration between states in seconds:")
         print(summary_stats['movement_duration_summary'], "\n")
-        
+        self.msm_state_table.to_csv(os.path.join(self.project.output_dir,'state table.csv'))
         return summary_stats
 
 # Example usage

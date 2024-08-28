@@ -505,110 +505,125 @@ class overlap_reduction():
         """
         Identifies and removes overlapping detections across receivers using signal power.
     
-        This method performs pairwise comparisons between nodes to determine the true
-        receiver where the fish is located based on median signal power. Overlapping
-        detections with lower signal power are marked and can be removed from further
-        analysis. A visualization of the K-means results is saved to the project directory.
+        This method performs pairwise comparisons between nodes (receivers) to determine the true
+        receiver where the fish is located based on median signal power. Overlapping detections with
+        lower signal power are marked and can be removed from further analysis. A visualization of 
+        the K-means results is saved to the project directory.
     
         Args:
             project (object): The project object containing the project directory path.
         """
-        
-        for fish_id in project.tags.index:
-            # Combine bouts from all receivers for the current fish
-            bout_summaries = []
-            for node, df in self.node_pres_dict.items():
-                #fish_bouts = df.copy()
-                fish_bouts = df[df['freq_code'] == fish_id].copy()
-                fish_bouts['node'] = node
-                bout_summaries.append(fish_bouts)
-            
-            if len(bout_summaries) == 0:
-                continue
-            
-            bout_summaries = pd.concat(bout_summaries, ignore_index=True)
-            
-            # Normalize the power values within each receiver's bouts
-            bout_summaries['norm_power'] = bout_summaries.groupby('node')['median_power'].transform(
-                lambda x: (x - x.min()) / (x.max() - x.min())
-            )
-            
-            # Perform pairwise comparison of nodes for overlapping bouts
-            nodes = bout_summaries['node'].unique()
-            classified_detections = []
-            
-            for i, node_a in enumerate(nodes):
-                for node_b in nodes[i + 1:]:
-                    bouts_a = bout_summaries[bout_summaries['node'] == node_a]
-                    bouts_b = bout_summaries[bout_summaries['node'] == node_b]
-                    
-                    # Check if there are bouts to compare
-                    if len(bouts_a) == 0 or len(bouts_b) == 0:
-                        print(f"Skipping comparison between node {node_a} and {node_b} because one has no bouts.")
-                        continue
-                    
-                    # Identify overlapping bouts between nodes
-                    overlapping_bouts = bouts_a[bouts_a.apply(
-                        lambda row: ((row['min_epoch'] <= bouts_b['max_epoch']) &
-                                     (row['max_epoch'] >= bouts_b['min_epoch'])).any(),
-                        axis=1)]
-                    
-                    if len(overlapping_bouts) == 0:
-                        print(f"No overlapping bouts found between node {node_a} and {node_b}.")
-                        continue
-                    
-                    print(f"Processing overlapping bouts between node {node_a} and {node_b}.")
     
-                    # Combine overlapping bouts for K-means clustering
-                    combined_bouts = pd.concat([bouts_a, bouts_b])
-                    combined_power = combined_bouts['norm_power'].values.reshape(-1, 1)
-                    
-                    kmeans = KMeans(n_clusters=2, random_state=42).fit(combined_power)
-                    centers = kmeans.cluster_centers_.flatten()
-                    combined_bouts['cluster'] = kmeans.labels_
-                    
-                    # Determine which cluster is 'near' (higher power)
-                    near_cluster = np.argmax(centers)
-                    combined_bouts['assigned_label'] = combined_bouts['cluster'].apply(
-                        lambda x: 'near' if x == near_cluster else 'far'
-                    )
+        # Combine bouts from all receivers
+        bout_summaries = []
+        for node, df in self.node_pres_dict.items():
+            fish_bouts = df.copy()  # No need to filter by fish_id now
+            fish_bouts['node'] = node
+            bout_summaries.append(fish_bouts)
     
-                    # Now, map the clustering back to individual detections in node_recap_dict
-                    for node in [node_a, node_b]:
-                        recaps = self.node_recap_dict[node][self.node_recap_dict[node]['freq_code'] == fish_id].copy()
-                        
-                        for _, bout in combined_bouts[combined_bouts['node'] == node].iterrows():
-                            in_bout = (recaps['epoch'] >= bout['min_epoch']) & (recaps['epoch'] <= bout['max_epoch'])
+        if len(bout_summaries) == 0:
+            return
+    
+        bout_summaries = pd.concat(bout_summaries, ignore_index=True)
+    
+        # Normalize the power values within each receiver's bouts
+        bout_summaries['norm_power'] = bout_summaries.groupby('node')['median_power'].transform(
+            lambda x: (x - x.min()) / (x.max() - x.min())
+        )
+    
+        # Perform pairwise comparison of nodes for overlapping bouts
+        nodes = bout_summaries['node'].unique()
+        classified_detections = []
+    
+        # Track which detections have already been classified
+        already_classified = set()
+    
+        for i, node_a in enumerate(nodes):
+            for node_b in nodes[i + 1:]:
+                bouts_a = bout_summaries[bout_summaries['node'] == node_a]
+                bouts_b = bout_summaries[bout_summaries['node'] == node_b]
+    
+                # Check if there are bouts to compare
+                if len(bouts_a) == 0 or len(bouts_b) == 0:
+                    print(f"Skipping comparison between node {node_a} and {node_b} because one has no bouts.")
+                    continue
+    
+                # Identify overlapping bouts between nodes
+                overlapping_bouts_a = bouts_a[bouts_a.apply(
+                    lambda row: ((row['min_epoch'] <= bouts_b['max_epoch']) &
+                                 (row['max_epoch'] >= bouts_b['min_epoch'])).any(),
+                    axis=1)]
+    
+                overlapping_bouts_b = bouts_b[bouts_b.apply(
+                    lambda row: ((row['min_epoch'] <= bouts_a['max_epoch']) &
+                                 (row['max_epoch'] >= bouts_a['min_epoch'])).any(),
+                    axis=1)]
+    
+                if len(overlapping_bouts_a) == 0 or len(overlapping_bouts_b) == 0:
+                    print(f"No overlapping bouts found between node {node_a} and {node_b}.")
+                    continue
+    
+                print(f"Processing overlapping bouts between node {node_a} and {node_b}.")
+    
+                # Combine overlapping bouts for K-means clustering
+                combined_bouts = pd.concat([overlapping_bouts_a, overlapping_bouts_b])
+    
+                combined_power = combined_bouts['norm_power'].values.reshape(-1, 1)
+    
+                kmeans = KMeans(n_clusters=2, random_state=42).fit(combined_power)
+                centers = kmeans.cluster_centers_.flatten()
+                combined_bouts['cluster'] = kmeans.labels_
+    
+                # Determine which cluster is 'near' (higher power)
+                near_cluster = np.argmax(centers)
+                combined_bouts['assigned_label'] = combined_bouts['cluster'].apply(
+                    lambda x: 'near' if x == near_cluster else 'far'
+                )
+    
+                # Now, map the clustering back to individual detections in node_recap_dict
+                for node in [node_a, node_b]:
+                    recaps = self.node_recap_dict[node].copy()
+    
+                    for _, bout in combined_bouts[combined_bouts['node'] == node].iterrows():
+                        in_bout = (recaps['epoch'] >= bout['min_epoch']) & (recaps['epoch'] <= bout['max_epoch'])
+                        bout_ids = set(recaps.loc[in_bout].index)
+    
+                        # Only classify detections that haven't been classified yet
+                        if not bout_ids.intersection(already_classified):
                             recaps.loc[in_bout, 'overlapping'] = 1 if bout['assigned_label'] == 'far' else 0
                             recaps.loc[in_bout, 'parent'] = node_a if bout['assigned_label'] == 'far' else node_b
-                        
-                        classified_detections.append(recaps)
-                    
-                    # Plot and save the K-means results for visualization
-                    self._plot_kmeans_results(combined_bouts, centers, fish_id, node_a, node_b, project.project_dir)
     
-            if classified_detections:
-                final_result = pd.concat(classified_detections, ignore_index=True)
-                final_result = final_result.astype({
-                    'freq_code': 'object',
-                    'epoch': 'int32',
-                    'rec_id': 'object',
-                    'node': 'object',
-                    'overlapping': 'int32',
-                    'parent': 'object'
-                })
+                            # Mark these detections as classified
+                            already_classified.update(bout_ids)
     
-                # Save the final results to the HDF5 store
-                with pd.HDFStore(self.db, mode='a') as store:
-                    store.append(key='overlapping',
-                                 value=final_result,
-                                 format='table',
-                                 index=False,
-                                 min_itemsize={'freq_code': 20, 'rec_id': 20, 'parent': 20},
-                                 append=True,
-                                 data_columns=True,
-                                 chunksize=1000000)
-                print(f'Processed overlap for fish {fish_id}')
+                    classified_detections.append(recaps)
+    
+                # Plot and save the K-means results for visualization
+                self._plot_kmeans_results(combined_bouts, centers, None, node_a, node_b, project.project_dir)
+    
+        if classified_detections:
+            final_result = pd.concat(classified_detections, ignore_index=True)
+            final_result.fillna(0, inplace=True)
+            final_result = final_result.astype({
+                'freq_code': 'object',
+                'epoch': 'int32',
+                'rec_id': 'object',
+                'node': 'object',
+                'overlapping': 'int32',
+                'parent': 'object'
+            })
+    
+            # Save the final results to the HDF5 store
+            with pd.HDFStore(self.db, mode='a') as store:
+                store.append(key='overlapping',
+                             value=final_result,
+                             format='table',
+                             index=False,
+                             min_itemsize={'freq_code': 20, 'rec_id': 20, 'parent': 20},
+                             append=True,
+                             data_columns=True,
+                             chunksize=1000000)
+            print(f'Processed overlap for all receiver pairs.')
             
     def _plot_kmeans_results(self, combined, centers, fish_id, node_a, node_b, project_dir):
         """

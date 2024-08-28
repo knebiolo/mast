@@ -243,8 +243,8 @@ class radio_project():
         train_dat['lag'] = train_dat.epoch.diff()
         train_dat['lag_diff'] = train_dat.lag.diff()
         
-        if freq_code in self.tags.index:
-            print ('check')
+        # if freq_code in self.tags.index:
+        #     print ('check')
             
         # Apply the optimized detection history function to the entire dataset at once
         detection_history, hit_ratio_arr, cons_det_arr, max_count_arr = predictors.detection_history(
@@ -666,6 +666,8 @@ class radio_project():
             columns = ['freq_code','epoch','rec_id','time_stamp','power','noise_ratio','scan_time','channels','rec_type']
             class_dat = class_dat[columns]
 
+        class_dat = class_dat.drop_duplicates()
+        
         if len(class_dat) > 0:
             # do some data management when importing training dataframe
             class_dat['time_stamp'] = pd.to_datetime(class_dat['time_stamp'])
@@ -684,8 +686,7 @@ class radio_project():
                 pulse_rate,
                 self.det_count,
                 class_dat['channels'].values,
-                class_dat['scan_time'].values,
-                class_dat['channels'].values
+                class_dat['scan_time'].values
             )
         
             # Convert detection history arrays to concatenated strings outside Numba
@@ -1039,117 +1040,109 @@ class radio_project():
                           data_columns=True, 
                           append = False)   
 
-    def make_recaptures_table(self):
-        '''method creates a recaptures key in the hdf file'''
-        
-        # iterate over fish, get last classificaiton, presences, and overlapping detections
-        for fish in self.tags[self.tags.tag_type == 'study'].index: 
-            rel_date = pd.to_datetime(self.tags.loc[fish,'rel_date'])
-            for rec in self.receivers.index:
-                # get this receivers data from the classified key
-                rec_dat = pd.read_hdf(self.db,
-                                      key = 'classified',
-                                      where = f'(freq_code == "{fish}") & (rec_id == "{rec}")')
-                try: 
-                    presence_dat = pd.read_hdf(self.db,
-                                               key = 'presence',
-                                               where = f'(freq_code == "{fish}") & (rec_id == "{rec}")')
-                except:
-                    presence_dat = []
-
-                try:
-                    # get data from overlapping associated with this fish and receiver
-                    overlap_dat = pd.read_hdf(self.db,
-                                              key = 'overlapping', 
-                                              where = f'(freq_code == "{fish}") & (rec_id == "{rec}")')
-                    
-                except:
-                    overlap_dat = []
-                
-                rec_dat = rec_dat[rec_dat.time_stamp >= rel_date]
-                
-                if len(rec_dat) > 0:
-                    rec_dat = rec_dat[rec_dat.iter == rec_dat.iter.max()]
-                    rec_dat = rec_dat[rec_dat.test == 1]
-                    if len(rec_dat) > 0:
-                        rec_dat.set_index('epoch')
-                        
-                        if len(presence_dat) > 0:
-                            presence_dat.set_index('epoch')
-                        
-                            rec_dat = pd.merge(rec_dat,
-                                               presence_dat,
-                                               how = 'left')
-                            
-                        else:
-                            rec_dat['bout_no'] = np.zeros(len(rec_dat))
+    def make_recaptures_table(self, export = False):
+        '''Method creates a recaptures key in the hdf file, iterating over receivers to manage memory.'''
     
-                        if len(overlap_dat) > 0:
-                            overlap_dat.set_index('epoch')
-                            
-                            rec_dat = pd.merge(rec_dat,
-                                               overlap_dat,
-                                               how = 'left')
-                            rec_dat['overlapping'] = rec_dat['overlapping'].fillna(0)                       
-
-                            rec_dat = rec_dat[rec_dat.overlapping != 1]
-                            
-                        else:
-                            rec_dat['overlapping'] = np.zeros(len(rec_dat))                        
-                            
-                        rec_dat.reset_index(inplace = True)
-                        rec_dat['bout_no'] = rec_dat['bout_no'].fillna(0)
+        # Convert release dates to datetime if not already done
+        self.tags['rel_date'] = pd.to_datetime(self.tags['rel_date'])
     
-                        # keep certain columns and write to hdf
-                        rec_dat = rec_dat[['freq_code',
-                                        'rec_id',
-                                        'epoch',
-                                        'time_stamp',
-                                        'power',
-                                        'noise_ratio',
-                                        'lag',
-                                        'det_hist',
-                                        'hit_ratio',
-                                        'cons_det',
-                                        'cons_length',
-                                        'likelihood_T',
-                                        'likelihood_F',
-                                        'bout_no',
-                                        'overlapping']]
-                        
-                        # keep it tidy cuz hdf is fragile
-                        rec_dat = rec_dat.astype({'freq_code': 'object',
-                                                'epoch': 'float32',
-                                                'rec_id': 'object',
-                                                'time_stamp': 'datetime64[ns]',
-                                                'power': 'float32', 
-                                                'noise_ratio': 'float32',
-                                                'lag': 'float32',
-                                                'det_hist': 'object',
-                                                'hit_ratio': 'float32',
-                                                'cons_det': 'int32',
-                                                'cons_length': 'float32',
-                                                'likelihood_T': 'float32',
-                                                'likelihood_F': 'float32',
-                                                'bout_no':'int32',
-                                                'overlapping':'int32'})
-                        
-                        with pd.HDFStore(self.db, mode='a') as store:
-                            store.append(key = 'recaptures',
-                                         value = rec_dat, 
-                                         format = 'table', 
-                                         index = False,
-                                         min_itemsize = {'freq_code':20,
-                                                         'rec_id':20,
-                                                         'det_hist':20},
-                                         append = True, 
-                                         chunksize = 1000000,
-                                         data_columns = True)
-                            
-                        print ('recaps for fish %s at receiver %s compiled' %(fish,rec))
-        
-        tbl_recaptures = pd.read_hdf(self.db,key = 'recaptures')
-        tbl_recaptures.to_csv(os.path.join(self.output_dir,'recaptures.csv'))
+        # Loop over receivers
+        for rec in self.receivers.index:
+            print(f'Processing receiver {rec}...')
+            
+            # Read classified data for this receiver
+            rec_dat = pd.read_hdf(self.db, key='classified', where=f'rec_id == "{rec}"')
+    
+            # Filter for study fish
+            #rec_dat = rec_dat[rec_dat['freq_code'].isin(self.tags[self.tags.tag_type == 'study'].index)]
+    
+            # Merge with release dates to filter out data before release
+            rec_dat = rec_dat.merge(self.tags[['rel_date']], left_on='freq_code', right_index=True)
+            rec_dat = rec_dat[rec_dat.time_stamp >= rec_dat.rel_date]
+    
+            # **Reset index to avoid ambiguity between index and column labels**
+            if 'freq_code' in rec_dat.columns and 'freq_code' in rec_dat.index.names:
+                rec_dat.drop(columns = ['freq_code'], inplace = True)   
+                rec_dat.reset_index(inplace=True)
+    
+            # Filter by latest iteration and valid test
+            rec_dat = rec_dat.loc[rec_dat.groupby(['freq_code', 'rec_id']).iter.idxmax()]
+            rec_dat = rec_dat[rec_dat.test == 1]
+    
+            # Reset index (with drop=True to avoid inserting the index as a column)
+            rec_dat.reset_index(inplace=True, drop=True)
+    
+            # Read presence and overlap data for this receiver
+            try:
+                presence_data = pd.read_hdf(self.db, key='presence', where=f'rec_id == "{rec}"')
+                presence_data = presence_data[presence_data['freq_code'].isin(self.tags[self.tags.tag_type == 'study'].index)]
+            except KeyError:
+                presence_data = pd.DataFrame()
+    
+            try:
+                overlap_data = pd.read_hdf(self.db, key='overlapping', where=f'rec_id == "{rec}"')
+                overlap_data = overlap_data[overlap_data['freq_code'].isin(self.tags[self.tags.tag_type == 'study'].index)]
+            except KeyError:
+                overlap_data = pd.DataFrame()
+    
+            # Merge with presence data
+            if not presence_data.empty:
+                rec_dat = rec_dat.merge(presence_data, on=['freq_code', 'epoch'], how='left')
+                rec_dat['bout_no'] = rec_dat['bout_no'].fillna(0).astype(int)
+            else:
+                rec_dat['bout_no'] = 0
+    
+            # Merge with overlap data
+            if not overlap_data.empty:
+                rec_dat = rec_dat.merge(overlap_data, on=['freq_code', 'epoch'], how='left')
+                rec_dat['overlapping'] = rec_dat['overlapping'].fillna(0).astype(int)
+                rec_dat = rec_dat[rec_dat['overlapping'] != 1]
+            else:
+                rec_dat['overlapping'] = 0
+    
+            # remove duplicate rows
+            rec_dat = rec_dat.drop_duplicates(subset = ['freq_code', 'epoch'])
+            
+            # sort by freq code and epoch
+            rec_dat = rec_dat.sort_values(by = ['freq_code','epoch'], ascending = [True,True])
+            
+            # Keep only the necessary columns
+            rec_dat = rec_dat[['freq_code', 'rec_id', 'epoch', 'time_stamp', 'power', 'noise_ratio', 
+                               'lag', 'det_hist', 'hit_ratio', 'cons_det', 'cons_length', 
+                               'likelihood_T', 'likelihood_F', 'bout_no', 'overlapping']]
+    
+            # Ensure correct data types
+            rec_dat = rec_dat.astype({
+                'freq_code': 'object',
+                'epoch': 'float32',
+                'rec_id': 'object',
+                'time_stamp': 'datetime64[ns]',
+                'power': 'float32', 
+                'noise_ratio': 'float32',
+                'lag': 'float32',
+                'det_hist': 'object',
+                'hit_ratio': 'float32',
+                'cons_det': 'int32',
+                'cons_length': 'float32',
+                'likelihood_T': 'float32',
+                'likelihood_F': 'float32',
+                'bout_no': 'int32',
+                'overlapping': 'int32'
+            })
+    
+            # Append to the HDF5 file
+            with pd.HDFStore(self.db, mode='a') as store:
+                store.append(key='recaptures', value=rec_dat, format='table', 
+                             index=False, min_itemsize={'freq_code': 20, 'rec_id': 20, 'det_hist': 20},
+                             append=True, chunksize=1000000, data_columns=True)
+    
+            print(f'Recaps for receiver {rec} compiled.')
+    
+        # Save the recaptures table to CSV
+        if export == True:
+            tbl_recaptures = pd.read_hdf(self.db, key='recaptures')
+            tbl_recaptures.to_csv(os.path.join(self.output_dir, 'recaptures.csv'), index=False)
+            print('Recaptures table saved to CSV.')
                 
     def undo_recaptures(self):
         """
