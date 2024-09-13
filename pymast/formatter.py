@@ -411,6 +411,8 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
                                    left_index = True,
                                    right_index = True)
         
+        self.recap_data = self.recap_data[self.recap_data.overlapping == 0]
+        
         self.recap_data.drop(columns = ['pulse_rate',
                                         'tag_type',
                                         'rel_date',
@@ -420,11 +422,11 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
         
         # filter out tag data we don't want mucking up our staistical model
         if species != None:
-            self.recap_data = self.recap_data[self.recap_data.Species == species]
+            self.recap_data = self.recap_data[self.recap_data.species == species]
         if rel_loc != None:
-            self.recap_data = self.recap_data[self.recap_data.RelLoc == rel_loc]
+            self.recap_data = self.recap_data[self.recap_data.rel_loc == rel_loc]
         if cap_loc != None:
-            self.recap_data = self.recap_data[self.recap_data.CapLoc == cap_loc]
+            self.recap_data = self.recap_data[self.recap_data.cap_loc == cap_loc]
 
         self.recap_data['state'] = self.recap_data.rec_id.map(receiver_to_state)
         self.recap_data.reset_index(inplace = True)
@@ -785,6 +787,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
         print("Movement summaries - Duration between states in seconds:")
         print(summary_stats['movement_duration_summary'], "\n")
         self.msm_state_table.to_csv(os.path.join(self.project.output_dir,'state table.csv'))
+        self.move_summ.to_csv(os.path.join(self.project.output_dir,'movement_summary.csv'))
         return summary_stats
 
 # Example usage

@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-
 '''
 Module contains all of the functions to create a radio telemetry project.'''
 
@@ -17,6 +16,9 @@ from matplotlib import rcParams
 from scipy import interpolate
 import shutil
 import warnings
+import dask.dataframe as dd
+import dask.array as da
+from dask_ml.cluster import KMeans
 warnings.filterwarnings("ignore")
 
 font = {'family': 'serif','size': 6}
@@ -1040,77 +1042,107 @@ class radio_project():
                           data_columns=True, 
                           append = False)   
 
-    def make_recaptures_table(self, export = False):
-        '''Method creates a recaptures key in the hdf file, iterating over receivers to manage memory.'''
-    
+    def make_recaptures_table(self, export=False):
+        '''Creates a recaptures key in the HDF5 file, iterating over receivers to manage memory.'''
+
         # Convert release dates to datetime if not already done
         self.tags['rel_date'] = pd.to_datetime(self.tags['rel_date'])
-    
-        # Loop over receivers
         for rec in self.receivers.index:
+        #for rec in ['R14a','R14b']:
             print(f'Processing receiver {rec}...')
+
+            # Read classified data for this receiver as a Dask DataFrame
+            # Reading the data (assuming self.db and rec are predefined variables)
+            rec_dat = dd.read_hdf(self.db, key='classified')
             
-            # Read classified data for this receiver
-            rec_dat = pd.read_hdf(self.db, key='classified', where=f'rec_id == "{rec}"')
-    
-            # Filter for study fish
-            #rec_dat = rec_dat[rec_dat['freq_code'].isin(self.tags[self.tags.tag_type == 'study'].index)]
-    
+            # Filter for specific rec_id and convert to pandas DataFrame
+            rec_dat = rec_dat[rec_dat['rec_id'] == rec].compute()
+            
+            # Convert 'timestamp' column to datetime
+            rec_dat['time_stamp'] = pd.to_datetime(rec_dat['time_stamp'])
+            
+            # Calculate seconds since Unix epoch
+            rec_dat['epoch'] = (rec_dat['time_stamp'] - pd.Timestamp("1970-01-01")) // pd.Timedelta('1s')
+            print(f"Length of rec_dat after initial load: {len(rec_dat)}")
+
             # Merge with release dates to filter out data before release
             rec_dat = rec_dat.merge(self.tags[['rel_date']], left_on='freq_code', right_index=True)
-            rec_dat = rec_dat[rec_dat.time_stamp >= rec_dat.rel_date]
-    
-            # **Reset index to avoid ambiguity between index and column labels**
+            rec_dat = rec_dat[rec_dat['time_stamp'] >= rec_dat['rel_date']]
+            print(f"Length of rec_dat after merging with release dates: {len(rec_dat)}")
+
+            # Reset index to avoid ambiguity between index and column labels
             if 'freq_code' in rec_dat.columns and 'freq_code' in rec_dat.index.names:
-                rec_dat.drop(columns = ['freq_code'], inplace = True)   
-                rec_dat.reset_index(inplace=True)
-    
+                rec_dat = rec_dat.reset_index(drop=True)
+
             # Filter by latest iteration and valid test
-            rec_dat = rec_dat.loc[rec_dat.groupby(['freq_code', 'rec_id']).iter.idxmax()]
-            rec_dat = rec_dat[rec_dat.test == 1]
-    
-            # Reset index (with drop=True to avoid inserting the index as a column)
-            rec_dat.reset_index(inplace=True, drop=True)
-    
-            # Read presence and overlap data for this receiver
+            #idxmax_values = rec_dat.groupby(['freq_code', 'rec_id'])['iter'].idxmax()
+            #rec_dat = rec_dat.loc[idxmax_values]
+            rec_dat = rec_dat[rec_dat['test'] == 1]
+            #print(f"Columns in rec_dat after filtering by iter and test: {rec_dat.columns}")
+            print(f"Length of rec_dat after filtering by iter and test: {len(rec_dat)}")
+
+            # Read presence data
             try:
-                presence_data = pd.read_hdf(self.db, key='presence', where=f'rec_id == "{rec}"')
+                presence_data = dd.read_hdf(self.db, key='presence')
+                presence_data = presence_data[presence_data['rec_id'] == rec].compute()
                 presence_data = presence_data[presence_data['freq_code'].isin(self.tags[self.tags.tag_type == 'study'].index)]
+                presence_data = presence_data[['freq_code','epoch','rec_id','bout_no']]
+                #print(f"Columns in presence_data: {presence_data.columns}")
+                print(f"Length of presence_data: {len(presence_data)}")
             except KeyError:
                 presence_data = pd.DataFrame()
-    
+                print("No presence data found for this receiver.")
+
+            # Read overlap data
             try:
-                overlap_data = pd.read_hdf(self.db, key='overlapping', where=f'rec_id == "{rec}"')
+                overlap_data = dd.read_hdf(self.db, key='overlapping')
+                overlap_data = overlap_data[overlap_data['rec_id'] == rec].compute()
                 overlap_data = overlap_data[overlap_data['freq_code'].isin(self.tags[self.tags.tag_type == 'study'].index)]
+                grp_ovlp = overlap_data.groupby(['freq_code','epoch','rec_id'])['overlapping'].max()
+                overlap_data = grp_ovlp.to_frame().reset_index()
+
+                #print(f"Columns in overlap_data: {overlap_data.columns}")
+                print(f"Length of overlap_data: {len(overlap_data)}")
             except KeyError:
                 overlap_data = pd.DataFrame()
-    
+                print("No overlap data found for this receiver.")
+
             # Merge with presence data
             if not presence_data.empty:
-                rec_dat = rec_dat.merge(presence_data, on=['freq_code', 'epoch'], how='left')
+                rec_dat = rec_dat.merge(presence_data, on=['freq_code', 'epoch', 'rec_id'], how='left')
                 rec_dat['bout_no'] = rec_dat['bout_no'].fillna(0).astype(int)
             else:
                 rec_dat['bout_no'] = 0
-    
+
             # Merge with overlap data
             if not overlap_data.empty:
-                rec_dat = rec_dat.merge(overlap_data, on=['freq_code', 'epoch'], how='left')
+                rec_dat = rec_dat.merge(overlap_data, on=['freq_code', 'epoch', 'rec_id'], how='left')
                 rec_dat['overlapping'] = rec_dat['overlapping'].fillna(0).astype(int)
-                rec_dat = rec_dat[rec_dat['overlapping'] != 1]
             else:
                 rec_dat['overlapping'] = 0
-    
-            # remove duplicate rows
-            rec_dat = rec_dat.drop_duplicates(subset = ['freq_code', 'epoch'])
             
-            # sort by freq code and epoch
-            rec_dat = rec_dat.sort_values(by = ['freq_code','epoch'], ascending = [True,True])
+            #rec_dat = rec_dat[rec_dat['overlapping'] != 1]
+
+            #print(f"Columns in rec_dat after merging with presence and overlap data: {rec_dat.columns}")
+            print(f"Length of rec_dat after merging with presence and overlap data: {len(rec_dat)}")
+
+            # Check for required columns
+            required_columns = ['freq_code', 'rec_id', 'epoch', 'time_stamp', 'power', 'noise_ratio',
+                                'lag', 'det_hist', 'hit_ratio', 'cons_det', 'cons_length', 
+                                'likelihood_T', 'likelihood_F', 'bout_no', 'overlapping']
             
-            # Keep only the necessary columns
-            rec_dat = rec_dat[['freq_code', 'rec_id', 'epoch', 'time_stamp', 'power', 'noise_ratio', 
-                               'lag', 'det_hist', 'hit_ratio', 'cons_det', 'cons_length', 
-                               'likelihood_T', 'likelihood_F', 'bout_no', 'overlapping']]
-    
+            missing_columns = [col for col in required_columns if col not in rec_dat.columns]
+            if missing_columns:
+                print(f"The following required columns are missing: {missing_columns}")
+                continue
+
+            # Sort by freq code and epoch
+            rec_dat = rec_dat.sort_values(by=['freq_code', 'epoch'], ascending=[True, True])
+
+            # Keep only the necessary columns (including handling missing columns)
+            available_columns = [col for col in required_columns if col in rec_dat.columns]
+            rec_dat = rec_dat[available_columns]
+
             # Ensure correct data types
             rec_dat = rec_dat.astype({
                 'freq_code': 'object',
@@ -1129,20 +1161,29 @@ class radio_project():
                 'bout_no': 'int32',
                 'overlapping': 'int32'
             })
-    
+
+            # Prompt to confirm importing the data
+            #print(f"Final columns in rec_dat: {rec_dat.columns}")
+            print(f"Final length of rec_dat: {len(rec_dat)}")
+            import_confirmation = input("Do you want to import the data into the database? (yes/no): ").strip().lower()
+            if import_confirmation != 'yes':
+                print("Data import canceled.")
+                return
+
             # Append to the HDF5 file
             with pd.HDFStore(self.db, mode='a') as store:
                 store.append(key='recaptures', value=rec_dat, format='table', 
                              index=False, min_itemsize={'freq_code': 20, 'rec_id': 20, 'det_hist': 20},
                              append=True, chunksize=1000000, data_columns=True)
-    
+
             print(f'Recaps for receiver {rec} compiled.')
-    
-        # Save the recaptures table to CSV
-        if export == True:
-            tbl_recaptures = pd.read_hdf(self.db, key='recaptures')
-            tbl_recaptures.to_csv(os.path.join(self.output_dir, 'recaptures.csv'), index=False)
-            print('Recaptures table saved to CSV.')
+
+        if export:
+            print("Exporting to CSV...")
+            rec_data = dd.read_hdf(self.db, 'recaptures').compute()
+            rec_data.to_csv('recaptures.csv', index=False)
+            print("Export completed.")
+
                 
     def undo_recaptures(self):
         """
