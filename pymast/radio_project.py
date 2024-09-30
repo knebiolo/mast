@@ -673,8 +673,10 @@ class radio_project():
         if len(class_dat) > 0:
             # do some data management when importing training dataframe
             class_dat['time_stamp'] = pd.to_datetime(class_dat['time_stamp'])
+            class_dat['epoch'] = np.round((class_dat.time_stamp - pd.Timestamp("1970-01-01")) / pd.Timedelta('1s'), 6)
+
             class_dat.sort_values(by = 'time_stamp', inplace = True)
-            class_dat['epoch'] = class_dat.epoch.values.astype(np.int32)
+            class_dat['epoch'] = class_dat.epoch.values.astype(np.int64)
             class_dat = class_dat.drop_duplicates(subset = 'time_stamp')
             
             # calculate predictors

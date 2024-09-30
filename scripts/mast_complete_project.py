@@ -15,7 +15,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 #%% set up project
-project_dir = r"C:\Users\knebiolo\OneDrive - Kleinschmidt Associates, Inc\PYMAST\Nuyakuk"
+project_dir = r"C:\Users\knebiolo\OneDrive - Kleinschmidt Associates, Inc\PYMAST Round 2"
 db_name = 'nuyakuk_kpn'
 detection_count = 5
 duration = 1
@@ -36,56 +36,56 @@ project = radio_project(project_dir,
 # project.new_db_version(os.path.join(project_dir,'Nuyakuk_v2.h5'))
 # ,presence,classified,trained
 
-# #%%  import data
-# rec_id = 'R02'
-# rec_type = 'srx1200'
-# #TODO - remove these directory arguments - the project is smart
-# training_dir = os.path.join(project_dir,'Data','Training_Files')
-# db_dir = os.path.join(project_dir,'%s.h5'%(db_name))
-# scan_time = 1.         
-# channels = 1
-# antenna_to_rec_dict = {'Antenna 1':rec_id}
+#%%  import data
+rec_id = 'R11'
+rec_type = 'ares'
+#TODO - remove these directory arguments - the project is smart
+training_dir = os.path.join(project_dir,'Data',rec_id)
+db_dir = os.path.join(project_dir,'%s.h5'%(db_name))
+scan_time = 1. #10.5        
+channels = 1. #2
+antenna_to_rec_dict = {'A0':rec_id}
 
-# project.telem_data_import(rec_id,
-#                           rec_type,
-#                           training_dir,
-#                           db_dir,
-#                           scan_time,
-#                           channels,
-#                           antenna_to_rec_dict,
-#                           True)
+project.telem_data_import(rec_id,
+                          rec_type,
+                          training_dir,
+                          db_dir,
+                          scan_time,
+                          channels,
+                          antenna_to_rec_dict,
+                          True)
 
-# # undo import
-# # project.undo_import(rec_id)
+# undo import
+# project.undo_import(rec_id)
 
-# #%%  train data
-# # set parameters and get a list of fish to iterate over
-# rec_id = 'R02'
-# rec_type = 'srx1200'
-# fishes = project.get_fish(rec_id = rec_id)
+#%%  train data
+# set parameters and get a list of fish to iterate over
+rec_id = 'R11'
+rec_type = 'ares'
+fishes = project.get_fish(rec_id = rec_id)
 
-# # iterate over fish and train
-# for fish in fishes:
-#     project.train(fish, rec_id)
+# iterate over fish and train
+for fish in fishes:
+    project.train(fish, rec_id)
 
-# # generate summary statistics
-# project.training_summary(rec_type, site = [rec_id])
+# generate summary statistics
+project.training_summary(rec_type, site = [rec_id])
 
-# # undo training
-# # project.undo_training(rec_id)
+# undo training
+# project.undo_training(rec_id)
 
-# # %% classify data
+# %% classify data
 
-# # Set initial parameters
-# rec_id = 'R03'
-# rec_type = 'srx1200'
-# threshold_ratio = 1  # 1.0 = MAP Hypothesis
-# likelihood = ['hit_ratio','cons_length', 'noise_ratio', 'power', 'lag_diff'] # a-la carte likelihood, standard fields: ['hit_ratio', 'cons_length', 'noise_ratio', 'power', 'lag_diff']
+# Set initial parameters
+rec_id = 'R02'
+rec_type = 'srx1200'
+threshold_ratio = 1  # 1.0 = MAP Hypothesis
+likelihood = ['hit_ratio','cons_length', 'noise_ratio', 'power', 'lag_diff'] # a-la carte likelihood, standard fields: ['hit_ratio', 'cons_length', 'noise_ratio', 'power', 'lag_diff']
 
-# project.reclassify(project, rec_id, rec_type, threshold_ratio, likelihood)
+project.reclassify(project, rec_id, rec_type, threshold_ratio, likelihood)
 
-# # undo classification 
-# # project.undo_classification(rec_id)
+# undo classification 
+# project.undo_classification(rec_id)
 
 #%% cross validate
 

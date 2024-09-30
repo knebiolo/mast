@@ -8,17 +8,25 @@ overlapping detections from radio telemetry data.
 import os
 import numpy as np
 import pandas as pd
+from concurrent.futures import ProcessPoolExecutor
+
 from scipy.optimize import curve_fit, minimize
 from scipy.interpolate import UnivariateSpline
 import matplotlib.pyplot as plt
 import networkx as nx
 from matplotlib import rcParams
-from sklearn.cluster import KMeans
+#from sklearn.cluster import KMeans
+from sklearn.neighbors import KNeighborsClassifier
 from sklearn.cluster import AgglomerativeClustering
 from sklearn.mixture import GaussianMixture
+from sklearn.preprocessing import MinMaxScaler
 import dask.dataframe as dd
 import dask.array as da
 from dask_ml.cluster import KMeans
+import sys
+import matplotlib
+from dask import config
+from intervaltree import Interval, IntervalTree
 
 font = {'family': 'serif','size': 6}
 rcParams['font.size'] = 6
@@ -32,7 +40,7 @@ class bout():
         self.db = radio_project.db
 
         # get the receivers associated with this particular network node
-        recs = radio_project.receivers[radio_project.receivers.node == node]
+        recs = radio_project.receivers[radio_project.receivers.index == node]
         self.receivers = recs.index  # get the unique receivers associated with this node
         self.data = pd.DataFrame(columns = ['freq_code','epoch','power','rec_id'])            # set up an empty data frame
 
@@ -44,18 +52,24 @@ class bout():
                                   where = 'rec_id = %s'%(i))
             rec_dat = rec_dat[rec_dat.iter == rec_dat.iter.max()]
             rec_dat = rec_dat[rec_dat.test == 1]
-            rec_dat = rec_dat[['freq_code','epoch','power','rec_id']]
+            rec_dat = rec_dat[['freq_code','epoch','time_stamp','power','rec_id']]
             rec_dat = rec_dat.astype({'freq_code':'object',
                             'epoch':'float32',
+                            'time_stamp':'datetime64[ns]',
                             'power':'float32',
                             'rec_id':'object'})
             
             self.data = pd.concat([self.data,rec_dat])
 
+        # Define the bin size (5 seconds)
+        bin_size = 30
+    
         # clean up and bin the lengths
         self.data.drop_duplicates(keep = 'first', inplace = True)
-        self.data.sort_values(by = ['freq_code','epoch'], inplace = True)
+        self.data.sort_values(by = ['freq_code','time_stamp'], inplace = True)
+        self.data['epoch'] = (self.data['time_stamp'] - pd.Timestamp("1970-01-01")) // pd.Timedelta('1s')
         self.data['det_lag'] = self.data.groupby('freq_code')['epoch'].diff().abs() // lag_window * lag_window
+        self.data['lag_binned'] = (self.data['det_lag'] // bin_size) * bin_size
         self.data.dropna(axis = 0, inplace = True)   # drop Nan from the data
         self.node = node
         self.fishes = self.data.freq_code.unique()
@@ -88,7 +102,7 @@ class bout():
             print ("Sorry, we don't yet support that model type")
         # get lag frequencies
         lags = np.arange(0,self.time_limit,2)
-        freqs, bins = np.histogram(np.sort(self.data.det_lag),lags)
+        freqs, bins = np.histogram(np.sort(self.data.lag_binned),lags)
         bins = bins[np.where(freqs > 0)]
         freqs = freqs[np.where(freqs > 0)]
         log_freqs = np.log(freqs)
@@ -100,7 +114,7 @@ class bout():
         plt.title('Raw Data for Two-Process Model')
         plt.legend()
         plt.show()
-    
+        plt.pause(5)
         # Prompt the user for initial parameters
         initial_guess = self.prompt_for_params(model_type = 'two_process')
     
@@ -122,7 +136,7 @@ class bout():
             plt.ylabel('y')
             plt.title('Fitted Two-Process Model')
             plt.show()
-            
+            plt.pause(1)
             # Return the fitted parameters
             return params
         except RuntimeError as e:
@@ -132,7 +146,7 @@ class bout():
     def find_knot(self, initial_knot_guess):
         # get lag frequencies
         lags = np.arange(0, self.time_limit, 2)
-        freqs, bins = np.histogram(np.sort(self.data.det_lag), lags)
+        freqs, bins = np.histogram(np.sort(self.data.lag_binned), lags)
         bins = bins[:-1][freqs > 0]  # Ensure the bins array is the right length
         freqs = freqs[freqs > 0]
         log_freqs = np.log(freqs)
@@ -226,7 +240,7 @@ class bout():
     def find_knots(self, initial_knot_guesses):
         # get lag frequencies
         lags = np.arange(0, self.time_limit, 2)
-        freqs, bins = np.histogram(np.sort(self.data.det_lag), lags)
+        freqs, bins = np.histogram(np.sort(self.data.lag_binned), lags)
         bins = bins[:-1][freqs > 0]  # Ensure the bins array is the right length
         freqs = freqs[freqs > 0]
         log_freqs = np.log(freqs)
@@ -274,6 +288,8 @@ class bout():
             bounds=[(bins.min(), initial_knot_guesses[1]),  # Ensure k1 < k2
                     (initial_knot_guesses[0], bins.max())]
         )
+
+            
     
         # Check if the optimization was successful and extract the results
         if result.success:
@@ -321,16 +337,17 @@ class bout():
             plt.ylabel('Frequency')
             plt.legend()
             plt.show()
+            plt.pause(5)
         else:
-            print("Optimization failed:", result.message)
-            return None
+            print("Try again, optimization failed:", result.message)
+            sys.exit()
 
         return optimized_params[-1]
     
     def fit_processes(self):
         # Step 1: Plot bins vs log frequencies
         lags = np.arange(0, self.time_limit, 2)
-        freqs, bins = np.histogram(np.sort(self.data.det_lag), lags)
+        freqs, bins = np.histogram(np.sort(self.data.lag_binned), lags)
         bins = bins[:-1][freqs > 0]  # Ensure the bins array is the right length
         freqs = freqs[freqs > 0]
         log_freqs = np.log(freqs)
@@ -342,7 +359,7 @@ class bout():
         plt.ylabel('Log Frequencies')
         plt.legend()
         plt.show(block=True)
-    
+        plt.pause(5)
         # Step 2: Ask user for initial knots
         num_knots = int(input("Enter the number of knots (1 for two-process, 2 for three-process): "))
         initial_knots = []
@@ -380,45 +397,54 @@ class bout():
         '''Function takes the break point between a continuous presence and new presence,
         enumerates the presence number at a receiver and writes the data to the
         analysis database.'''
-        fishes = self.data.freq_code.unique()
-        
-        for fish in fishes:
-            fish_dat = self.data[self.data.freq_code == fish]
-        
-            # Vectorized classification
-            classifications = np.where(fish_dat.det_lag <= threshold, 'within_bout', 'start_new_bout')
-        
-            # Generating bout numbers
-            # Increment bout number each time a new bout starts
-            bout_changes = np.where(classifications == 'start_new_bout', 1, 0)
-            bout_no = np.cumsum(bout_changes)
-        
-            # Assigning classifications and bout numbers to the dataframe
-            fish_dat['class'] = classifications
-            fish_dat['bout_no'] = bout_no 
+        response = input ('Satisfied with the bout fitting?')
+        if response in ['yes', 'y', 'T','True']:
             
-            fish_dat = fish_dat.astype({'freq_code': 'object',
-                                        'epoch': 'float32',
-                                        'power': 'float32',
-                                        'rec_id': 'object',
-                                        'class': 'object',
-                                        'bout_no':'int32',
-                                        'det_lag':'int32'})
-    
-            # append to hdf5
-            with pd.HDFStore(self.db, mode='a') as store:
-                store.append(key = 'presence',
-                             value = fish_dat, 
-                             format = 'table', 
-                             index = False,
-                             min_itemsize = {'freq_code':20,
-                                             'rec_id':20,
-                                             'class':20},
-                             append = True, 
-                             data_columns = True,
-                             chunksize = 1000000)
+            
+            fishes = self.data.freq_code.unique()
+            
+            for fish in fishes:
+                fish_dat = self.data[self.data.freq_code == fish]
+            
+                # Vectorized classification
+                classifications = np.where(fish_dat.det_lag <= threshold, 'within_bout', 'start_new_bout')
+            
+                # Generating bout numbers
+                # Increment bout number each time a new bout starts
+                bout_changes = np.where(classifications == 'start_new_bout', 1, 0)
+                bout_no = np.cumsum(bout_changes)
+            
+                # Assigning classifications and bout numbers to the dataframe
+                fish_dat['class'] = classifications
+                fish_dat['bout_no'] = bout_no 
+                
+                fish_dat = fish_dat.astype({'freq_code': 'object',
+                                            # 'epoch': 'float64',
+                                            'epoch': 'float32',
+                                            'time_stamp':'datetime64[ns]',
+                                            'power': 'float32',
+                                            'rec_id': 'object',
+                                            'class': 'object',
+                                            'bout_no':'int32',
+                                            'det_lag':'int32'})
         
-            print ('bouts classified for fish %s'%(fish))
+                # append to hdf5
+                with pd.HDFStore(self.db, mode='a') as store:
+                    store.append(key = 'presence',
+                                 value = fish_dat, 
+                                 format = 'table', 
+                                 index = False,
+                                 min_itemsize = {'freq_code':20,
+                                                 'rec_id':20,
+                                                 'class':20},
+                                 append = True, 
+                                 data_columns = True,
+                                 chunksize = 1000000)
+            
+                print ('bouts classified for fish %s'%(fish))
+        else:
+            print ('Give the fitting another try')
+            sys.exit()
             
 class overlap_reduction():
     """
@@ -437,7 +463,7 @@ class overlap_reduction():
         importing the necessary data for each node (receiver).
         """
         self.db = radio_project.db
-
+        self.project = radio_project
         # Create a directed graph from the list of edges
         self.G = nx.DiGraph()
         self.G.add_edges_from(edges)
@@ -445,19 +471,24 @@ class overlap_reduction():
         # Initialize dictionaries for presence and recap data
         self.node_pres_dict = {}
         self.node_recap_dict = {}
+        self.nodes = nodes
+        self.edges = edges
         
         for node in nodes:
             # Load the entire dataset or relevant columns, and then filter it in memory
-            pres_data = dd.read_hdf(self.db, 'presence', columns=['freq_code', 'epoch', 'power', 'rec_id', 'bout_no'])
-            recap_data = dd.read_hdf(self.db, 'classified', columns=['freq_code', 'epoch', 'power', 'rec_id', 'iter', 'test'])
+            pres_data = dd.read_hdf(self.db, 'presence', columns=['freq_code', 'epoch','time_stamp', 'power', 'rec_id', 'bout_no'])
+            recap_data = dd.read_hdf(self.db, 'classified', columns=['freq_code', 'epoch','time_stamp', 'power', 'rec_id', 'iter', 'test'])
+            pres_data['epoch'] = (pres_data['time_stamp'] - pd.Timestamp("1970-01-01")) // pd.Timedelta('1s')
+            recap_data['epoch'] = (recap_data['time_stamp'] - pd.Timestamp("1970-01-01")) // pd.Timedelta('1s')
 
             # Filter the data for the specific node
             pres_data = pres_data[pres_data['rec_id'] == node]
             recap_data = recap_data[recap_data['rec_id'] == node]
 
+            # We only want good data in our recaps
             recap_data = recap_data[recap_data['iter'] == recap_data['iter'].max()]
             recap_data = recap_data[recap_data['test'] == 1]
-            recap_data = recap_data[['freq_code', 'epoch', 'power', 'rec_id']]
+            recap_data = recap_data[['freq_code', 'epoch','time_stamp', 'power', 'rec_id']]            
             
             # Grouping with shuffle-based aggregation
             summarized_data = pres_data.groupby(['freq_code', 'bout_no', 'rec_id']).agg({
@@ -468,15 +499,20 @@ class overlap_reduction():
             # Flatten multi-index columns
             summarized_data.columns = ['freq_code', 'bout_no', 'rec_id', 
                                        'min_epoch', 'max_epoch', 'median_power']
+            
+            # normalize power
+            recap_data['norm_power'] = (recap_data.power - recap_data.power.min()) / (recap_data.power.max() - recap_data.power.min())
+            summarized_data['norm_power'] = (summarized_data.median_power - summarized_data.median_power.min()) / \
+                (summarized_data.median_power.max() - summarized_data.median_power.min())
 
             self.node_pres_dict[node] = summarized_data
             self.node_recap_dict[node] = recap_data
             print(f"Completed data management process for node {node}")
 
-        self.visualize_graph()
+        #self.visualize_graph()
 
         # Visualize the graph
-        self.visualize_graph()
+        #self.visualize_graph()
 
     def visualize_graph(self):
         """
@@ -487,108 +523,144 @@ class overlap_reduction():
         plt.axis('off')
         plt.show()
 
-    def unsupervised_removal(self, project):
-        """
-        Identifies and removes overlapping detections across receivers using signal power.
-        """
-        bout_summaries = []
-        for node, df in self.node_pres_dict.items():
-            df = df.compute()  # Compute the Dask DataFrame to bring it into memory
-            df['rec_id'] = node
-            bout_summaries.append(df)
-    
-        if len(bout_summaries) == 0:
-            return
-    
-        bout_summaries = pd.concat(bout_summaries, ignore_index=True)
+    def unsupervised_removal(self):
+        for i in self.edges:
+            parent = i[0]
+            child = i[1]
+            
+            # get bout data
+            parent_bouts = self.node_pres_dict[parent]
+            child_bouts = self.node_pres_dict[child]
+            
+            # get parent data to label
+            parent_dat = self.node_recap_dict[parent]
+            
+            if child_bouts.shape[0].compute() == 0:
+                continue
 
-        # Normalize the power values within each receiver's bouts
-        bout_summaries['norm_power'] = bout_summaries.groupby('rec_id')['median_power'].transform(
-            lambda x: (x - x.min()) / (x.max() - x.min())
-        )
-    
-        nodes = bout_summaries['rec_id'].unique()
-        classified_detections = []
-        already_classified = set()
+            # identify overlapping bouts
+            print (f'Identifying overlapping bouts between {parent} and {child}')
+            # 1. Perform an inner merge on 'freq_code'
+            merged_ddf = dd.merge(parent_bouts, child_bouts, on='freq_code', suffixes=('_parent', '_child'))
+            
+            # 2. Define a function to check for overlaps
+            def check_overlap(row):
+                # Fish heard in both places if: max(min_epoch_parent, min_epoch_child) <= min(max_epoch_parent, max_epoch_child)
+                return max(row['min_epoch_parent'], row['min_epoch_child']) <= min(row['max_epoch_parent'], row['max_epoch_child'])
+            
+            # 3. Apply the overlap check row-wise (this is efficient with Dask as it operates in parallel)
+            merged_ddf['overlap'] = merged_ddf.apply(check_overlap, axis=1, meta=('overlap', 'bool'))
+            
+            # 4. Filter rows where overlap is True
+            overlap_ddf = merged_ddf[merged_ddf['overlap']]
+            
+            print ('Creating intermediate dataframes and removing duplicates created in previous step')
+            # get overlapping parent and child dataframes
+            ovlp_parent_bouts = overlap_ddf[['freq_code','bout_no_parent','rec_id_parent',
+                                             'min_epoch_parent','max_epoch_parent','norm_power_parent']]
+            ovlp_parent_bouts = ovlp_parent_bouts.rename(columns = {
+                'bout_no_parent':'bout_no',
+                'rec_id_parent':'rec_id',
+                'min_epoch_parent':'min_epoch',
+                'max_epoch_parent':'max_epoch',
+                'norm_power_parent':'norm_power'})
+            ovlp_parent_bouts = ovlp_parent_bouts.drop_duplicates(subset=['freq_code', 'bout_no'])
 
-        for i, node_a in enumerate(nodes):
-            for node_b in nodes[i + 1:]:
-                bouts_a = bout_summaries[bout_summaries['rec_id'] == node_a]
-                bouts_b = bout_summaries[bout_summaries['rec_id'] == node_b]
-    
-                if bouts_a.empty or bouts_b.empty:
-                    print(f"Skipping comparison between node {node_a} and {node_b} because one has no bouts.")
-                    continue
-    
-                overlapping_bouts_a = bouts_a[bouts_a.apply(
-                    lambda row: ((row['min_epoch'] <= bouts_b['max_epoch']) &
-                                 (row['max_epoch'] >= bouts_b['min_epoch'])).any(),
-                    axis=1)]
-    
-                overlapping_bouts_b = bouts_b[bouts_b.apply(
-                    lambda row: ((row['min_epoch'] <= bouts_a['max_epoch']) &
-                                 (row['max_epoch'] >= bouts_a['min_epoch'])).any(),
-                    axis=1)]
-    
-                if overlapping_bouts_a.empty or overlapping_bouts_b.empty:
-                    print(f"No overlapping bouts found between node {node_a} and {node_b}.")
-                    continue
-    
-                print(f"Processing overlapping bouts between node {node_a} and {node_b}.")
-    
-                combined_bouts = pd.concat([overlapping_bouts_a, overlapping_bouts_b])
+            ovlp_child_bouts = overlap_ddf[['freq_code','bout_no_child','rec_id_child',
+                                             'min_epoch_child','max_epoch_child','norm_power_child']] 
+            ovlp_child_bouts = ovlp_child_bouts.rename(columns = {
+                'bout_no_child':'bout_no',
+                'rec_id_child':'rec_id',
+                'min_epoch_child':'min_epoch',
+                'max_epoch_child':'max_epoch',
+                'norm_power_child':'norm_power'})
+            ovlp_child_bouts = ovlp_child_bouts.drop_duplicates(subset=['freq_code', 'bout_no'])
+            
+            # get power and create an array for processing with kmeans
+            parent_column = ovlp_parent_bouts['norm_power']
+            child_column = ovlp_child_bouts['norm_power']
 
-                combined_power = combined_bouts['norm_power'].values.reshape(-1, 1)
+            combined_columns = dd.concat([parent_column, child_column])
+            combined_array = combined_columns.to_dask_array(lengths=True)
+            combined_array = combined_array.rechunk({0: 'auto'})
 
-                kmeans = KMeans(n_clusters=2, random_state=42).fit(combined_power)
-                centers = kmeans.cluster_centers_.flatten()
-                combined_bouts['cluster'] = kmeans.labels_
+            print ('Perform k-means to identify differences between detection power')
+            try:
+                # see if there is anything different about the median power by bout
+                kmeans = KMeans(n_clusters=2)
+                kmeans.fit(combined_array.reshape(-1, 1))  # Reshape for 1D data
+                
+                # Get the cluster centers (centroids)
+                centroids = kmeans.cluster_centers_    
     
-                near_cluster = np.argmax(centers)
-                combined_bouts['assigned_label'] = combined_bouts['cluster'].apply(
-                    lambda x: 'near' if x == near_cluster else 'far'
-                )
-    
-                for node in [node_a, node_b]:
-                    recaps = self.node_recap_dict[node].compute().copy()  # Compute recaps to bring into memory
-    
-                    for _, bout in combined_bouts[combined_bouts['rec_id'] == node].iterrows():
-                        in_bout = (recaps['epoch'] >= bout['min_epoch']) & (recaps['epoch'] <= bout['max_epoch'])
-                        bout_ids = set(recaps.loc[in_bout].index)
-    
-                        if not bout_ids.intersection(already_classified):
-                            recaps.loc[in_bout, 'overlapping'] = 1 if bout['assigned_label'] == 'far' else 0
-                            recaps.loc[in_bout, 'parent'] = node_a if bout['assigned_label'] == 'far' else node_b
-    
-                            already_classified.update(bout_ids)
-    
-                    classified_detections.append(recaps)
-    
-                self._plot_kmeans_results(combined_bouts, centers, None, node_a, node_b, project.project_dir)
-    
-        if classified_detections:
-            final_result = pd.concat(classified_detections, ignore_index=True)
-            final_result.drop(columns = ['node'], inplace = True)
-            final_result.fillna(0, inplace=True)
-            final_result = final_result.astype({
-                'freq_code': 'object',
-                'epoch': 'int32',
-                'rec_id': 'object',
-                'overlapping': 'int32',
-                'parent': 'object'
-            })
-    
-            with pd.HDFStore(self.db, mode='a') as store:
-                store.append(key='overlapping',
-                             value=final_result,
-                             format='table',
-                             index=False,
-                             min_itemsize={'freq_code': 20, 'rec_id': 20, 'parent': 20},
-                             append=True,
-                             data_columns=True,
-                             chunksize=1000000)
-            print(f'Processed overlap for all receiver pairs.')
+                # Assuming centroids is a NumPy array (already computed)
+                sorted_centroids = np.sort(centroids, axis=0)
+                
+                # Calculate the split point
+                split_point = (sorted_centroids[0] + sorted_centroids[1]) / 2
 
+                print (f'Split point: {split_point} ')
+                
+            except ValueError:
+                print (f'K-means failed')
+                split_point = 0.0
+                continue
+            
+            print ('Classifying rows in parent dataframe')
+            # Define a function to classify each row based on the 'norm_power' and split_point
+            def classify(row, split_point):
+                return 0 if row['norm_power'] < split_point else 1
+            
+            # Apply the classification to each row in the parent dataframe using Dask's `apply`
+            parent_bouts['overlapping_bout'] = parent_bouts['norm_power'].apply(
+                lambda x: 1 if x < split_point else 0, meta=('classification', 'int')
+            )
+            
+            # Step 1: Merge on 'freq_code' (since there is no 'bout_no')
+            merged_df = dd.merge(parent_dat, parent_bouts, on='freq_code', how='left')
+            
+            # Step 2: Filter where 'epoch' falls within the 'min_epoch' and 'max_epoch'
+            merged_df['in_bout'] = (merged_df['epoch'] >= merged_df['min_epoch']) & (merged_df['epoch'] <= merged_df['max_epoch'])
+            
+            # Step 3: Classify the detections based on the 'in_bout' column
+            # Assign the bout's classification to the detection if it falls within the bout's time range
+            merged_df['overlapping'] = merged_df['overlapping_bout'].where(merged_df['in_bout'], other=None)
+            
+            # Step 1: Keep the necessary columns and rename
+            merged_df = merged_df[['freq_code', 'epoch', 'time_stamp', 'rec_id_x', 'in_bout', 'overlapping']]
+            merged_df = merged_df.rename(columns={'rec_id_x': 'rec_id'})
+            
+            # Step 2: Filter rows where in_bout is True
+            merged_df = merged_df[merged_df['in_bout'] == True]
+            
+            # Step 3: Convert string columns to object-type strings (which are compatible with HDFStore)
+            merged_df['freq_code'] = merged_df['freq_code'].astype(str)
+            merged_df['rec_id'] = merged_df['rec_id'].astype(str)
+            merged_df = merged_df.repartition(npartitions=20)
+            # Step 4: Write to HDFStore in chunks without calling .compute()
+            # Loop through partitions with a counter
+            for i, partition in enumerate(merged_df.partitions):
+                # Compute the partition
+                partition_df = partition.compute()
+            
+                # Convert StringDtype columns to object dtype for HDF5 compatibility
+                partition_df['freq_code'] = partition_df['freq_code'].astype(str)
+                partition_df['rec_id'] = partition_df['rec_id'].astype(str)
+            
+                # Open HDF5 file, write the partition, then close it to avoid conflict
+                with pd.HDFStore(self.project.db, mode='a') as store:
+                    store.append(
+                        key='overlapping',
+                        value=partition_df,
+                        format='table',
+                        index=False,
+                        min_itemsize={'freq_code': 20, 'rec_id': 20},  # Adjust itemsize based on your needs
+                        data_columns=True
+                    )
+                
+                # Print progress
+                print(f"Partition {i+1} written to HDF5.")
+                
     def _plot_kmeans_results(self, combined, centers, fish_id, node_a, node_b, project_dir):
         """
         Plots and saves the K-means clustering results to the project directory.
@@ -607,62 +679,316 @@ class overlap_reduction():
         plt.close()
         print(f"K-means plot saved")
 
-    def nested_doll(self):
-        """
-        Identify and mark overlapping detections between parent and child nodes.
-        """
-        overlaps_found = False
-        overlap_count = 0
+
+            
+# class overlap_reduction():
+#     def __init__(self, nodes, edges, radio_project, n_clusters=2):
+#         self.db = radio_project.db
+#         self.G = nx.DiGraph()
+#         self.G.add_edges_from(edges)
         
-        for i in self.node_recap_dict:
-            fishes = self.node_recap_dict[i].freq_code.unique().compute()
+#         self.node_pres_dict = {}
+#         self.node_recap_dict = {}
+#         self.nodes = nodes
+#         self.edges = edges
+#         self.n_clusters = n_clusters
 
-            for j in fishes:
-                children = list(self.G.successors(i))
-                fish_dat = self.node_recap_dict[i][self.node_recap_dict[i].freq_code == j].compute().copy()
-                fish_dat['overlapping'] = 0
-                fish_dat['parent'] = ''
+#         for node in nodes:
+#             pres_data = dd.read_hdf(self.db, 'presence', columns=['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id', 'bout_no'])
+#             recap_data = dd.read_hdf(self.db, 'classified', columns=['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id', 'iter', 'test'])
 
-                if len(children) > 0:
-                    for k in children:
-                        child_dat = self.node_pres_dict[k][self.node_pres_dict[k].freq_code == j].compute()
-                        if len(child_dat) > 0:
-                            min_epochs = child_dat.min_epoch.values
-                            max_epochs = child_dat.max_epoch.values
+#             pres_data['epoch'] = ((pres_data['time_stamp'] - pd.Timestamp("1970-01-01")) // pd.Timedelta('1s')).astype('int64')
+#             recap_data['epoch'] = ((recap_data['time_stamp'] - pd.Timestamp("1970-01-01")) // pd.Timedelta('1s')).astype('int64')
+
+#             pres_data = pres_data[pres_data['rec_id'] == node]
+#             recap_data = recap_data[(recap_data['rec_id'] == node) & 
+#                                     (recap_data['iter'] == recap_data['iter'].max()) & 
+#                                     (recap_data['test'] == 1)]
+#             recap_data = recap_data[['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id']]
+            
+#             pres_data = pres_data.compute()
+
+#             summarized_data = pres_data.groupby(['freq_code', 'bout_no', 'rec_id']).agg({
+#                 'epoch': ['min', 'max'],
+#                 'power': 'median'
+#             }).reset_index()
+
+#             summarized_data.columns = ['freq_code', 'bout_no', 'rec_id', 
+#                                        'min_epoch', 'max_epoch', 'median_power']
+
+#             rec_ids = summarized_data['rec_id'].values
+#             median_powers = summarized_data['median_power'].values
+#             normalized_power = np.zeros_like(median_powers)
+
+#             for rec_id in np.unique(rec_ids):
+#                 mask = rec_ids == rec_id
+#                 norm_power = median_powers[mask]
+#                 normalized_power[mask] = (norm_power - norm_power.min()) / (norm_power.max() - norm_power.min())
+
+#             summarized_data['norm_power'] = normalized_power
+
+#             self.node_pres_dict[node] = dd.from_pandas(summarized_data, npartitions=10)
+#             self.node_recap_dict[node] = recap_data
+#             print(f"Completed data management process for node {node}")
+
+#         # Debugging step to check initialized keys
+#         print("Initialized nodes in node_pres_dict:", list(self.node_pres_dict.keys()))
+    
+
+#     def unsupervised_removal(self):
+#         final_classifications = {}
+#         combined_recaps_list = []
+    
+#         def process_pair(parent, child):
+#             parent_bouts = self.node_pres_dict[parent]
+#             child_bouts = self.node_pres_dict[child]
+    
+#             overlapping = parent_bouts.merge(
+#                 child_bouts,
+#                 on='freq_code',
+#                 suffixes=('_parent', '_child')
+#             ).query('(min_epoch_child <= max_epoch_parent) & (max_epoch_child >= min_epoch_parent)').compute()
+    
+#             if overlapping.empty:
+#                 return None
+    
+#             parent_recaps = self.node_recap_dict[parent].merge(
+#                 overlapping[['freq_code', 'min_epoch_parent', 'max_epoch_parent']],
+#                 on='freq_code'
+#             ).query('epoch >= min_epoch_parent and epoch <= max_epoch_parent').compute()
+    
+#             child_recaps = self.node_recap_dict[child].merge(
+#                 overlapping[['freq_code', 'min_epoch_child', 'max_epoch_child']],
+#                 on='freq_code'
+#             ).query('epoch >= min_epoch_child and epoch <= max_epoch_child').compute()
+    
+#             if parent_recaps.empty or child_recaps.empty:
+#                 return None
+    
+#             combined_recaps = pd.concat([parent_recaps, child_recaps])
+#             combined_recaps['norm_power'] = (combined_recaps['power'] - combined_recaps['power'].min()) / (combined_recaps['power'].max() - combined_recaps['power'].min())
+#             return combined_recaps
+    
+#         # Process receiver pairs in parallel
+#         with ProcessPoolExecutor() as executor:
+#             results = executor.map(lambda pair: process_pair(pair[0], pair[1]), self.edges)
+    
+#         for combined_recaps in results:
+#             if combined_recaps is not None:
+#                 combined_recaps_list.append(combined_recaps)
+    
+#         if combined_recaps_list:
+#             all_combined_recaps = pd.concat(combined_recaps_list, ignore_index=True)
+#             best_bout_mask = self.apply_kmeans(all_combined_recaps)
+    
+#             all_combined_recaps['overlapping'] = np.where(best_bout_mask, 0, 1)
+#             for _, rec in all_combined_recaps.iterrows():
+#                 key = (rec['freq_code'], rec['epoch'])
+#                 if key not in final_classifications:
+#                     final_classifications[key] = rec['overlapping']
+#                 else:
+#                     final_classifications[key] = max(final_classifications[key], rec['overlapping'])
+    
+#         final_detections = []
+#         for parent in self.node_pres_dict.keys():
+#             recaps_chunk = self.node_recap_dict[parent].compute()
+#             recaps_chunk['overlapping'] = 1
+    
+#             for (freq_code, epoch), overlap_value in final_classifications.items():
+#                 recaps_chunk.loc[(recaps_chunk['epoch'] == epoch) & (recaps_chunk['freq_code'] == freq_code), 'overlapping'] = overlap_value
+    
+#             final_detections.append(recaps_chunk)
+    
+#         final_result = pd.concat(final_detections, ignore_index=True)
+#         final_result['epoch'] = final_result['epoch'].astype('int64')
+    
+#         string_columns = final_result.select_dtypes(include=['string']).columns
+#         final_result[string_columns] = final_result[string_columns].astype('object')
+    
+#         with pd.HDFStore(self.db, mode='a') as store:
+#             store.append(key='overlapping',
+#                          value=final_result,
+#                          format='table',
+#                          index=False,
+#                          min_itemsize={'freq_code': 20, 'rec_id': 20},
+#                          append=True,
+#                          data_columns=True,
+#                          chunksize=1000000)
+    
+#         print(f'Processed overlap for all receiver pairs.')
+
+    
+#     def apply_kmeans(self, combined_recaps):
+#         """
+#         Applies KMeans clustering to identify 'near' and 'far' clusters.
+#         If KMeans cannot find two distinct clusters, falls back to a simple power comparison.
+#         """
+#         # Convert to NumPy arrays directly from the DataFrame
+#         features = combined_recaps[['norm_power']].values
+    
+#         kmeans = KMeans(n_clusters=2, random_state=42, n_init=10)
+#         kmeans.fit(features)
+    
+#         # Ensure labels are a NumPy array
+#         labels = np.array(kmeans.labels_)
+    
+#         # Check if KMeans found fewer than 2 clusters
+#         if len(np.unique(labels)) < 2:
+#             print("Found fewer than 2 clusters. Falling back to selecting the recapture with the highest power.")
+#             return combined_recaps['power'].values >= combined_recaps['power'].mean()
+    
+#         # Determine which cluster corresponds to 'near' based on median power
+#         cluster_medians = combined_recaps.groupby(labels)['norm_power'].median()
+#         near_cluster = cluster_medians.idxmax()  # Cluster with the higher median power is 'near'
+    
+#         return labels == near_cluster
+   
+#     # def unsupervised_removal(self):
+#     #     """
+#     #     Identifies and removes overlapping detections across receivers using KMeans for clustering.
+#     #     Ensures each detection is classified only once, with the most conservative (i.e., 'far') classification.
+#     #     """
+#     #     final_classifications = {}
+    
+#     #     for parent, child in self.edges:
+#     #         print(f"Processing parent: {parent}")
+    
+#     #         if parent not in self.node_pres_dict:
+#     #             raise KeyError(f"Parent {parent} not found in node_pres_dict. Available keys: {list(self.node_pres_dict.keys())}")
+    
+#     #         parent_bouts = self.node_pres_dict[parent].compute()
+#     #         child_bouts = self.node_pres_dict[child].compute()
+    
+#     #         # Merge and detect overlaps between parent and child
+#     #         overlapping = parent_bouts.merge(
+#     #             child_bouts,
+#     #             on='freq_code',
+#     #             suffixes=('_parent', '_child')
+#     #         ).query('(min_epoch_child <= max_epoch_parent) & (max_epoch_child >= min_epoch_parent)')
+    
+#     #         if not overlapping.empty:
+#     #             # Apply KMeans clustering or fallback to greater-than analysis
+#     #             best_bout_mask = self.apply_kmeans(overlapping)
+#     #             overlapping['overlapping'] = np.where(best_bout_mask, 0, 1)
+    
+#     #             # Update the final classification for each detection
+#     #             for _, bout in overlapping.iterrows():
+#     #                 key = (bout['freq_code'], bout['min_epoch_parent'], bout['max_epoch_parent'])
+#     #                 if key not in final_classifications:
+#     #                     final_classifications[key] = bout['overlapping']
+#     #                 else:
+#     #                     final_classifications[key] = max(final_classifications[key], bout['overlapping'])
+    
+#     #     # Prepare final result based on the most conservative classification
+#     #     final_detections = []
+#     #     for parent in self.node_pres_dict.keys():
+#     #         recaps_chunk = self.node_recap_dict[parent].compute()
+    
+#     #         # Initialize 'overlapping' column as 1 (conservative)
+#     #         recaps_chunk['overlapping'] = 1
+    
+#     #         # Update based on the final classifications
+#     #         for (freq_code, min_epoch, max_epoch), overlap_value in final_classifications.items():
+#     #             in_bout = (recaps_chunk['epoch'] >= min_epoch) & (recaps_chunk['epoch'] <= max_epoch) & (recaps_chunk['freq_code'] == freq_code)
+#     #             recaps_chunk.loc[in_bout, 'overlapping'] = overlap_value
+    
+#     #         final_detections.append(recaps_chunk)
+    
+#     #     # Combine all detections
+#     #     final_result = pd.concat(final_detections, ignore_index=True)
+#     #     final_result['epoch'] = final_result['epoch'].astype('int64')
+    
+#     #     # Convert StringDtype columns to object dtype
+#     #     string_columns = final_result.select_dtypes(include=['string']).columns
+#     #     final_result[string_columns] = final_result[string_columns].astype('object')
+    
+#     #     # Save the final results to the HDF5 store
+#     #     with pd.HDFStore(self.db, mode='a') as store:
+#     #         store.append(key='overlapping',
+#     #                       value=final_result,
+#     #                       format='table',
+#     #                       index=False,
+#     #                       min_itemsize={'freq_code': 20, 'rec_id': 20},
+#     #                       append=True,
+#     #                       data_columns=True,
+#     #                       chunksize=1000000)
+    
+#     #     print(f'Processed overlap for all receiver pairs.')
+    
+#     def _plot_kmeans_results(self, combined, centers, fish_id, node_a, node_b, project_dir):
+#         """
+#         Plots and saves the K-means clustering results to the project directory.
+#         """
+#         plt.figure(figsize=(10, 6))
+#         plt.hist(combined['norm_power'], bins=30, alpha=0.5, label='Normalized Power')
+#         plt.axvline(centers[0], color='r', linestyle='dashed', linewidth=2, label='Cluster Center 1')
+#         plt.axvline(centers[1], color='b', linestyle='dashed', linewidth=2, label='Cluster Center 2')
+#         plt.title(f"K-means Clustering between Nodes {node_a} and {node_b}")
+#         plt.xlabel("Normalized Power")
+#         plt.ylabel("Frequency")
+#         plt.legend()
+
+#         output_path = os.path.join(project_dir, 'Output', 'Figures', f'kmeans_nodes_{node_a}_{node_b}.png')
+#         plt.savefig(output_path)
+#         plt.close()
+#         print(f"K-means plot saved")
+
+#     def nested_doll(self):
+#         """
+#         Identify and mark overlapping detections between parent and child nodes.
+#         """
+#         overlaps_found = False
+#         overlap_count = 0
+        
+#         for i in self.node_recap_dict:
+#             fishes = self.node_recap_dict[i].freq_code.unique().compute()
+
+#             for j in fishes:
+#                 children = list(self.G.successors(i))
+#                 fish_dat = self.node_recap_dict[i][self.node_recap_dict[i].freq_code == j].compute().copy()
+#                 fish_dat['overlapping'] = 0
+#                 fish_dat['parent'] = ''
+
+#                 if len(children) > 0:
+#                     for k in children:
+#                         child_dat = self.node_pres_dict[k][self.node_pres_dict[k].freq_code == j].compute()
+#                         if len(child_dat) > 0:
+#                             min_epochs = child_dat.min_epoch.values
+#                             max_epochs = child_dat.max_epoch.values
                             
-                            fish_epochs = fish_dat.epoch.values
-                            overlaps = np.any(
-                                (min_epochs[:, None] <= fish_epochs) & (max_epochs[:, None] > fish_epochs), axis=0
-                            )
-                            overlap_indices = np.where(overlaps)[0]
-                            if overlap_indices.size > 0:
-                                overlaps_found = True
-                                overlap_count += overlap_indices.size
-                                fish_dat.loc[overlaps, 'overlapping'] = 1
-                                fish_dat.loc[overlaps, 'parent'] = i
+#                             fish_epochs = fish_dat.epoch.values
+#                             overlaps = np.any(
+#                                 (min_epochs[:, None] <= fish_epochs) & (max_epochs[:, None] > fish_epochs), axis=0
+#                             )
+#                             overlap_indices = np.where(overlaps)[0]
+#                             if overlap_indices.size > 0:
+#                                 overlaps_found = True
+#                                 overlap_count += overlap_indices.size
+#                                 fish_dat.loc[overlaps, 'overlapping'] = 1
+#                                 fish_dat.loc[overlaps, 'parent'] = i
 
-                fish_dat = fish_dat.astype({
-                    'freq_code': 'object',
-                    'epoch': 'int32',
-                    'rec_id': 'object',
-                    'node': 'object',
-                    'overlapping': 'int32',
-                    'parent': 'object'
-                })
+#                 fish_dat = fish_dat.astype({
+#                     'freq_code': 'object',
+#                     'epoch': 'int32',
+#                     'rec_id': 'object',
+#                     'node': 'object',
+#                     'overlapping': 'int32',
+#                     'parent': 'object'
+#                 })
 
-                with pd.HDFStore(self.db, mode='a') as store:
-                    store.append(key='overlapping',
-                                 value=fish_dat,
-                                 format='table',
-                                 index=False,
-                                 min_itemsize={'freq_code': 20,
-                                               'rec_id': 20,
-                                               'parent': 20},
-                                 append=True,
-                                 data_columns=True,
-                                 chunksize=1000000)
+#                 with pd.HDFStore(self.db, mode='a') as store:
+#                     store.append(key='overlapping',
+#                                  value=fish_dat,
+#                                  format='table',
+#                                  index=False,
+#                                  min_itemsize={'freq_code': 20,
+#                                                'rec_id': 20,
+#                                                'parent': 20},
+#                                  append=True,
+#                                  data_columns=True,
+#                                  chunksize=1000000)
 
-        if overlaps_found:
-            print(f"Overlaps were found and processed. Total number of overlaps: {overlap_count}.")
-        else:
-            print("No overlaps were found.")
+#         if overlaps_found:
+#             print(f"Overlaps were found and processed. Total number of overlaps: {overlap_count}.")
+#         else:
+#             print("No overlaps were found.")
