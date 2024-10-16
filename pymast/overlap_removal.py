@@ -586,20 +586,31 @@ class overlap_reduction():
 
             print ('Perform k-means to identify differences between detection power')
             try:
-                # see if there is anything different about the median power by bout
-                kmeans = KMeans(n_clusters=2)
-                kmeans.fit(combined_array.reshape(-1, 1))  # Reshape for 1D data
+                # # see if there is anything different about the median power by bout
+                # kmeans = KMeans(n_clusters=2)
+                # kmeans.fit(combined_array.reshape(-1, 1))  # Reshape for 1D data
                 
-                # Get the cluster centers (centroids)
-                centroids = kmeans.cluster_centers_    
+                # # Get the cluster centers (centroids)
+                # centroids = kmeans.cluster_centers_    
     
-                # Assuming centroids is a NumPy array (already computed)
-                sorted_centroids = np.sort(centroids, axis=0)
+                # # Assuming centroids is a NumPy array (already computed)
+                # sorted_centroids = np.sort(centroids, axis=0)
                 
-                # Calculate the split point
-                split_point = (sorted_centroids[0] + sorted_centroids[1]) / 2
+                # # Calculate the split point
+                # split_point = (sorted_centroids[0] + sorted_centroids[1]) / 2
 
-                print (f'Split point: {split_point} ')
+                # print (f'Split point: {split_point} ')
+                
+                gmm = GaussianMixture(n_components=2)
+                gmm.fit(combined_array.reshape(-1, 1))
+                
+                # Get the means of the two Gaussians (these are analogous to centroids)
+                means = gmm.means_.flatten()
+                sorted_means = np.sort(means)
+                
+                # Calculate the split point as the midpoint between the two means
+                split_point = (sorted_means[0] + sorted_means[1]) / 2
+                print(f'Split point: {split_point}')
                 
             except ValueError:
                 print (f'K-means failed')
@@ -634,32 +645,38 @@ class overlap_reduction():
             merged_df = merged_df[merged_df['in_bout'] == True]
             
             # Step 3: Convert string columns to object-type strings (which are compatible with HDFStore)
-            merged_df['freq_code'] = merged_df['freq_code'].astype(str)
-            merged_df['rec_id'] = merged_df['rec_id'].astype(str)
-            merged_df = merged_df.repartition(npartitions=20)
-            # Step 4: Write to HDFStore in chunks without calling .compute()
-            # Loop through partitions with a counter
+            # Ensure 'freq_code' and 'rec_id' are converted to object type for compatibility with HDF5
+            merged_df['freq_code'] = merged_df['freq_code'].astype('object')
+            merged_df['rec_id'] = merged_df['rec_id'].astype('object')
+            
+            # Repartition the DataFrame to reduce memory pressure
+            merged_df = merged_df.repartition(npartitions=300)
+            
+            # Keep only necessary columns before writing
+            merged_df = merged_df[['freq_code', 'epoch', 'time_stamp', 'rec_id', 'in_bout', 'overlapping']]
+            
+            # Write each partition to HDF5
             for i, partition in enumerate(merged_df.partitions):
-                # Compute the partition
+                # Compute partition to bring it into memory
                 partition_df = partition.compute()
             
-                # Convert StringDtype columns to object dtype for HDF5 compatibility
-                partition_df['freq_code'] = partition_df['freq_code'].astype(str)
-                partition_df['rec_id'] = partition_df['rec_id'].astype(str)
+                # Ensure object types for string columns to avoid 'itemsize' issues
+                partition_df['freq_code'] = partition_df['freq_code'].astype('object')
+                partition_df['rec_id'] = partition_df['rec_id'].astype('object')
             
-                # Open HDF5 file, write the partition, then close it to avoid conflict
+                # Write the partition to HDF5 using 'min_itemsize' for string columns
                 with pd.HDFStore(self.project.db, mode='a') as store:
                     store.append(
                         key='overlapping',
                         value=partition_df,
-                        format='table',
+                        format='table',    # Allows appendable HDF5 format
                         index=False,
-                        min_itemsize={'freq_code': 20, 'rec_id': 20},  # Adjust itemsize based on your needs
-                        data_columns=True
+                        min_itemsize={'freq_code': 20, 'rec_id': 20},  # Ensure sufficient size for string columns
+                        data_columns=True  # Enable querying on these columns
                     )
-                
-                # Print progress
-                print(f"Partition {i+1} written to HDF5.")
+            
+                print(f"Partition {i + 1} written to HDF5.")
+
                 
     def _plot_kmeans_results(self, combined, centers, fish_id, node_a, node_b, project_dir):
         """
