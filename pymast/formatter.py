@@ -518,13 +518,13 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
             release_dat['presence_number'] = np.zeros(len(release_dat))
             
             
-            # filter out tag data we don't want mucking up our staistical model
-            if species != None:
-                release_dat = release_dat[release_dat.Species == species]
-            if rel_loc != None:
-                release_dat = release_dat[release_dat.RelLoc == rel_loc]
-            if cap_loc != None:
-                release_dat = release_dat[release_dat.CapLoc == cap_loc]
+            # # filter out tag data we don't want mucking up our staistical model
+            # if species != None:
+            #     release_dat = release_dat[release_dat.Species == species]
+            # if rel_loc != None:
+            #     release_dat = release_dat[release_dat.RelLoc == rel_loc]
+            # if cap_loc != None:
+            #     release_dat = release_dat[release_dat.CapLoc == cap_loc]
                 
             release_dat.reset_index(inplace = True)
             

@@ -492,57 +492,84 @@ class radio_project():
                                           'rec_type':20,
                                           'rec_id':20})  
         
-    def create_training_data(self, rec_type, reclass_iter = None, rec_list = None):
-        '''Function creates training dataset for current round of classification -
-        if we only do this once, this time suck goes away'''
+    def create_training_data(self, rec_type=None, reclass_iter=None, rec_list=None):
+        """
+        Function to create a training dataset for the current round of classification.
+        The function supports multiple pathways for generating training data, including 
+        using a receiver list (rec_list) and incorporating reclassification methods.
     
-        #get training data
-        '''
-        Reclassification code contributed by T Castro-Santos
-        '''
-        # get training data and restrict it to the receiver type - we can't have orion's diagnose srx800's now can we?
-        train_dat = pd.read_hdf(self.db,
-                                'trained', 
-                                where = f'rec_type == "{rec_type}"')
-        
-        # then if we are further restricting to a subset of that receiver type
-        if rec_list != None:
-            train_dat = train_dat[train_dat['rec_id'].isin(rec_list)] 
-   
-            # if this is not the first classification - we need known falses from training and assumed true from last classification
-            if reclass_iter != None:
-                last_class = reclass_iter - 1
-                
-                class_dat = pd.read_hdf(self.db, 
-                                        'classified', 
-                                        where = f'iter == "{last_class}"')
-                
-                class_dat = class_dat[class_dat['rec_id'].isin(rec_list)]
-                class_dat = class_dat[class_dat.iter == last_class]
-                
-                columns = ['test', 'freq_code','power','noise_ratio','lag', 'lag_diff', 
-                           'cons_length','cons_det','det_hist','hit_ratio','rec_type','epoch']
-                
-                class_dat = class_dat[columns]
-                
-                class_dat.rename(columns = {'test':'detection'},
-                                 inplace = True)
-        
-                train_dat = train_dat[train_dat.detection==0]
-                class_dat = class_dat[class_dat.detection==1]
+        Parameters
+        ----------
+        rec_type : str, optional
+            The type of receiver to filter the data by. This restricts the training data 
+            to a specific receiver type (e.g., 'orion', 'srx800'). If not provided and 
+            `rec_list` is used, it is ignored.
+        reclass_iter : int, optional
+            Iteration number for reclassification. If provided, the function pulls the 
+            previous classification data and incorporates known false positives and 
+            assumed true positives.
+        rec_list : list of str, optional
+            A list of receiver IDs to filter the data by. If provided, the function 
+            queries the HDF database using this list directly rather than the receiver 
+            type (`rec_type`).
     
-                #Next we append the classdf to the traindf
-                train_dat = train_dat.append(class_dat)
+        Returns
+        -------
+        pandas.DataFrame
+            A DataFrame containing the training data for the classification process, 
+            incorporating any previous classifications if applicable.
+    
+        Notes
+        -----
+        - If both `rec_type` and `rec_list` are provided, the function will prioritize 
+          the `rec_list` to restrict the training data.
+        - Reclassification logic is based on contributions from T. Castro-Santos.
+        """
+        if rec_list is not None:
+            # Construct the query for multiple receiver IDs using the OR operator
+            rec_query = ' | '.join([f'rec_id == "{rec_id}"' for rec_id in rec_list])
+            train_dat = pd.read_hdf(self.db, 'trained', where=rec_query)
+        elif rec_type is not None:
+            # Query based on receiver type directly
+            train_dat = pd.read_hdf(self.db, 'trained', where=f'rec_type == "{rec_type}"')
+        else:
+            raise ValueError("Either 'rec_type' or 'rec_list' must be provided to create training data.")
+    
+        # Handling reclassification if this is not the first iteration
+        if reclass_iter is not None:
+            last_class = reclass_iter - 1
+            
+            # Load the classified dataset and filter by iteration
+            class_dat = pd.read_hdf(self.db, 'classified', where=f'iter == {last_class}')
+            
+            # Further restrict classified data to the receiver list if rec_list is provided
+            if rec_list is not None:
+                class_query = ' | '.join([f'rec_id == "{rec_id}"' for rec_id in rec_list])
+                class_dat = class_dat.query(class_query)
+            
+            # Selecting relevant columns for the training dataset
+            columns = ['test', 'freq_code', 'power', 'noise_ratio', 'lag', 
+                       'lag_diff', 'cons_length', 'cons_det', 'det_hist', 
+                       'hit_ratio', 'rec_type', 'epoch']
+            
+            class_dat = class_dat[columns]
+            class_dat.rename(columns={'test': 'detection'}, inplace=True)
+            
+            # Separate known falses (train_dat) and assumed trues (class_dat)
+            train_dat = train_dat[train_dat['detection'] == 0]
+            class_dat = class_dat[class_dat['detection'] == 1]
+    
+            # Append the classified data to the training data
+            train_dat = pd.concat([train_dat, class_dat], ignore_index=True)
     
         return train_dat
+
+
+
     
-    def reclassify(self, project, rec_id, rec_type, threshold_ratio, likelihood_model):
+    def reclassify(self, project, rec_id, threshold_ratio, likelihood_model, rec_type=None, rec_list=None):
         """
         Reclassifies fish in a project based on user-defined criteria and threshold ratios.
-    
-        This function iteratively reclassifies fish in a given project. It allows the user to
-        specify a project, a record identifier, the type of record, and a threshold ratio for
-        classification. The process continues until the user decides to stop.
     
         Parameters
         ----------
@@ -550,52 +577,26 @@ class radio_project():
             The project object that contains methods for managing and classifying fish data.
             
         rec_id : int or str
-            The unique identifier for the reciever to be reclassified.
-            
-        rec_type : str
-            The type of receiver being processed (e.g., 'srx1200', 'orion').
+            The unique identifier for the receiver to be reclassified.
             
         threshold_ratio : float
             The threshold ratio used for determining classification criteria.
             
-        Attributes
-        ----------
-        class_iter : int, optional
-            An iteration counter for the classification process, initially set to None.
+        likelihood_model : list of str
+            The fields to use as the likelihood model for classification.
             
-        Methods
-        -------
-        project.get_fish(rec_id, train, reclass_iter)
-            Retrieves a list of fish based on the record identifier and iteration parameters.
+        rec_type : str, optional
+            The type of receiver being processed (e.g., 'srx1200', 'orion').
             
-        project.create_training_data(rec_type, class_iter)
-            Generates the training data needed for classification based on the record type and
-            iteration counter.
-            
-        project.classify(fish, rec_id, fields, training_data, class_iter, threshold_ratio)
-            Classifies each fish based on the specified parameters and training data.
-            
-        project.classification_summary(rec_id, class_iter)
-            Generates a summary of the classification results for the given record identifier
-            and iteration.
-            
-        plt.show(block)
-            Displays figures and blocks execution until they are closed.
+        rec_list : list of str, optional
+            A list of receiver IDs to filter the data by, used for creating training data.
     
         Notes
         -----
         - The classification process involves interactive user input to determine if additional
           iterations are needed.
-        - The function utilizes several project methods to handle fish data retrieval, training
-          data generation, classification, and summary generation.
         - The fields used for classification are hardcoded as ['hit_ratio', 'cons_length',
           'noise_ratio', 'power', 'lag_diff'].
-    
-        Examples
-        --------
-        >>> project = Project()
-        >>> reclassify(project, rec_id=123, rec_type='species', threshold_ratio=0.75)
-    
         """
         class_iter = None
         
@@ -604,8 +605,8 @@ class radio_project():
             fishes = project.get_fish(rec_id=rec_id, train=False, reclass_iter=class_iter)
             
             # Generate training data for the classifier
-            training_data = project.create_training_data(rec_type, class_iter)
-            
+            training_data = project.create_training_data(rec_type=rec_type, reclass_iter=class_iter, rec_list=rec_list)
+    
             # Iterate over fish and classify
             for fish in fishes:
                 project.classify(fish, rec_id, likelihood_model, training_data, class_iter, threshold_ratio)
@@ -631,6 +632,7 @@ class radio_project():
                 break
             else:
                 print("Invalid input. Please enter 'yes' or 'no'.")
+
 
     def classify(self,
                  freq_code,
