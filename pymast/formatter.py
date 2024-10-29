@@ -377,8 +377,9 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
                  initial_state_release = False, 
                  last_presence_time0 = False, 
                  cap_loc = None,
-                 rel_loc = None, 
-                 species = None):
+                 rel_loc = None,
+                 species = None,
+                 rel_date = None):
         # Import Data From Project HDF
         self.rel_loc = rel_loc
         self.cap_loc = cap_loc
@@ -412,10 +413,10 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
                                    right_index = True)
         
         self.recap_data = self.recap_data[self.recap_data.overlapping == 0]
+        self.recap_data['rel_date'] = pd.to_datetime(self.recap_data.rel_date)
         
         self.recap_data.drop(columns = ['pulse_rate',
                                         'tag_type',
-                                        'rel_date',
                                         'length'],
                              axis = 'columns',
                              inplace = True)
@@ -427,7 +428,10 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
             self.recap_data = self.recap_data[self.recap_data.rel_loc == rel_loc]
         if cap_loc != None:
             self.recap_data = self.recap_data[self.recap_data.cap_loc == cap_loc]
+        if rel_date != None:
+            self.recap_data = self.recap_data[self.recap_data.rel_date >= pd.to_datetime(rel_date)]
 
+        
         self.recap_data['state'] = self.recap_data.rec_id.map(receiver_to_state)
         self.recap_data.reset_index(inplace = True)
 
