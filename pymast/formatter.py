@@ -383,7 +383,8 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
         # Import Data From Project HDF
         self.rel_loc = rel_loc
         self.cap_loc = cap_loc
-
+        
+        self.initial_state_release = initial_state_release
         # get recaptures, but first build a query
         query_parts = []
         for key in receiver_to_state:
@@ -583,7 +584,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
     
         # Initialize state tracking columns
         self.recap_data['prev_state'] = self.recap_data.groupby('freq_code')['state'].shift(1).fillna(0).astype(int)
-    
+        self.recap_data = self.recap_data[self.recap_data.prev_state > 0]
         # Set time_0 to the previous epoch or first_recapture if it's the first observation
         self.recap_data['time_0'] = self.recap_data.groupby('freq_code')['epoch'].shift(1)
         self.recap_data['time_0'].fillna(self.recap_data['first_recapture'], inplace=True)
@@ -599,18 +600,19 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
         state_table = self.recap_data[mask].copy()
     
         # Fill in the remaining columns
-        state_table['start_state'] = state_table['prev_state']
-        state_table['end_state'] = state_table['state']
+        state_table['start_state'] = state_table['prev_state'].astype('int32')
+        state_table['end_state'] = state_table['state'].astype('int32')
         state_table['presence'] = state_table.groupby('freq_code').cumcount()
         state_table['first_obs'] = fish_start_mask.astype(int)
         state_table['time_1'] = state_table['epoch']
     
         # Create the 'transition' column by zipping 'start_state' and 'end_state'
-        state_table['transition'] = list(zip(state_table['start_state'], state_table['end_state']))
+        state_table['transition'] = list(zip(state_table['start_state'].astype('int32'), state_table['end_state'].astype('int32')))
     
         # Add flow period for time-dependent variables
         state_table['flow_period'] = state_table['time_stamp'].dt.round('30min')
     
+        
         # Write state table to master state table
         self.master_state_table = pd.concat([self.master_state_table, state_table[columns]], axis=0, ignore_index=True)
 
@@ -660,6 +662,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
 
                             # do some data management, we need to take the start state and t0 of the affected rows and place them on the subsequent row
                             idx = fish_dat.index[fish_dat['transition_filter']==1]
+                            time0 = fish_dat.iloc[0]['time_0']
 
                             for k in idx:
                                 idx_int = fish_dat.index.get_loc(k)
@@ -685,6 +688,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
 
                             # remove those rows
                             fish_dat = fish_dat[fish_dat.transition_filter != 1]
+                            fish_dat.time_0 = time0
 
                             # create a new transition field
                             fish_dat['transition'] = tuple(zip(fish_dat.start_state.values.astype(int),
@@ -722,7 +726,9 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
 
                 fish_dat.drop(labels = ['transition_filter'], axis = 1, inplace = True)
                 filtered = pd.concat([filtered, fish_dat])
-            
+            if self.initial_state_release == False:
+                self.master_state_table 
+
             self.master_state_table = filtered
             
         #self.master_stateTable = self.master_stateTable[self.master_stateTable.firstObs == 0]
@@ -731,18 +737,40 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
     # generate summary statistics
     def summary(self, print_summary = True):
         """Prepare the data needed for summarization."""
-        self.master_state_table['transition'] = self.master_state_table['transition'].astype(str)
+        self.master_state_table = self.master_state_table.astype({'freq_code':'object',
+                                                                  'start_state':'int32',
+                                                                  'end_state':'int32',
+                                                                  'presence':'int32',
+                                                                  'time_stamp':'datetime64[ns]',
+                                                                  'time_delta':'int32',
+                                                                  'first_obs':'int32',
+                                                                  'time_0':'int32',
+                                                                  'time_1':'int32',
+                                                                  'transition':'object'})
+                                                                  
         self.master_state_table['dur'] = (
             self.master_state_table['time_1'].astype('int32') - 
             self.master_state_table['time_0'].astype('int32')
         )
+        
         self.unique_fish_count = len(self.master_state_table['freq_code'].unique())
         self.count_per_state = self.master_state_table.groupby('end_state')['freq_code'].nunique()
         self.msm_state_table = pd.crosstab(self.master_state_table['start_state'], self.master_state_table['end_state'])
-        self.count_table = self.master_state_table.groupby(['start_state', 'end_state'])['freq_code'].nunique().unstack().fillna(0)
+        self.count_table = self.master_state_table.groupby(['start_state', 'end_state'])['freq_code'].nunique().unstack().fillna(0).astype('int32')
         self.fish_trans_count = self.master_state_table.groupby(['freq_code', 'transition']).size().unstack(fill_value=0)
-        self.move_summ = self.master_state_table.groupby('transition')['dur'].describe().round(3)
-
+        
+        grouped_stats = (
+            self.master_state_table
+            .groupby('transition')
+            .agg({
+                'dur': [
+                    'min',
+                    'median',
+                    'max'
+                ]
+            })
+        )
+        self.move_summ = grouped_stats
   
         """Generate summary statistics as a dictionary."""
         min_trans_count = self.fish_trans_count.min()

@@ -705,7 +705,8 @@ class overlap_reduction:
         self.project = radio_project
         self.nodes = nodes
         self.edges = edges
-        
+        self.G = nx.DiGraph()
+        self.G.add_edges_from(edges)
         # Initialize dictionaries for presence and recapture data
         self.node_pres_dict = {}
         self.node_recap_dict = {}
@@ -823,6 +824,66 @@ class overlap_reduction:
             del parent_bouts, parent_dat, child_dat
             gc.collect()
 
+    def nested_doll(self):
+        """
+        Identify and mark overlapping detections between parent and child nodes.
+        """
+        overlaps_found = False
+        overlap_count = 0
+        
+        for i in self.node_recap_dict:
+            fishes = self.node_recap_dict[i].freq_code.unique()
+
+            for j in fishes:
+                children = list(self.G.successors(i))
+                fish_dat = self.node_recap_dict[i][self.node_recap_dict[i].freq_code == j]
+                fish_dat = np.repeat(i,len(fish_dat))
+                fish_dat['overlapping'] = 0
+                fish_dat['parent'] = ''
+
+                if len(children) > 0:
+                    for k in children:
+                        child_dat = self.node_pres_dict[k][self.node_pres_dict[k].freq_code == j]
+                        if len(child_dat) > 0:
+                            min_epochs = child_dat.min_epoch.values
+                            max_epochs = child_dat.max_epoch.values
+                            
+                            fish_epochs = fish_dat.epoch.values
+                            overlaps = np.any(
+                                (min_epochs[:, None] <= fish_epochs) & (max_epochs[:, None] > fish_epochs), axis=0
+                            )
+                            overlap_indices = np.where(overlaps)[0]
+                            if overlap_indices.size > 0:
+                                overlaps_found = True
+                                overlap_count += overlap_indices.size
+                                fish_dat.loc[overlaps, 'overlapping'] = 1
+                                fish_dat.loc[overlaps, 'parent'] = i
+
+                fish_dat = fish_dat.astype({
+                    'freq_code': 'object',
+                    'epoch': 'int32',
+                    'rec_id': 'object',
+                    'node': 'object',
+                    'overlapping': 'int32',
+                    'parent': 'object'
+                })
+
+                with pd.HDFStore(self.db, mode='a') as store:
+                    store.append(key='overlapping',
+                                  value=fish_dat,
+                                  format='table',
+                                  index=False,
+                                  min_itemsize={'freq_code': 20,
+                                                'rec_id': 20,
+                                                'parent': 20},
+                                  append=True,
+                                  data_columns=True,
+                                  chunksize=1000000)
+
+        if overlaps_found:
+            print(f"Overlaps were found and processed. Total number of overlaps: {overlap_count}.")
+        else:
+            print("No overlaps were found.")
 
     def write_results_to_hdf5(self, df):
         """
