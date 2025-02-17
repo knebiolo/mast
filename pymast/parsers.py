@@ -1268,5 +1268,312 @@ def srx600(file_name,
     
     
     
+def PIT(file_name,
+        db_dir,
+        rec_id,
+        study_tags,
+        skiprows=6,
+        scan_time=0,
+        channels=0,
+        rec_type="PIT_Array",
+        ant_to_rec_dict=None):
     
+    import pandas as pd
+    
+    # Open the file and read through the header/metadata lines.
+    with open(file_name, 'r') as file:
+        header_lines = []
+        for _ in range(skiprows):
+            header_lines.append(file.readline().rstrip('\n'))
+        # Combine header lines for searching (lowercased)
+        header_text = " ".join(header_lines).lower()
+    
+    # Define colspecs and column names for group1 (when latitude/longitude are present).
+    colspecs_group1 = [
+        (0, 12),    # Scan Date 
+        (12, 26),   # Scan Time
+        (26, 41),   # Download Date 
+        (41, 56),   # Download Time 
+        (56, 59),   # Reader ID 
+        (66, 70),   # Antenna ID (adjusted: now 6 characters instead of 12)
+        (79, 95),   # HEX Tag ID (14 characters; may need adjustment)
+        (95, 112),  # DEC Tag ID (adjusted accordingly)
+        (113, 120), # Temperature (C) (adjust if needed)
+        (120, 131), # Signal (mV)
+        (138, 145), # Is Duplicate
+        (145, 155), # Latitude
+        (155, 166), # Longitude
+        (166, 175)  # File Name
+    ]
+    
+    col_names_group1 = [
+        "Scan Date",
+        "Scan Time",
+        "Download Date",
+        "Download Time",
+        "Reader ID",
+        "Antenna ID",
+        "HEX Tag ID",
+        "DEC Tag ID",
+        "Temperature_C",
+        "Signal_mV",
+        "Is Duplicate",
+        "Latitude",
+        "Longitude",
+        "File Name"
+    ]
+    
+    # Define colspecs and column names for group2 (when latitude/longitude are not present).
+    colspecs_group2 = [
+        (0, 12),    # Scan Date 
+        (12, 26),   # Scan Time
+        (26, 41),   # Download Date 
+        (41, 56),   # Download Time 
+        (56, 62),   # S/N 
+        (62, 73),   # Reader ID 
+        (73, 89),   # HEX Tag ID 
+        (89, 107),  # DEC Tag ID 
+        (107, 122), # Temperature (C) 
+        (122, 132), # Signal (mV) 
+        (136, 136), # Is Duplicate 
+    ]
+    
+    col_names_group2 = [
+        "Scan Date",
+        "Scan Time",
+        "Download Date",
+        "Download Time",
+        "S/N",
+        "Reader ID",
+        "HEX Tag ID",
+        "DEC Tag ID",
+        "Temperature_C",
+        "Signal_mV",
+        "Is Duplicate"
+    ]
+    
+    # Determine which colspecs to use:
+    if 'latitude' in header_text or 'longitude' in header_text:
+        colspecs = colspecs_group1
+        col_names = col_names_group1
+        print("Using colspecs_group1:")
+        print(colspecs_group1)
+    else:
+        colspecs = colspecs_group2
+        col_names = col_names_group2
+        print("Using colspecs_group2:")
+        print(colspecs_group2)
+    
+    # ------------------------------------------------------------------
+    # Debug: Print out field slices from a sample data line.
+    with open(file_name, 'r') as file:
+        # Skip the header/metadata lines.
+        for _ in range(skiprows):
+            file.readline()
+        sample_line = file.readline()
+    
+    print("\nSample data line:")
+    print(repr(sample_line))
+    print("\nField slices from the sample line:")
+    for (start, end), header in zip(colspecs, col_names):
+        field_slice = sample_line[start:end]
+        print(f"{header:15s}: slice {start:3d}-{end:3d} -> {repr(field_slice)}")
+    
+    # Additionally, print HEX Tag details if present.
+    if "HEX Tag ID" in col_names:
+        hex_index = col_names.index("HEX Tag ID")
+        hex_start, hex_end = colspecs[hex_index]
+        hex_tag_raw = sample_line[hex_start:hex_end]
+        hex_tag_stripped = hex_tag_raw.strip()
+        print("\nHEX Tag details:")
+        print(f"Raw HEX Tag (slice {hex_start}-{hex_end}): {repr(hex_tag_raw)}")
+        print(f"Stripped HEX Tag: {repr(hex_tag_stripped)}")
+    # ------------------------------------------------------------------
+    
+    # Read the file fully using the fixed-width format settings.
+    telem_dat = pd.read_fwf(
+        file_name,
+        colspecs=colspecs,
+        names=col_names,
+        skiprows=skiprows
+    )
+    
+    print("\nDataFrame preview (HEX Tag and DEC Tag):")
+    if "HEX Tag ID" in telem_dat.columns and "DEC Tag ID" in telem_dat.columns:
+        print(telem_dat[['HEX Tag ID', 'DEC Tag ID']].head())
+    
+    print("\nDataFrame shape:", telem_dat.shape)
+    print(telem_dat.head())
+    
+    # Build a datetime from Scan Date + Scan Time.
+    telem_dat["time_stamp"] = pd.to_datetime(
+        telem_dat["Scan Date"] + " " + telem_dat["Scan Time"],
+        errors="coerce"
+    )
+    
+    # Use HEX Tag ID as freq_code (stripping extra whitespace).
+    telem_dat["freq_code"] = telem_dat["HEX Tag ID"].str.strip()
+    
+    # Fill columns we don't have in the file.
+    telem_dat["power"] = 0
+    telem_dat["scan_time"] = 0
+    telem_dat["channels"] = channels
+    telem_dat["noise_ratio"] = 0
+    
+    # Assign rec_type and rec_id.
+    telem_dat["rec_type"] = rec_type
+    telem_dat["rec_id"] = rec_id
+    
+    # Calculate epoch (seconds since 1970-01-01).
+    telem_dat["epoch"] = (
+        telem_dat["time_stamp"] - pd.Timestamp("1970-01-01")
+    ) / pd.Timedelta("1s")
+    
+    # Convert to desired dtypes.
+    telem_dat = telem_dat.astype({
+        "power": "float32",
+        "freq_code": "object",        
+        "time_stamp": "datetime64[ns]",
+        "scan_time": "float32",
+        "channels": "int32",
+        "rec_type": "object",
+        "epoch": "float32",
+        "noise_ratio": "float32",
+        "rec_id": "object"
+    })
+    
+    # Keep only the standardized columns in the final DataFrame.
+    telem_dat = telem_dat[[
+        "power",
+        "time_stamp",
+        "epoch",
+        "freq_code",
+        "noise_ratio",
+        "scan_time",
+        "channels",
+        "rec_id",
+        "rec_type"
+    ]]
+    
+    # Append to the HDF5 store.
+    with pd.HDFStore(db_dir, mode='a') as store:
+        store.append(
+            key="raw_data",
+            value=telem_dat,
+            format="table",
+            index=False,
+            min_itemsize={"freq_code": 20, "rec_type": 20, "rec_id": 20},
+            append=True,
+            chunksize=1000000,
+            data_columns=True
+        )
+    
+    print(f"\nSuccessfully parsed {file_name} and appended to {db_dir}!")
+    
+    with pd.HDFStore(db_dir, 'r') as store:
+        print("Store keys after append:", store.keys())
+
+
+
+
+
+
+def PIT_Multiple(
+    file_name,
+    db_dir,
+    study_tags=None,
+    skiprows=0,
+    scan_time=0,
+    channels=0,
+    rec_type="PIT_Multiple",
+    ant_to_rec_dict=None
+):
+    # Define column names based on the expected structure of the CSV
+    col_names = [
+        "FishId", "Tag1Dec", "Tag1Hex", "Tag2Dec", "Tag2Hex", "FloyTag", "RadioTag",
+        "Location", "Source", "FishSpecies", "TimeStamp", "Weight", "Length",
+        "Antennae", "Latitude", "Longitude", "SampleDate", "CaptureMethod",
+        "LocationDetail", "Type", "Recapture", "Sex", "GeneticSampleID", "Comments"
+    ]
+
+    # Read the CSV into a DataFrame, skipping rows if needed
+    telem_dat = pd.read_csv(file_name, names=col_names, header=0, skiprows=skiprows, dtype=str)
+
+    # Convert "TimeStamp" to datetime with explicit format
+    telem_dat["time_stamp"] = pd.to_datetime(telem_dat["TimeStamp"], format="%m/%d/%Y %H:%M", errors="coerce")
+
+    # Ensure "Tag1Dec" and "Tag1Hex" are treated as strings (avoid scientific notation issues)
+    telem_dat["Tag1Dec"] = telem_dat["Tag1Dec"].astype(str)
+    telem_dat["Tag1Hex"] = telem_dat["Tag1Hex"].astype(str)
+
+    # Use Tag1Hex as the frequency code, with stripping to remove spaces
+    telem_dat["freq_code"] = telem_dat["Tag1Hex"].str.strip()
+
+    # Mapping Antennae values to Receiver IDs (R0001, R0002, etc.)
+    antennae_to_rec_id = {
+        1: "R0001",
+        2: "R0002",
+        3: "R0003",
+        4: "R0004",
+        5: "R0005"
+    }
+    
+    # Convert Antennae column to integer and apply mapping
+    telem_dat["Antennae"] = telem_dat["Antennae"].astype(str).str.extract(r'(\d+)')  # Extract digits
+    telem_dat["Antennae"] = pd.to_numeric(telem_dat["Antennae"], errors='coerce').astype("Int64")  # Convert to int
+    telem_dat["rec_id"] = telem_dat["Antennae"].map(antennae_to_rec_id)  # Map to rec_id
+
+    # Drop rows where Antennae values do not match known receivers
+    telem_dat = telem_dat.dropna(subset=["rec_id"])
+
+    # Fill missing values in critical columns
+    telem_dat["power"] = 0.0
+    telem_dat["noise_ratio"] = 0.0
+    telem_dat["scan_time"] = scan_time
+    telem_dat["channels"] = channels
+    telem_dat["rec_type"] = rec_type
+
+    # Calculate epoch time
+    telem_dat["epoch"] = (
+        telem_dat["time_stamp"] - pd.Timestamp("1970-01-01")
+    ) / pd.Timedelta("1s")
+
+    # Convert data types to match standard format
+    telem_dat = telem_dat.astype({
+        "power": "float32",
+        "freq_code": "object",
+        "time_stamp": "datetime64[ns]",
+        "scan_time": "float32",
+        "channels": "int32",
+        "rec_type": "object",
+        "epoch": "float32",
+        "noise_ratio": "float32",
+        "rec_id": "object"
+    })
+
+    # Keep only necessary columns
+    telem_dat = telem_dat[
+        ["power", "time_stamp", "epoch", "freq_code", "noise_ratio",
+         "scan_time", "channels", "rec_id", "rec_type"]
+    ]
+
+
+    # Append to the HDF5 store
+    with pd.HDFStore(db_dir, mode='a') as store:
+        store.append(
+            key="raw_data",
+            value=telem_dat,
+            format="table",
+            index=False,
+            min_itemsize={"freq_code": 20, "rec_type": 20, "rec_id": 20},
+            append=True,
+            chunksize=1000000,
+            data_columns=True
+        )
+
+    print(f"Successfully parsed {file_name} and appended to {db_dir}!")
+
+    # (Optional) Check store keys
+    with pd.HDFStore(db_dir, 'r') as store:
+        print("Store keys after append:", store.keys()) 
     
