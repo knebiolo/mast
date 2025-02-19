@@ -59,7 +59,7 @@ class cjs_data_prep():
         
         # filter out tag data we don't want mucking up our staistical model
         if species != None:
-            self.recap_data = self.recap_data[self.recap_data.Species == species]
+            self.recap_data = self.recap_data[self.recap_data.species == species]
         if rel_loc != None:
             self.recap_data = self.recap_data[self.recap_data.RelLoc == rel_loc]
         if cap_loc != None:
@@ -379,7 +379,8 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
                  cap_loc = None,
                  rel_loc = None,
                  species = None,
-                 rel_date = None):
+                 rel_date = None,
+                 recap_date = None):
         # Import Data From Project HDF
         self.rel_loc = rel_loc
         self.cap_loc = cap_loc
@@ -431,6 +432,8 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
             self.recap_data = self.recap_data[self.recap_data.cap_loc == cap_loc]
         if rel_date != None:
             self.recap_data = self.recap_data[self.recap_data.rel_date >= pd.to_datetime(rel_date)]
+        if recap_date != None:
+            self.recap_data = self.recap_data[self.recap_data.time_stamp >= pd.to_datetime(recap_date)]
 
         
         self.recap_data['state'] = self.recap_data.rec_id.map(receiver_to_state)
@@ -501,6 +504,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
                 if i not in fish_at_start:
                     self.recap_data.drop(self.recap_data[self.recap_data.freq_code == i].index, 
                                         inplace = True)
+                    
         if initial_state_release == True:
             '''we are modeling movement from the initial release location rather
             than the initial location in our competing risks model.  This allows
@@ -523,13 +527,13 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
             release_dat['presence_number'] = np.zeros(len(release_dat))
             
             
-            # # filter out tag data we don't want mucking up our staistical model
-            # if species != None:
-            #     release_dat = release_dat[release_dat.Species == species]
-            # if rel_loc != None:
-            #     release_dat = release_dat[release_dat.RelLoc == rel_loc]
-            # if cap_loc != None:
-            #     release_dat = release_dat[release_dat.CapLoc == cap_loc]
+            # filter out tag data we don't want mucking up our staistical model
+            if species != None:
+                release_dat = release_dat[release_dat.species == species]
+            if rel_loc != None:
+                release_dat = release_dat[release_dat.rel_loc == rel_loc]
+            if cap_loc != None:
+                release_dat = release_dat[release_dat.cap_loc == cap_loc]
                 
             release_dat.reset_index(inplace = True)
             
@@ -572,13 +576,19 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
         # Sorting recap_data by freq_code and epoch for efficient processing
         self.recap_data.sort_values(by=['freq_code', 'epoch'], ascending=True, inplace=True)
     
-        # Merge start_times into recap_data based on freq_code
+        # if self.initial_state_release == True:
+        #     # Merge start_times into recap_data based on freq_code
+        #     self.recap_data = self.recap_data.merge(
+        #         self.start_times[['first_recapture']].reset_index(),
+        #         on='freq_code',
+        #         how='left'
+        #     )
+            
         self.recap_data = self.recap_data.merge(
             self.start_times[['first_recapture']].reset_index(),
             on='freq_code',
-            how='left'
-        )
-    
+            how='left')
+        
         # Create a boolean array to mark the start of a new fish
         fish_start_mask = self.recap_data['freq_code'] != self.recap_data['freq_code'].shift(1)
     
