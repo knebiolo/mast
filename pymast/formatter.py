@@ -594,7 +594,8 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
     
         # Initialize state tracking columns
         self.recap_data['prev_state'] = self.recap_data.groupby('freq_code')['state'].shift(1).fillna(0).astype(int)
-        self.recap_data = self.recap_data[self.recap_data.prev_state > 0]
+        if self.initial_state_release == False:
+            self.recap_data = self.recap_data[self.recap_data.prev_state > 0]
         # Set time_0 to the previous epoch or first_recapture if it's the first observation
         self.recap_data['time_0'] = self.recap_data.groupby('freq_code')['epoch'].shift(1)
         self.recap_data['time_0'].fillna(self.recap_data['first_recapture'], inplace=True)
