@@ -751,6 +751,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
     # generate summary statistics
     def summary(self, print_summary = True):
         """Prepare the data needed for summarization."""
+        self.master_state_table.dropna(subset = ['time_delta'],inplace = True)
         self.master_state_table = self.master_state_table.astype({'freq_code':'object',
                                                                   'start_state':'int32',
                                                                   'end_state':'int32',
