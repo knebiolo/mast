@@ -811,10 +811,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
         print("--------------------------------------- MOVEMENT SUMMARY STATISTICS -----------------------------------------\n")
         print(f"In total, there were {summary_stats['unique_fish_count']} unique fish within this competing risks model.\n")
         
-        print("The number of unique fish per state:")
-        print(summary_stats['count_per_state'], "\n")
-        
-        print("These fish made the following movements as enumerated in the state transition table:")
+        print(f"{summary_stats['count_per_state']} fish made the movements as enumerated in the state transition table:")
         print(summary_stats['state_transition_table'])
         print("The table should read movement from a row to a column.\n")
         
