@@ -613,6 +613,9 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
         # Fill in the remaining columns
         state_table['start_state'] = state_table['prev_state'].astype('int32')
         state_table['end_state'] = state_table['state'].astype('int32')
+        # drop duplicates 
+        state_table = state_table.drop_duplicates(subset=['time_0', 'end_state', 'start_state'])
+
         state_table['presence'] = state_table.groupby('freq_code').cumcount()
         state_table['first_obs'] = fish_start_mask.astype(int)
         state_table['time_1'] = state_table['epoch']
