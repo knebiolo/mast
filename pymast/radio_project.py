@@ -172,8 +172,16 @@ class radio_project():
                 
             elif rec_type == 'ares':
                 parsers.ares(f_dir,db_dir,rec_id, self.study_tags, scan_time = scan_time, channels = channels, ant_to_rec_dict = ant_to_rec_dict)
+            
+            elif rec_type == 'PIT':
+                parsers.PIT(f_dir,db_dir,rec_id, self.study_tags, scan_time = scan_time, channels = channels, ant_to_rec_dict = ant_to_rec_dict)
+                
+            elif rec_type == 'PIT_Multiple':
+                parsers.PIT_Multiple(f_dir,db_dir,rec_id, self.study_tags, scan_time = scan_time, channels = channels, ant_to_rec_dict = ant_to_rec_dict)
+            
             else:
                 print ("There currently is not an import routine created for this receiver type.  Please try again")
+
             
             print ("File %s imported"%(f))
         
@@ -1051,6 +1059,7 @@ class radio_project():
         if pit_study==False:
             # Convert release dates to datetime if not already done
             self.tags['rel_date'] = pd.to_datetime(self.tags['rel_date'])
+            tags_copy = self.tags.copy()
             for rec in self.receivers.index:
             #for rec in ['R14a','R14b']:
                 print(f'Processing receiver {rec}...')
@@ -1070,7 +1079,7 @@ class radio_project():
                 print(f"Length of rec_dat after initial load: {len(rec_dat)}")
     
                 # Merge with release dates to filter out data before release
-                rec_dat = rec_dat.merge(self.tags[['rel_date']], left_on='freq_code', right_index=True)
+                rec_dat = rec_dat.merge(tags_copy, left_on='freq_code', right_index=True)
                 rec_dat = rec_dat[rec_dat['time_stamp'] >= rec_dat['rel_date']]
                 print(f"Length of rec_dat after merging with release dates: {len(rec_dat)}")
     
@@ -1296,7 +1305,7 @@ class radio_project():
         if export:
             print("Exporting to CSV...")
             rec_data = dd.read_hdf(self.db, 'recaptures').compute()
-            rec_data.to_csv('recaptures.csv', index=False)
+            rec_data.to_csv(os.path.join(self.output_dir,'recaptures.csv'), index=False)
             print("Export completed.")
 
                 

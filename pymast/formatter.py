@@ -516,7 +516,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
             merge it to self.data'''
 
             # get data   
-            release_dat = project.tags
+            release_dat = project.tags.copy()
             
             # do some data management
             release_dat['rel_date'] = pd.to_datetime(release_dat.rel_date)
