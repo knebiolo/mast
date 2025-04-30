@@ -7,7 +7,7 @@ Created on Thu Nov 16 09:42:22 2023
 # import modules
 import os
 import sys
-sys.path.append(r"C:\Users\knebiolo\OneDrive - Kleinschmidt Associates, Inc\Software\mast\pymast")
+sys.path.append(r"C:\Users\EMuhlestein\OneDrive - Kleinschmidt Associates, Inc\Software\MAST\mast")
 from pymast.radio_project import radio_project
 from pymast import formatter as formatter
 import pymast
@@ -15,8 +15,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 #%% set up project
-project_dir = r"K:\Jobs\2819\005\Calcs\2024 Telemetry"
-db_name = 'nuyakuk_kpn'
+project_dir = r"C:\Users\EMuhlestein\Documents\Thompson\TEST"
+db_name = 'Thompson_Data_04292025'
 detection_count = 5
 duration = 1
 tag_data = pd.read_csv(os.path.join(project_dir,'tblMasterTag.csv'))
@@ -37,23 +37,23 @@ project = radio_project(project_dir,
 # ,presence,classified,trained
 
 #%%  import data
-# rec_id = 'T15'
-# rec_type = 'orion'
-# #TODO - remove these directory arguments - the project is smart
-# training_dir = os.path.join(project_dir,'Data','Training_Files')
-# db_dir = os.path.join(project_dir,'%s.h5'%(db_name))
-# scan_time = 1 #10.5        
-# channels = 1. #2
-# antenna_to_rec_dict = {'1':rec_id}
+rec_id = 'R2024'
+rec_type = 'PIT_Multiple'
+#TODO - remove these directory arguments - the project is smart
+training_dir = os.path.join(project_dir,'Data', 'Training_Files')
+db_dir = os.path.join(project_dir,'%s.h5'%(db_name))
+scan_time = 1 #10.5        
+channels = 1. #2
+antenna_to_rec_dict = {'1':rec_id}
 
-# project.telem_data_import(rec_id,
-#                           rec_type,
-#                           training_dir,
-#                           db_dir,
-#                           scan_time,
-#                           channels,
-#                           antenna_to_rec_dict,
-#                           True)
+project.telem_data_import(rec_id,
+                          rec_type,
+                          training_dir,
+                          db_dir,
+                          scan_time,
+                          channels,
+                          antenna_to_rec_dict,
+                          True)
 
 # # undo import
 # # project.undo_import(rec_id)
@@ -139,26 +139,42 @@ project = radio_project(project_dir,
 
 # #%% create a recaptures table
 # #project.undo_recaptures()
-# project.make_recaptures_table(export = True) 
+project.make_recaptures_table(export = True) 
 
 #%% create Time to Event Model
     
 # what is the Node to State relationship - use Python dictionary
 # node_to_state = {'T5':1,'T6':1,'T7':2,'T15':3,'T3':4}
-node_to_state = {'R01':1,'R02':1,'R03':5,'R04':5,'R10':2,'R12':2,
-                  'R13':3,'R14':3,'R14a':3,'R14b':3,'R15':4,'R16':4
-                }                   
+
+# # #Submersible vs ladder
+# node_to_state = {'R1696':1,'R1698':1,'R1699':1,'R1695':1, 'R0004': 2, 'R0005':2,'R0001':2,
+#                   'R0002':2,'R0003':2
+#                 }   
+
+# # #Entering/exiting ladder
+# node_to_state = {'R1696':1, 'R1698': 1, 'R0004': 2, 'R0005':2
+#                 } 
+
+# #Full arrays
+node_to_state = {'R1696':1,'R1698':2,'R1699':2,'R1695':4, 'R0004': 5, 'R0005':5,'R0001':6,
+                  'R0002':7,'R0003':8
+                }
+
+# #Submersible split vs ladder
+# node_to_state = {'R1696':1,'R1698':2,'R1699':3,'R1695':4, 'R0004': 5, 'R0005':5,'R0001':5,
+#                   'R0002':5,'R0003':5
+#                 }                 
 
 # Step 1, create time to event data class 
 tte = formatter.time_to_event(node_to_state,
                               project,
-                              initial_state_release = True,
+                              initial_state_release = False,
                               last_presence_time0 = False,
                               cap_loc = None,
                               rel_loc = None,
-                              species = 'Sockeye',
-                              rel_date = '2024-01-01',
-                              recap_date = '2024-01-01')
+                              species = None,
+                              rel_date = None,
+                              recap_date = None)
 
 # Step 2, format data - without covariates
 tte.data_prep(project)#, 
@@ -168,6 +184,36 @@ tte.data_prep(project)#,
 # Step 3, generate a summary
 stats = tte.summary()
 tte.master_state_table.to_csv(os.path.join(project_dir,'Output','cabot_tailrace.csv'))
+
+
+
+
+
+
+
+#Print off dataframes of the Moement Summary, State Table, Tailrace Table
+# ensure Spyder prints every column
+pd.set_option('display.max_columns', None)
+pd.set_option('display.width', None)
+
+out = os.path.join(project_dir, "Output")
+df_movement_summary = pd.read_csv(os.path.join(out, "movement_summary.csv"))
+df_state_table      = pd.read_csv(os.path.join(out, "state table.csv"))
+df_tailrace         = pd.read_csv(os.path.join(out, "cabot_tailrace.csv"))
+
+# --- print to console ---
+print("=== Movement Summary ===")
+print(df_movement_summary, "\n")  
+
+print("=== State Table ===")
+print(df_state_table, "\n")
+
+print("=== Tailrace Table ===")
+# head(14) plus full‑column display:
+print(df_tailrace.head(14), "\n")
+
+
+
 
 # #%% create a Cormack-Jolly-Seber Mark Recapture model
 # # what is the output directory?

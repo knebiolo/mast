@@ -172,8 +172,15 @@ class radio_project():
                 
             elif rec_type == 'ares':
                 parsers.ares(f_dir,db_dir,rec_id, self.study_tags, scan_time = scan_time, channels = channels, ant_to_rec_dict = ant_to_rec_dict)
+                
+            elif rec_type == 'PIT':
+                parsers.PIT(f_dir,db_dir,rec_id, self.study_tags, scan_time = scan_time, channels = channels, ant_to_rec_dict = ant_to_rec_dict)
+                
+            elif rec_type == 'PIT_Multiple':
+                parsers.PIT_Multiple(f_dir,db_dir,rec_id, self.study_tags, scan_time = scan_time, channels = channels, ant_to_rec_dict = ant_to_rec_dict)
             else:
                 print ("There currently is not an import routine created for this receiver type.  Please try again")
+
             
             print ("File %s imported"%(f))
         
