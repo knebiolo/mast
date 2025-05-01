@@ -413,7 +413,9 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
                                    how = 'left',
                                    left_index = True,
                                    right_index = True)
-        
+        # remove any row where df['your_column'] is NaN
+        self.recap_data.dropna(subset=['rel_date'], inplace=True)
+
         self.recap_data = self.recap_data[self.recap_data.overlapping == 0]
         self.recap_data['rel_date'] = pd.to_datetime(self.recap_data.rel_date)
         
@@ -449,6 +451,9 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
                                                   'state':'int32'})
         
         print ("Unique states in Returned data:%s"%(self.recap_data.state.unique()))
+        
+        # identify unique fish to loop through
+        self.fish = self.recap_data.freq_code.unique()
 
         if last_presence_time0 == True:
             ''' sometimes when we are modeling downstream movement, it would be
@@ -534,16 +539,20 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
                 release_dat = release_dat[release_dat.rel_loc == rel_loc]
             if cap_loc != None:
                 release_dat = release_dat[release_dat.cap_loc == cap_loc]
+            if rel_date != None:
+                release_dat = release_dat[release_dat.time_stamp >= pd.to_datetime(rel_date)]
+            if recap_date != None:
+                release_dat = release_dat[release_dat.time_stamp >= pd.to_datetime(recap_date)]
                 
             release_dat.reset_index(inplace = True)
-            
+            release_dat = release_dat[release_dat['freq_code'].isin(self.fish)]
+
             # add to recaptures table and create a start times table
             self.recap_data = pd.concat([self.recap_data, release_dat], axis=0, ignore_index=True)
             self.start_times = release_dat[['freq_code','epoch']]
             self.start_times.rename(columns = {'epoch':'first_recapture'},
                                     inplace = True)
-            self.start_times.set_index('freq_code', inplace = True)
-            
+            self.start_times.set_index('freq_code', inplace = True) 
         else:
             # Identify first recapture times
             self.start_times = self.recap_data[self.recap_data.state == 1].\
@@ -558,9 +567,6 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
                 # we only care about movements from the initial sstate - this is a competing risks model
                 if fish not in self.start_times.index:
                     self.recap_data = self.recap_data[self.recap_data.freq_code != fish]
-
-        # identify unique fish to loop through
-        self.fish = self.recap_data.freq_code.unique()
 
     def data_prep(self, project, unknown_state=None, bucket_length_min=15, adjacency_filter=None):
         self.project = project
