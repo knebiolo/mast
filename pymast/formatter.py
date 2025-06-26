@@ -573,7 +573,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
         if unknown_state is not None:
             last_epoch = self.recap_data[self.recap_data.state == 1].epoch.max()
     
-        columns = ['freq_code', 'start_state', 'end_state', 'presence', 'time_stamp',
+        columns = ['freq_code','species', 'start_state', 'end_state', 'presence', 'time_stamp',
                    'time_delta', 'first_obs', 'time_0', 'time_1', 'transition']  # Include 'transition' here
     
         self.master_state_table = pd.DataFrame()
@@ -759,6 +759,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
         """Prepare the data needed for summarization."""
         self.master_state_table.dropna(subset = ['time_delta'],inplace = True)
         self.master_state_table = self.master_state_table.astype({'freq_code':'object',
+                                                                  'species':'object',
                                                                   'start_state':'int32',
                                                                   'end_state':'int32',
                                                                   'presence':'int32',
