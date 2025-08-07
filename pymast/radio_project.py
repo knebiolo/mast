@@ -25,6 +25,8 @@ font = {'family': 'serif','size': 6}
 rcParams['font.size'] = 6
 rcParams['font.family'] = 'serif'
 
+push = 'push'
+
 class radio_project():
     '''
     A class to manage and organize data and parameters for a Radio Telemetry project.
