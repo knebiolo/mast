@@ -1123,21 +1123,23 @@ class radio_project():
                         overlap_data = overlap_data[overlap_data['rec_id'] == rec].compute()
                         overlap_data = overlap_data[overlap_data['freq_code'].isin(self.tags[self.tags.tag_type=='study'].index)]
                         overlap_data = overlap_data.groupby(['freq_code', 'epoch', 'rec_id'])['overlapping'].max().reset_index()
-        
+                        print(f"Length of overlap_data: {len(overlap_data)}")
+
                     except KeyError:
                         print(f"WARNING: No overlap data found for receiver {rec}. Skipping overlap merge.")
                 else:
+                    
                     print(f"WARNING: 'overlapping' key not found in HDF5. Skipping overlap merge.")
     
                 # Merge with presence data
-                if not presence_data.empty:
+                if presence_exists:
                     rec_dat = rec_dat.merge(presence_data, on=['freq_code', 'epoch', 'rec_id'], how='left')
                     rec_dat['bout_no'] = rec_dat['bout_no'].fillna(0).astype(int)
                 else:
                     rec_dat['bout_no'] = 0
     
                 # Merge with overlap data
-                if not overlap_data.empty:
+                if overlap_exists:
                     rec_dat = rec_dat.merge(overlap_data, on=['freq_code', 'epoch', 'rec_id'], how='left')
                     rec_dat['overlapping'] = rec_dat['overlapping'].fillna(0).astype(int)
                 else:
