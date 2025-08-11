@@ -1056,7 +1056,7 @@ class radio_project():
                           data_columns=True, 
                           append = False)   
 
-    def make_recaptures_table(self, export=True, pit_study=True):
+    def make_recaptures_table(self, export=True, pit_study=False):
         '''Creates a recaptures key in the HDF5 file, iterating over receivers to manage memory.'''
         if pit_study==False:
             # Convert release dates to datetime if not already done
@@ -1095,32 +1095,39 @@ class radio_project():
                 rec_dat = rec_dat[rec_dat['test'] == 1]
                 #print(f"Columns in rec_dat after filtering by iter and test: {rec_dat.columns}")
                 print(f"Length of rec_dat after filtering by iter and test: {len(rec_dat)}")
-    
-                # Read presence data
-                try:
-                    presence_data = dd.read_hdf(self.db, key='presence')
-                    presence_data = presence_data[presence_data['rec_id'] == rec].compute()
-                    presence_data = presence_data[presence_data['freq_code'].isin(self.tags[self.tags.tag_type == 'study'].index)]
-                    presence_data = presence_data[['freq_code','epoch','rec_id','bout_no']]
-                    #print(f"Columns in presence_data: {presence_data.columns}")
-                    print(f"Length of presence_data: {len(presence_data)}")
-                except KeyError:
-                    presence_data = pd.DataFrame()
-                    print("No presence data found for this receiver.")
+
+                # Check if 'presence' exists before trying to read it
+                with pd.HDFStore(self.db, mode='r') as store:
+                    presence_exists = 'presence' in store.keys()
+                    
+                if presence_exists:
+                    try:
+                        presence_data = dd.read_hdf(self.db, key='presence')
+                        presence_data = presence_data[presence_data['rec_id'] == rec].compute()
+                        presence_data = presence_data[presence_data['freq_code'].isin(self.tags[self.tags.tag_type=='study'].index)]
+                        presence_data = presence_data[['freq_code', 'epoch', 'rec_id', 'bout_no']]
+                        print(f"Length of presence_data: {len(presence_data)}")
+
+                    except KeyError:
+                        print(f"WARNING: No presence data found for receiver {rec}. Skipping presence merge.")
+                else:
+                    print(f"WARNING: 'presence' key not found in HDF5. Skipping presence merge.")                    
     
                 # Read overlap data
-                try:
-                    overlap_data = dd.read_hdf(self.db, key='overlapping')
-                    overlap_data = overlap_data[overlap_data['rec_id'] == rec].compute()
-                    overlap_data = overlap_data[overlap_data['freq_code'].isin(self.tags[self.tags.tag_type == 'study'].index)]
-                    grp_ovlp = overlap_data.groupby(['freq_code','epoch','rec_id'])['overlapping'].max()
-                    overlap_data = grp_ovlp.to_frame().reset_index()
-    
-                    #print(f"Columns in overlap_data: {overlap_data.columns}")
-                    print(f"Length of overlap_data: {len(overlap_data)}")
-                except KeyError:
-                    overlap_data = pd.DataFrame()
-                    print("No overlap data found for this receiver.")
+                with pd.HDFStore(self.db, mode='r') as store:
+                    overlap_exists = 'overlapping' in store.keys()
+        
+                if overlap_exists:
+                    try:
+                        overlap_data = dd.read_hdf(self.db, key='overlapping')
+                        overlap_data = overlap_data[overlap_data['rec_id'] == rec].compute()
+                        overlap_data = overlap_data[overlap_data['freq_code'].isin(self.tags[self.tags.tag_type=='study'].index)]
+                        overlap_data = overlap_data.groupby(['freq_code', 'epoch', 'rec_id'])['overlapping'].max().reset_index()
+        
+                    except KeyError:
+                        print(f"WARNING: No overlap data found for receiver {rec}. Skipping overlap merge.")
+                else:
+                    print(f"WARNING: 'overlapping' key not found in HDF5. Skipping overlap merge.")
     
                 # Merge with presence data
                 if not presence_data.empty:
