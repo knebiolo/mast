@@ -426,7 +426,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
                              inplace = True)
         
         if "species" not in self.recap_data.columns:
-            self.recap_data.columns["species"] = np.nan  # or any default value you want
+            self.recap_data["species"] = np.nan  # or any default value you want
             print ("Species Column Not In Recap Data, defaulting to Nan")
         
         # filter out tag data we don't want mucking up our staistical model
