@@ -837,7 +837,7 @@ class overlap_reduction:
             for j in fishes:
                 children = list(self.G.successors(i))
                 fish_dat = self.node_recap_dict[i][self.node_recap_dict[i].freq_code == j]
-                #fish_dat = np.repeat(i,len(fish_dat))
+                fish_dat['node'] = np.repeat(i,len(fish_dat))
                 fish_dat['overlapping'] = 0
                 fish_dat['parent'] = ''
 
