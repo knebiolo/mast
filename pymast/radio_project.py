@@ -1097,14 +1097,17 @@ class radio_project():
                 print(f"Length of rec_dat after filtering by iter and test: {len(rec_dat)}")
 
                 # Check if 'presence' exists before trying to read it
-                with pd.HDFStore(self.db, mode='r') as store:
-                    presence_exists = 'presence' in store.keys()
+                presence_data = dd.read_hdf(self.db, key='presence')
+                
+                if len(presence_data) > 0:
+                    presence_exists = True
+                else:
+                    presence_exists = False
                     
                 if presence_exists:
                     try:
-                        presence_data = dd.read_hdf(self.db, key='presence')
                         presence_data = presence_data[presence_data['rec_id'] == rec].compute()
-                        #presence_data = presence_data[presence_data['freq_code'].isin(self.tags[self.tags.tag_type=='study'].index)]
+                        presence_data = presence_data[presence_data['freq_code'].isin(self.tags[self.tags.tag_type=='study'].index)]
                         presence_data = presence_data[['freq_code', 'epoch', 'rec_id', 'bout_no']]
                         print(f"Length of presence_data: {len(presence_data)}")
 
@@ -1114,14 +1117,17 @@ class radio_project():
                     print(f"WARNING: 'presence' key not found in HDF5. Skipping presence merge.")                    
     
                 # Read overlap data
-                with pd.HDFStore(self.db, mode='r') as store:
-                    overlap_exists = 'overlapping' in store.keys()
+                overlap_data = dd.read_hdf(self.db, key='overlapping')
+                
+                if len(overlap_data) > 0:
+                    overlap_exists = True
+                else:
+                    overlap_exists = False
         
                 if overlap_exists:
                     try:
-                        overlap_data = dd.read_hdf(self.db, key='overlapping')
                         overlap_data = overlap_data[overlap_data['rec_id'] == rec].compute()
-                        #overlap_data = overlap_data[overlap_data['freq_code'].isin(self.tags[self.tags.tag_type=='study'].index)]
+                        overlap_data = overlap_data[overlap_data['freq_code'].isin(self.tags[self.tags.tag_type=='study'].index)]
                         overlap_data = overlap_data.groupby(['freq_code', 'epoch', 'rec_id'])['overlapping'].max().reset_index()
                         print(f"Length of overlap_data: {len(overlap_data)}")
 
