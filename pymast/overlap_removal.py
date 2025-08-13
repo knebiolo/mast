@@ -736,6 +736,8 @@ class overlap_reduction:
                 max_epoch=('epoch', 'max'),
                 median_power=('power', 'median')
             ).reset_index()
+            
+            print (f"length of presence data {len(pres_data)}")
 
             # Store the processed data in the dictionaries
             self.node_pres_dict[node] = summarized_data

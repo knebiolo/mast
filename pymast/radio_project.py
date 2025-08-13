@@ -1104,7 +1104,7 @@ class radio_project():
                     try:
                         presence_data = dd.read_hdf(self.db, key='presence')
                         presence_data = presence_data[presence_data['rec_id'] == rec].compute()
-                        presence_data = presence_data[presence_data['freq_code'].isin(self.tags[self.tags.tag_type=='study'].index)]
+                        #presence_data = presence_data[presence_data['freq_code'].isin(self.tags[self.tags.tag_type=='study'].index)]
                         presence_data = presence_data[['freq_code', 'epoch', 'rec_id', 'bout_no']]
                         print(f"Length of presence_data: {len(presence_data)}")
 
@@ -1121,7 +1121,7 @@ class radio_project():
                     try:
                         overlap_data = dd.read_hdf(self.db, key='overlapping')
                         overlap_data = overlap_data[overlap_data['rec_id'] == rec].compute()
-                        overlap_data = overlap_data[overlap_data['freq_code'].isin(self.tags[self.tags.tag_type=='study'].index)]
+                        #overlap_data = overlap_data[overlap_data['freq_code'].isin(self.tags[self.tags.tag_type=='study'].index)]
                         overlap_data = overlap_data.groupby(['freq_code', 'epoch', 'rec_id'])['overlapping'].max().reset_index()
                         print(f"Length of overlap_data: {len(overlap_data)}")
 
