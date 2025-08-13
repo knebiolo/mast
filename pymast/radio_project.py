@@ -1090,8 +1090,8 @@ class radio_project():
                     rec_dat = rec_dat.reset_index(drop=True)
     
                 # Filter by latest iteration and valid test
-                #idxmax_values = rec_dat.groupby(['freq_code', 'rec_id'])['iter'].idxmax()
-                #rec_dat = rec_dat.loc[idxmax_values]
+                idxmax_values = rec_dat.groupby(['freq_code', 'rec_id'])['iter'].idxmax()
+                rec_dat = rec_dat.loc[idxmax_values]
                 rec_dat = rec_dat[rec_dat['test'] == 1]
                 #print(f"Columns in rec_dat after filtering by iter and test: {rec_dat.columns}")
                 print(f"Length of rec_dat after filtering by iter and test: {len(rec_dat)}")
