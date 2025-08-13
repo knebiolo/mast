@@ -842,6 +842,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
         print("Movement summaries - Duration between states in seconds:")
         print(summary_stats['movement_duration_summary'], "\n")
         self.msm_state_table.to_csv(os.path.join(self.project.output_dir,'state table.csv'))
+        self.master_state_table.to_csv(os.path.join(self.project.output_dir,'tte.csv'))
         self.move_summ.to_csv(os.path.join(self.project.output_dir,'movement_summary.csv'))
         return summary_stats
 
