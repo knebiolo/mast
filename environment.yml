@@ -18,6 +18,9 @@ dependencies:
   - dask-ml
   - pytables>=3.8.0
   - pip
+  - libffi
+  - ipykernel
+  - spyder-kernels
 
   - pip:
       - intervaltree
