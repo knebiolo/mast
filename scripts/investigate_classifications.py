@@ -18,13 +18,13 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 #%% set up project
-project_dir = r"K:\Jobs\3671\014\Analysis\Submersible_Data\enm"
-db_name = 'Thompson_Data_05012025.h5'
+project_dir = r"K:\Jobs\1503\341\Analysis\Scotland"
+db_name = 'Scotland.h5'
 tag_dat = 'tblMasterTag.csv'
 
 # identify receiver and fish you wish to investigate
 rec_id = 'R04'
-freq_code = '148.300 45'
+freq_code = '148.360 22'
 
 rec_dat = dd.read_hdf(os.path.join(project_dir,db_name), key='classified')
 
@@ -38,15 +38,10 @@ rec_dat['time_stamp'] = pd.to_datetime(rec_dat['time_stamp'])
 
 # Merge with release dates to filter out data before release
 tags = pd.read_csv(os.path.join(project_dir,tag_dat))
-rec_dat = rec_dat.merge(tags, left_on='freq_code', right_index=True)
+rec_dat = rec_dat.merge(tags, left_on='freq_code', right_on= 'freq_code')#, right_index=True)
 rec_dat = rec_dat[rec_dat['time_stamp'] >= rec_dat['rel_date']]
 print(f"Length of rec_dat after merging with release dates: {len(rec_dat)}")
 
-# Reset index to avoid ambiguity between index and column labels
-if 'freq_code' in rec_dat.columns and 'freq_code' in rec_dat.index.names:
-    rec_dat = rec_dat.reset_index(drop=True)
+bad_recs = rec_dat[rec_dat.test ==0]
 
-# Filter by latest iteration and valid test
-idxmax_values = rec_dat.groupby(['freq_code', 'rec_id'])['iter'].idxmax()
-rec_dat = rec_dat.loc[idxmax_values]
-print (f"Length of rec_dat after filtering by receiver ID: {len(rec_dat)}")
+print (f"Length of bad detections after filtering by receiver ID: {len(bad_recs)}")

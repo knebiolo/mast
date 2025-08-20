@@ -81,58 +81,58 @@ def max_contiguous_sequence(arr):
 
 def detection_history(epoch, pulse_rate, num_detects, num_channels, scan_time):
     shifts = np.arange(-num_detects, num_detects + 1)
-    
-    # Create shifted epochs for each detection window
-    shifted_epochs = pd.DataFrame({f'Shift_{shift}': pd.Series(epoch).shift(shift) for shift in shifts * -1}).to_numpy()
-    
+
+    # Create shifted epochs for each detection window (NaNs for out-of-range shifts)
+    shifted_df = pd.DataFrame({f'Shift_{s}': pd.Series(epoch).shift(s) for s in (-shifts)})
+    shifted_epochs = shifted_df.to_numpy()
+
     # Expand arrays for vectorized operations
-    epoch_expanded = np.tile(epoch[:, None], (1, len(shifts)))
-    scan_time_expanded = np.tile(scan_time[:, None], (1, len(shifts)))
-    num_channels_expanded = np.tile(num_channels[:, None], (1, len(shifts)))
-    
-    # Compute expected epochs based on conditions
+    m = len(shifts)
+    epoch_expanded        = np.tile(epoch[:, None],        (1, m))
+    scan_time_expanded    = np.tile(scan_time[:, None],    (1, m))
+    num_channels_expanded = np.tile(num_channels[:, None], (1, m))
+
+    # Expected epoch per shift
     expected_epoch = np.where(
-        num_channels_expanded == 1, 
+        num_channels_expanded == 1,
         epoch_expanded + shifts * pulse_rate,
-        np.where(scan_time_expanded > 2 * pulse_rate, 
-                 epoch_expanded + shifts * pulse_rate,
-                 epoch_expanded + shifts * scan_time_expanded * num_channels_expanded)
+        np.where(
+            scan_time_expanded > 2 * pulse_rate,
+            epoch_expanded + shifts * pulse_rate,
+            epoch_expanded + shifts * scan_time_expanded * num_channels_expanded
+        )
     )
 
-    # Adjust window size relative to pulse rate
-    window_size = np.where(num_channels == 1, 
-                           np.where(pulse_rate > 10, 1, pulse_rate),
-                           scan_time / 2.)
-    
-    window_size_expanded = np.tile(window_size[:, None], (1, len(shifts)))
-    
-    # Compute detection history with reduced memory overhead
+    # Window size relative to pulse rate
+    window_size = np.where(
+        num_channels == 1,
+        np.where(pulse_rate > 10, 1, pulse_rate),
+        scan_time / 2.0
+    )
+    window_size_expanded = np.tile(window_size[:, None], (1, m))
+
+    # Elementwise window limits
     lower_limits = expected_epoch - window_size_expanded
     upper_limits = expected_epoch + window_size_expanded
-    
-    # Initialize detection history
-    detection_history = np.zeros_like(expected_epoch, dtype=np.int32)
-    
-    # Check if any values in each row of shifted_epochs fall within the corresponding windows
-    detection_history = np.any(
-        (shifted_epochs[:, :, None] >= lower_limits[:, None, :]) & 
-        (shifted_epochs[:, :, None] <= upper_limits[:, None, :]),
-        axis=1
+
+    # *** FIX: elementwise compare, not all-to-all ***
+    detection_history = (
+        (shifted_epochs >= lower_limits) &
+        (shifted_epochs <= upper_limits)
     ).astype(np.int32)
-    
-    # Ensure the current epoch detection is marked
+
+    # Ensure current epoch marked
     detection_history[:, num_detects] = 1
 
-    # Calculate hit ratio
+    # Metrics
     hit_ratio = detection_history.sum(axis=1) / detection_history.shape[1]
+    cons_det  = (detection_history[:, 1:-1].sum(axis=1) > 1).astype(np.int32)
 
-    # Consecutive detections (1 if consecutive, otherwise 0)
-    cons_det = (detection_history[:, 1:-1].sum(axis=1) > 1).astype(np.int32)
-
-    # Max contiguous sequence (find the maximum number of consecutive 1's)
+    # Max contiguous sequence of 1s (assumes you have max_contiguous_sequence)
     max_count = np.array([max_contiguous_sequence(hist) for hist in detection_history])
 
     return detection_history, hit_ratio, cons_det, max_count
+
     
 
 

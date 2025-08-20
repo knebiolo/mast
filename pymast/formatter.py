@@ -394,8 +394,8 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
 
         self.recap_data = pd.read_hdf(project.db,
                                       'recaptures',
-                                      where = qry)
-        
+                                      where = qry)#"rec_id == 'R11'")
+        self.recap_data = self.recap_data[self.recap_data.hit_ratio > 0.1]
         self.recap_data.drop(columns = ['power',
                                         'noise_ratio',
                                         'det_hist',
@@ -415,7 +415,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
                                    right_index = True)
         # remove any row where df['your_column'] is NaN
         self.recap_data.dropna(subset=['rel_date'], inplace=True)
-
+        df = self.recap_data
         self.recap_data = self.recap_data[self.recap_data.overlapping == 0]
         self.recap_data['rel_date'] = pd.to_datetime(self.recap_data.rel_date)
         
@@ -558,11 +558,19 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
                                     inplace = True)
             self.start_times.set_index('freq_code', inplace = True) 
         else:
-            # Identify first recapture times
+            # movement from state 1
             self.start_times = self.recap_data[self.recap_data.state == 1].\
                 groupby(['freq_code'])['epoch'].min().\
                     to_frame()
-                        
+            
+            # movement from first recapture        
+            # self.start_times = (
+            #     self.recap_data
+            #     .groupby(['freq_code'])['epoch']
+            #     .min()
+            #     .to_frame()
+            # )
+
             self.start_times.rename(columns = {'epoch':'first_recapture'},
                                     inplace = True)
 
@@ -676,7 +684,10 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
                     for j in adjacency_filter:
                         print ("Starting %s filter"%(i))
                         # find those rows where this movement exists
-                        fish_dat['transition_filter'] = np.where(fish_dat.transition == j,1,0)
+                        try:
+                            fish_dat['transition_filter'] = np.where(fish_dat.transition == j,1,0)
+                        except:
+                            bad_moves_present == False
                         #fish_dat.set_index(['time_0'], inplace = True)
 
                         if fish_dat.transition_filter.sum() > 0:
@@ -736,20 +747,23 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
                 equal_rows = fish_dat[fish_dat['start_state'] == fish_dat['end_state']]
 
                 # Step 2: Get the index of the last occurrence where column1 equals column2
-                last_index = fish_dat.index[-1]
-                
-                # Step 3: Drop all rows where column1 equals column2 except the last one
-                if len(equal_rows) > 1 and equal_rows.index[-1] == last_index:
-                    fish_dat = fish_dat.drop(equal_rows.index[:-1])
-                elif len(equal_rows) > 1 and equal_rows.index[-1] != last_index:
-                    fish_dat = fish_dat.drop(equal_rows.index)
-                elif len(equal_rows) == 1:
-                    fish_dat = fish_dat.drop(equal_rows.index)
-                else:
-                    pass
+                try:
+                    last_index = fish_dat.index[-1]
 
-                fish_dat.drop(labels = ['transition_filter'], axis = 1, inplace = True)
-                filtered = pd.concat([filtered, fish_dat])
+                    # Step 3: Drop all rows where column1 equals column2 except the last one
+                    if len(equal_rows) > 1 and equal_rows.index[-1] == last_index:
+                        fish_dat = fish_dat.drop(equal_rows.index[:-1])
+                    elif len(equal_rows) > 1 and equal_rows.index[-1] != last_index:
+                        fish_dat = fish_dat.drop(equal_rows.index)
+                    elif len(equal_rows) == 1:
+                        fish_dat = fish_dat.drop(equal_rows.index)
+                    else:
+                        pass
+    
+                    fish_dat.drop(labels = ['transition_filter'], axis = 1, inplace = True)
+                    filtered = pd.concat([filtered, fish_dat])
+                except:
+                    print ("check")
             if self.initial_state_release == False:
                 self.master_state_table 
 

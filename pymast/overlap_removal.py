@@ -768,6 +768,7 @@ class overlap_reduction:
                 parent_fish_bouts = parent_bouts[parent_bouts['freq_code'] == fish_id]
                 parent_fish_dat = parent_dat[parent_dat['freq_code'] == fish_id]
                 child_fish_dat = child_dat[child_dat['freq_code'] == fish_id]
+                
     
                 max_parent_power = parent_fish_dat.power.max()
                 max_child_power = child_fish_dat.power.max()
@@ -805,19 +806,23 @@ class overlap_reduction:
     
                     # Classify based on t-test and power mean comparison
                     if np.mean(parent_norm_power) > np.mean(child_norm_power) and p_value < 0.05:
-                        parent_classification = 0  # Near
+                        parent_classification = np.float32(0)  # Near
                         print(f"Fish ID {fish_id}: Parent classified as NEAR with p-value: {p_value:.4f}")
                     else:
-                        parent_classification = 1  # Far
+                        parent_classification = np.float32(1)  # Far
                         print(f"Fish ID {fish_id}: Parent classified as FAR with p-value: {p_value:.4f}")
     
                     # Update parent data with classification result
-                    parent_dat.loc[
-                        (parent_dat['freq_code'] == fish_id) &
-                        (parent_dat['epoch'] >= parent_row['min_epoch']) &
-                        (parent_dat['epoch'] <= parent_row['max_epoch']),
+                    parent_fish_dat.loc[
+                        (parent_fish_dat['freq_code'] == fish_id) &
+                        (parent_fish_dat['epoch'] >= parent_row['min_epoch']) &
+                        (parent_fish_dat['epoch'] <= parent_row['max_epoch']),
                         'overlapping'
                     ] = parent_classification
+                    
+            cols = parent_dat.columns
+            if 'overlapping' not in cols:
+                parent_dat['overlapping'] = np.float32(0)
     
             # Write the updated parent data to the HDF5 store incrementally
             self.write_results_to_hdf5(parent_dat)
@@ -839,9 +844,7 @@ class overlap_reduction:
             for j in fishes:
                 children = list(self.G.successors(i))
                 fish_dat = self.node_recap_dict[i][self.node_recap_dict[i].freq_code == j]
-                fish_dat['node'] = np.repeat(i,len(fish_dat))
-                fish_dat['overlapping'] = 0
-                fish_dat['parent'] = ''
+                fish_dat['overlapping'] = np.float32(0)
 
                 if len(children) > 0:
                     for k in children:
@@ -858,29 +861,28 @@ class overlap_reduction:
                             if overlap_indices.size > 0:
                                 overlaps_found = True
                                 overlap_count += overlap_indices.size
-                                fish_dat.loc[overlaps, 'overlapping'] = 1
-                                fish_dat.loc[overlaps, 'parent'] = i
+                                fish_dat.loc[overlaps, 'overlapping'] = np.float32(1)
+                                #fish_dat.loc[overlaps, 'parent'] = i
 
-                fish_dat = fish_dat.astype({
-                    'freq_code': 'object',
-                    'epoch': 'int32',
-                    'rec_id': 'object',
-                    'node': 'object',
-                    'overlapping': 'int32',
-                    'parent': 'object'
-                })
+                # fish_dat = fish_dat.astype({
+                #     'freq_code': 'object',
+                #     'epoch': 'int32',
+                #     'rec_id': 'object',
+                #     'overlapping': 'int32',
+                # })
+                fish_dat = fish_dat[['freq_code', 'epoch', 'time_stamp', 'rec_id', 'overlapping']]
+                self.write_results_to_hdf5(fish_dat)
 
-                with pd.HDFStore(self.db, mode='a') as store:
-                    store.append(key='overlapping',
-                                  value=fish_dat,
-                                  format='table',
-                                  index=False,
-                                  min_itemsize={'freq_code': 20,
-                                                'rec_id': 20,
-                                                'parent': 20},
-                                  append=True,
-                                  data_columns=True,
-                                  chunksize=1000000)
+                # with pd.HDFStore(self.db, mode='a') as store:
+                #     store.append(key='overlapping',
+                #                   value=fish_dat,
+                #                   format='table',
+                #                   index=False,
+                #                   min_itemsize={'freq_code': 20,
+                #                                 'rec_id': 20},
+                #                   append=True,
+                #                   data_columns=True,
+                #                   chunksize=1000000)
 
         if overlaps_found:
             print(f"Overlaps were found and processed. Total number of overlaps: {overlap_count}.")
@@ -898,6 +900,12 @@ class overlap_reduction:
         that each record is written incrementally to minimize memory usage.
         """
         try:
+            df = df.astype({
+                'freq_code': 'object',
+                'epoch': 'int32',
+                'rec_id': 'object',
+                'overlapping': 'int32',
+            })
             with pd.HDFStore(self.project.db, mode='a') as store:
                 store.append(
                     key='overlapping',
