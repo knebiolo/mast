@@ -1473,11 +1473,6 @@ def PIT(file_name,
     with pd.HDFStore(db_dir, 'r') as store:
         print("Store keys after append:", store.keys())
 
-
-
-
-
-
 def PIT_Multiple(
     file_name,
     db_dir,

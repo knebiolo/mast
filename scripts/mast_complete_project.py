@@ -15,8 +15,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 #%% set up project
-project_dir = r"C:\Users\Kevin.Nebiolo\Desktop\Scotland KPN"
-db_name = 'Scotland'
+project_dir = r"K:\Jobs\3671\014\Analysis\kpn_2025_10_01"
+db_name = 'ThompsonFalls'
 
 detection_count = 5
 duration = 1
