@@ -806,10 +806,10 @@ class overlap_reduction:
     
                     # Classify based on t-test and power mean comparison
                     if np.mean(parent_norm_power) > np.mean(child_norm_power) and p_value < 0.05:
-                        parent_classification = np.float32(0)  # Near
+                        parent_classification = 0.0  # Near
                         print(f"Fish ID {fish_id}: Parent classified as NEAR with p-value: {p_value:.4f}")
                     else:
-                        parent_classification = np.float32(1)  # Far
+                        parent_classification = 1.0  # Far
                         print(f"Fish ID {fish_id}: Parent classified as FAR with p-value: {p_value:.4f}")
     
                     # Update parent data with classification result
@@ -822,7 +822,7 @@ class overlap_reduction:
                     
             cols = parent_dat.columns
             if 'overlapping' not in cols:
-                parent_dat['overlapping'] = np.float32(0)
+                parent_dat['overlapping'] = 0.0
     
             # Write the updated parent data to the HDF5 store incrementally
             self.write_results_to_hdf5(parent_dat)
@@ -844,7 +844,7 @@ class overlap_reduction:
             for j in fishes:
                 children = list(self.G.successors(i))
                 fish_dat = self.node_recap_dict[i][self.node_recap_dict[i].freq_code == j]
-                fish_dat['overlapping'] = np.float32(0)
+                fish_dat['overlapping'] = 0.0
 
                 if len(children) > 0:
                     for k in children:
@@ -861,7 +861,7 @@ class overlap_reduction:
                             if overlap_indices.size > 0:
                                 overlaps_found = True
                                 overlap_count += overlap_indices.size
-                                fish_dat.loc[overlaps, 'overlapping'] = np.float32(1)
+                                fish_dat.loc[overlaps, 'overlapping'] = 1.0
                                 #fish_dat.loc[overlaps, 'parent'] = i
 
                 # fish_dat = fish_dat.astype({

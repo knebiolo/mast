@@ -7,10 +7,22 @@ Created on Thu Nov 16 09:42:22 2023
 # import modules
 import os
 import sys
-sys.path.append(r"C:\Users\knebiolo\OneDrive - Kleinschmidt Associates, Inc\Software\mast")
-from pymast.radio_project import radio_project
-from pymast import formatter as formatter
-import pymast
+from pathlib import Path
+
+# Add pymast to path if not installed (for development)
+try:
+    from pymast.radio_project import radio_project
+    from pymast import formatter as formatter
+    import pymast
+except ImportError:
+    # If pymast is not installed, add parent directory to path
+    current_dir = Path(__file__).parent
+    mast_dir = current_dir.parent
+    sys.path.insert(0, str(mast_dir))
+    from pymast.radio_project import radio_project
+    from pymast import formatter as formatter
+    import pymast
+
 import pandas as pd
 import matplotlib.pyplot as plt
 
