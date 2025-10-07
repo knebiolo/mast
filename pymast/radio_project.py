@@ -51,22 +51,83 @@ class radio_project():
     '''
     
     def __init__(self, project_dir, db_name, detection_count, duration, tag_data, receiver_data, nodes_data = None):
-        '''
-        Initializes the radio_project class with project parameters and datasets.
+        """
+        Initialize a radio telemetry project for data management and analysis.
         
-        Sets up the project directory structure, initializes the project database, and stores the provided datasets.
+        This constructor sets up the complete project infrastructure including:
+        - Directory structure for data, training files, and outputs
+        - HDF5 database for efficient data storage
+        - Tag, receiver, and node metadata
         
-        Parameters:
-        - project_dir (str): The root directory for the project.
-        - db_name (str): The name of the database file to be created or used.
-        - det (DataFrame or similar): Data containing detection information.
-        - duration (int or float): The duration of the project or a related parameter.
-        - tag_data (DataFrame or similar): Data containing information about the tags.
-        - receiver_data (DataFrame or similar): Data containing information about the receivers.
-        - nodes_data (DataFrame or similar, optional): Data containing information about the nodes, if applicable.
+        Parameters
+        ----------
+        project_dir : str
+            Root directory for the project. Recommended to avoid spaces in path.
+        db_name : str
+            Name of the HDF5 database file (without .h5 extension).
+        detection_count : int
+            Number of detections to include in detection history window for 
+            predictor calculation. Typical values: 3-7.
+        duration : float
+            Time window in seconds for noise ratio calculation. 
+            Typical values: 1.0-5.0 seconds.
+        tag_data : pandas.DataFrame
+            Master tag table with required columns:
+            - freq_code (str): Unique frequency-code combination
+            - pulse_rate (float): Seconds between tag pulses
+            - tag_type (str): 'study', 'BEACON', or 'TEST'
+            - rel_date (datetime): Release date and time
+            See docs/API_REFERENCE.md for complete schema.
+        receiver_data : pandas.DataFrame
+            Master receiver table with required columns:
+            - rec_id (str): Unique receiver identifier
+            - rec_type (str): Receiver type ('srx600', 'srx800', etc.)
+            - node (str): Associated network node ID
+        nodes_data : pandas.DataFrame, optional
+            Network nodes table with columns:
+            - node (str): Unique node identifier
+            - X (int): X coordinate for visualization
+            - Y (int): Y coordinate for visualization
+            Required for movement analysis and overlap removal.
         
-        The method creates the necessary directories for the project, initializes the HDF5 database, and sets up the class attributes.
-        '''
+        Raises
+        ------
+        ValueError
+            If required columns are missing from input DataFrames.
+        OSError
+            If project directory cannot be created.
+        
+        Examples
+        --------
+        >>> import pandas as pd
+        >>> from pymast.radio_project import radio_project
+        >>> 
+        >>> # Load input data
+        >>> tags = pd.read_csv('tblMasterTag.csv')
+        >>> receivers = pd.read_csv('tblMasterReceiver.csv')
+        >>> nodes = pd.read_csv('tblNodes.csv')
+        >>> 
+        >>> # Create project
+        >>> project = radio_project(
+        ...     project_dir='/path/to/project',
+        ...     db_name='my_study',
+        ...     detection_count=5,
+        ...     duration=1.0,
+        ...     tag_data=tags,
+        ...     receiver_data=receivers,
+        ...     nodes_data=nodes
+        ... )
+        
+        Notes
+        -----
+        The project directory structure will be created as:
+        - project_dir/
+          - Data/ (raw data storage)
+            - Training_Files/ (receiver data files)
+          - Output/ (processed data and exports)
+            - Figures/ (generated plots)
+          - my_study.h5 (HDF5 database)
+        """
         # set model parameters
         self.project_dir = project_dir     
         self.db_name = db_name
@@ -148,6 +209,57 @@ class radio_project():
                           channels = 1, 
                           ant_to_rec_dict = None,
                           ka_format = False):
+        """
+        Import raw telemetry data from receiver files into the project database.
+        
+        Parameters
+        ----------
+        rec_id : str
+            Receiver ID (must exist in receiver_data)
+        rec_type : str
+            Receiver type. Supported: 'srx600', 'srx800', 'srx1200', 
+            'orion', 'ares', 'VR2'
+        file_dir : str
+            Directory containing raw data files
+        db_dir : str
+            Path to HDF5 database file
+        scan_time : float, optional
+            Channel scan time in seconds (default: 1)
+        channels : int, optional
+            Number of channels (default: 1)
+        ant_to_rec_dict : dict, optional
+            Mapping of antenna IDs to receiver IDs
+        ka_format : bool, optional
+            Use Kleinschmidt Associates format (default: False)
+        
+        Raises
+        ------
+        ValueError
+            If rec_type is not supported or rec_id not found
+        FileNotFoundError
+            If file_dir doesn't exist or contains no data files
+        """
+        # Validate receiver type
+        VALID_REC_TYPES = ['srx600', 'srx800', 'srx1200', 'orion', 'ares', 'VR2']
+        if rec_type not in VALID_REC_TYPES:
+            raise ValueError(
+                f"Unsupported receiver type: '{rec_type}'. "
+                f"Supported types: {', '.join(VALID_REC_TYPES)}"
+            )
+        
+        # Validate receiver ID
+        if rec_id not in self.receivers.index:
+            raise ValueError(
+                f"Receiver '{rec_id}' not found in receiver_data. "
+                f"Available receivers: {', '.join(self.receivers.index)}"
+            )
+        
+        # Validate directory exists
+        if not os.path.exists(file_dir):
+            raise FileNotFoundError(
+                f"Data directory not found: {file_dir}. "
+                f"Expected location: {self.training_dir}"
+            )
         # list raw data files
         tFiles = os.listdir(file_dir)
         
@@ -219,6 +331,59 @@ class radio_project():
         return dat.freq_code.unique()
     
     def train(self, freq_code, rec_id):
+        """
+        Train the Naive Bayes classifier using a specific tag at a receiver.
+        
+        This method calculates predictor variables for all detections of the 
+        specified tag and stores them in the training dataset. Training data
+        includes both known true positives (from beacon/test tags) and known
+        false positives (miscoded detections).
+        
+        Parameters
+        ----------
+        freq_code : str
+            Frequency-code combination to train on (e.g., '164.123 45').
+            Must exist in the tag_data provided during initialization.
+        rec_id : str
+            Receiver ID where training data was collected.
+            Must exist in the receiver_data provided during initialization.
+        
+        Returns
+        -------
+        None
+            Training data is written to HDF5 database at /trained key.
+        
+        Raises
+        ------
+        KeyError
+            If freq_code or rec_id not found in project data.
+        ValueError
+            If insufficient data for training (e.g., no detections).
+        
+        Examples
+        --------
+        >>> # Train on a single tag
+        >>> project.train('164.123 45', 'R01')
+        
+        >>> # Train on all tags at a receiver
+        >>> fishes = project.get_fish(rec_id='R01')
+        >>> for fish in fishes:
+        ...     project.train(fish, 'R01')
+        
+        See Also
+        --------
+        training_summary : Generate statistics and plots from training data
+        reclassify : Apply trained classifier to classify detections
+        
+        Notes
+        -----
+        Predictor variables calculated:
+        - hit_ratio: Proportion of expected detections received
+        - cons_length: Maximum consecutive detection length
+        - noise_ratio: Ratio of miscoded to total detections
+        - power: Signal strength
+        - lag_diff: Second-order difference in detection timing
+        """
         '''A class object for a training dataframe and related data objects.'''
     
         # Pull raw data 

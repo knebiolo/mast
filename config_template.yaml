@@ -1,0 +1,55 @@
+# Configuration Template for MAST Projects
+
+# Copy this file to your project directory and rename to 'mast_config.yaml'
+# Update the values for your specific project
+
+project:
+  name: "my_telemetry_project"
+  directory: "C:/path/to/project"  # Use forward slashes
+  database_name: "telemetry_data"
+  
+parameters:
+  detection_count: 5      # Number of detections for detection history
+  duration: 1.0           # Duration window for noise ratio (seconds)
+  threshold_ratio: 1.0    # Classification threshold (0.8-1.2)
+  
+receivers:
+  - id: "R01"
+    type: "srx800"
+    scan_time: 1.0
+    channels: 1
+    antennas:
+      A0: "R01"
+      
+  - id: "R02"  
+    type: "srx800"
+    scan_time: 1.0
+    channels: 1
+    antennas:
+      A0: "R02"
+
+classification:
+  likelihood_model:
+    - "hit_ratio"
+    - "cons_length"
+    - "noise_ratio"
+    - "lag_diff"
+    
+bouts:
+  lag_window: 2
+  time_limit: 21600  # 6 hours in seconds
+  
+overlap:
+  method: "nested_doll"  # or "unsupervised"
+  edges:  # parent:child relationships
+    - ["R01", "R02"]
+    - ["R01", "R03"]
+  nodes:
+    - "R01"
+    - "R02"
+    - "R03"
+    
+export:
+  format: "csv"
+  include_overlap: false
+  include_filtered: true
