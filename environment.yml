@@ -21,6 +21,7 @@ dependencies:
   - libffi
   - ipykernel
   - spyder-kernels
+  - tqdm
 
   - pip:
       - intervaltree

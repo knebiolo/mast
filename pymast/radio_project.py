@@ -8,18 +8,23 @@ import pandas as pd
 import os
 import h5py
 import datetime
+import logging
 import pymast.naive_bayes as naive_bayes
 import pymast.parsers as  parsers
 import pymast.predictors as predictors
 import matplotlib.pyplot as plt
 from matplotlib import rcParams
 from scipy import interpolate
+from tqdm import tqdm
 import shutil
 import warnings
 import dask.dataframe as dd
 import dask.array as da
 from dask_ml.cluster import KMeans
 warnings.filterwarnings("ignore")
+
+# Initialize logger
+logger = logging.getLogger('pymast.radio_project')
 
 font = {'family': 'serif','size': 6}
 rcParams['font.size'] = 6
@@ -256,16 +261,27 @@ class radio_project():
         
         # Validate directory exists
         if not os.path.exists(file_dir):
+            logger.error(f"Data directory not found: {file_dir}")
             raise FileNotFoundError(
                 f"Data directory not found: {file_dir}. "
                 f"Expected location: {self.training_dir}"
             )
+        
+        logger.info(f"Importing data for receiver {rec_id} (type: {rec_type})")
+        logger.info(f"  Data directory: {file_dir}")
+        
         # list raw data files
         tFiles = os.listdir(file_dir)
         
+        if not tFiles:
+            logger.warning(f"No files found in {file_dir}")
+            return
+        
+        logger.info(f"  Found {len(tFiles)} file(s) to import")
+        
         # for every file call the correct text parser and import
-        for f in tFiles:
-            print ("start importing file %s"%(f))
+        for i, f in enumerate(tqdm(tFiles, desc=f"Importing {rec_id}", unit="file"), 1):
+            logger.debug(f"  Processing file {i}/{len(tFiles)}: {f}")
             # get the complete file directory
             f_dir = os.path.join(file_dir,f)
             
@@ -294,14 +310,14 @@ class radio_project():
                 parsers.PIT_Multiple(f_dir,db_dir,rec_id, self.study_tags, scan_time = scan_time, channels = channels, ant_to_rec_dict = ant_to_rec_dict)
 
             else:
-                print ("There currently is not an import routine created for this receiver type.  Please try again")
-
-            
-            print ("File %s imported"%(f))
+                logger.error(f"No import routine for receiver type: {rec_type}")
+                raise ValueError(f"No import routine available for receiver type: {rec_type}")
         
-        print ("Raw Telemetry Data Import Completed")
+        logger.info(f"✓ Import complete for receiver {rec_id}: {len(tFiles)} file(s) processed")
     
     def get_fish(self, rec_id, train = True, reclass_iter = None):
+        logger.info(f"Getting fish for receiver {rec_id}")
+        logger.debug(f"  Mode: {'training' if train else 'classification'}, Iteration: {reclass_iter}")
         
         tags_no_idx = self.tags.reset_index(drop = False)
 
@@ -328,7 +344,9 @@ class radio_project():
             dat = pd.merge(dat, tags_no_idx, on='freq_code', how='left')
             dat = dat[dat.tag_type == 'study']
     
-        return dat.freq_code.unique()
+        fish_list = dat.freq_code.unique()
+        logger.info(f"  Found {len(fish_list)} unique fish")
+        return fish_list
     
     def train(self, freq_code, rec_id):
         """
@@ -462,7 +480,7 @@ class radio_project():
                                           'cons_det': 'int32',
                                           'cons_length': 'float32'})
         except ValueError:
-            print('debug - check datatypes')
+            logger.debug(f"  Data type conversion issue for {freq_code} at {rec_id}")
             
         # Append to HDF5
         with pd.HDFStore(self.db, mode='a') as store:
@@ -477,69 +495,68 @@ class radio_project():
                          append=True, 
                          chunksize=1000000)
     
-        print(f'Fish {freq_code} trained at receiver {rec_id}, plausibility: {plausible}')
+        logger.info(f"✓ Training complete: {freq_code} at {rec_id} - Plausibility: {plausible:.2f}")
 
     def training_summary(self,rec_type,site = None):
-        # initialize some variables
-
+        logger.info(f"Generating training summary for {rec_type}")
+        
         # connect to database and get data
-
         trained_dat = pd.read_hdf(self.db,key = 'trained')#, mode = 'r')
         trained_dat = trained_dat[(trained_dat.rec_type == rec_type)] 
-        #train_dat.reset_index(inplace = True)
-
-        # if site != None:
-        #     for rec_id in site:
-        #         trained_dat = trained_dat[(trained_dat.rec_id == rec_id)] 
+        
+        logger.info(f"  Loaded {len(trained_dat)} detections from {len(trained_dat.rec_id.unique())} receivers")
 
         det_class_count = trained_dat.groupby('detection')['detection'].count().to_frame()
 
-        print ("")
-        print ("Training summary statistics report")
-        print ("The algorithm collected %s detections from %s %s receivers"%(len(trained_dat),len(trained_dat.rec_id.unique()),rec_type))
-        print ("----------------------------------------------------------------------------------")
-        print ("")
-        print ("%s detection clas statistics:"%(rec_type) )
+        logger.info("")
+        logger.info("Training Summary Statistics Report")
+        logger.info("="*80)
+        logger.info(f"Collected {len(trained_dat)} detections from {len(trained_dat.rec_id.unique())} {rec_type} receivers")
+        logger.info("="*80)
+        logger.info("")
+        logger.info(f"{rec_type} detection class statistics:")
         try:
-            print ("The prior probability that a detection was true was %s"%((round(float(det_class_count.at[1,'detection'])/float(det_class_count.sum()),3))))
+            prior_true = round(float(det_class_count.at[1,'detection'])/float(det_class_count.sum()),3)
+            logger.info(f"  Prior P(true detection) = {prior_true}")
         except KeyError:
-            print ("No known true detections found")
+            logger.warning("  No known true detections found")
             pass
         try:
-            print ("The prior probability that a detection was false positive was %s"%((round(float(det_class_count.at[0,'detection'])/float(det_class_count.sum()),3))))
+            prior_false = round(float(det_class_count.at[0,'detection'])/float(det_class_count.sum()),3)
+            logger.info(f"  Prior P(false positive) = {prior_false}")
         except KeyError:
-            print ("No known true detections found")
+            logger.warning("  No known false positives found")
             pass
 
-        print ("")
-        print ("----------------------------------------------------------------------------------")
-        print ("")
+        logger.info("")
+        logger.info("="*80)
+        logger.info("")
         trained_dat['detection'] = trained_dat.detection.astype('str')
         sta_class_count = trained_dat.groupby(['rec_id','detection'])['detection'].count().rename('det_class_count').to_frame().reset_index()
         recs = sorted(sta_class_count.rec_id.unique())
-        print ("Detection Class Counts Across Stations")
-        print ("             Known          Known")
-        print ("             False          True")
-        print ("       ______________________________")
-        print ("      |              |              |")
+        logger.info("Detection Class Counts Across Stations")
+        logger.info("             Known          Known")
+        logger.info("             False          True")
+        logger.info("       ______________________________")
+        logger.info("      |              |              |")
         for i in recs:
             trues = sta_class_count[(sta_class_count.rec_id == i) & (sta_class_count.detection == '1')]
             falses = sta_class_count[(sta_class_count.rec_id == i) & (sta_class_count.detection == '0')]
             if len(trues) > 0 and len(falses) > 0:
-                print ("%6s|   %8s   |   %8s   |"%(i,falses.det_class_count.values[0],trues.det_class_count.values[0]))
+                logger.info("%6s|   %8s   |   %8s   |"%(i,falses.det_class_count.values[0],trues.det_class_count.values[0]))
             elif len(trues) == 0 and len(falses) > 0:
-                print ("%6s|   %8s   |   %8s   |"%(i,falses.det_class_count.values[0],0))
+                logger.info("%6s|   %8s   |   %8s   |"%(i,falses.det_class_count.values[0],0))
             else:
                 try:
-                    print ("%6s|   %8s   |   %8s   |"%(i,0,trues.det_clas_count.values[0]))
+                    logger.info("%6s|   %8s   |   %8s   |"%(i,0,trues.det_clas_count.values[0]))
 
                 except AttributeError:
-                    print ("%6s|   %8s   |   %8s   |"%(i,0,0))
+                    logger.info("%6s|   %8s   |   %8s   |"%(i,0,0))
 
-        print ("      |______________|______________|")
-        print ("")
-        print ("----------------------------------------------------------------------------------")
-        print ("Compiling Figures")
+        logger.info("      |______________|______________|")
+        logger.info("")
+        logger.info("="*80)
+        logger.info("Compiling training figures...")
         # get data by detection class for side by side histograms
         trained_dat['power']= trained_dat.power.astype(float)
         trained_dat['lag_diff'] = trained_dat.lag_diff.astype(float)
@@ -700,6 +717,8 @@ class radio_project():
           the `rec_list` to restrict the training data.
         - Reclassification logic is based on contributions from T. Castro-Santos.
         """
+        logger.debug(f"  Creating training data (rec_type={rec_type}, iter={reclass_iter}, rec_list={rec_list})")
+        
         if rec_list is not None:
             # Construct the query for multiple receiver IDs using the OR operator
             rec_query = ' | '.join([f'rec_id == "{rec_id}"' for rec_id in rec_list])
@@ -736,6 +755,9 @@ class radio_project():
     
             # Append the classified data to the training data
             train_dat = pd.concat([train_dat, class_dat], ignore_index=True)
+            logger.debug(f"    Combined training data: {len(train_dat)} detections ({sum(train_dat['detection']==0)} false, {sum(train_dat['detection']==1)} true)")
+        else:
+            logger.debug(f"    Training data: {len(train_dat)} detections")
     
         return train_dat
 
@@ -773,27 +795,50 @@ class radio_project():
         - The fields used for classification are hardcoded as ['hit_ratio', 'cons_length',
           'noise_ratio', 'power', 'lag_diff'].
         """
+        logger.info(f"Starting classification for receiver {rec_id}")
+        logger.info(f"  Threshold ratio: {threshold_ratio}")
+        logger.info(f"  Likelihood model: {', '.join(likelihood_model)}")
+        
+        # Validate inputs
+        if rec_id not in self.receivers.index:
+            logger.error(f"Receiver {rec_id} not found")
+            raise ValueError(f"Receiver '{rec_id}' not found in receiver_data")
+        
+        valid_predictors = ['hit_ratio', 'cons_length', 'noise_ratio', 'power', 'lag_diff']
+        invalid = set(likelihood_model) - set(valid_predictors)
+        if invalid:
+            logger.error(f"Invalid predictors: {invalid}")
+            raise ValueError(f"Invalid predictors: {', '.join(invalid)}. Valid: {', '.join(valid_predictors)}")
+        
         class_iter = None
         
         while True:
+            iter_label = f"iteration {class_iter}" if class_iter else "initial classification"
+            logger.info(f"Running {iter_label}...")
+            
             # Get a list of fish to iterate over
             fishes = project.get_fish(rec_id=rec_id, train=False, reclass_iter=class_iter)
+            logger.info(f"  Found {len(fishes)} fish to classify")
             
             # Generate training data for the classifier
+            logger.info("  Creating training data...")
             training_data = project.create_training_data(rec_type=rec_type, reclass_iter=class_iter, rec_list=rec_list)
+            logger.info(f"  Training data: {len(training_data)} detections")
     
-            # Iterate over fish and classify
-            for fish in fishes:
+            # Iterate over fish and classify with progress bar
+            logger.info("  Classifying detections...")
+            for fish in tqdm(fishes, desc=f"  Classifying {rec_id}", unit="fish"):
                 project.classify(fish, rec_id, likelihood_model, training_data, class_iter, threshold_ratio)
             
             # Generate summary statistics
+            logger.info("  Generating classification summary...")
             project.classification_summary(rec_id, class_iter)
             
             # Show the figures and block execution until they are closed
             plt.show(block=True)
             
             # Ask the user if they need another iteration
-            user_input = input("Do you need another classification iteration? (yes/no): ").strip().lower()
+            user_input = input("\nDo you need another classification iteration? (yes/no): ").strip().lower()
             
             if user_input in ['yes', 'y']:
                 # If yes, increase class_iter and reclassify
@@ -801,12 +846,13 @@ class radio_project():
                     class_iter = 2
                 else:
                     class_iter += 1
+                logger.info(f"Starting iteration {class_iter}")
             elif user_input in ['no', 'n']:
                 # If no, break the loop
-                print("Classification process completed.")
+                logger.info(f"✓ Classification complete for {rec_id}")
                 break
             else:
-                print("Invalid input. Please enter 'yes' or 'no'.")
+                logger.warning("Invalid input, please enter 'yes' or 'no'")
 
 
     def classify(self,
@@ -816,6 +862,7 @@ class radio_project():
                  training_data,
                  reclass_iter = None,
                  threshold_ratio = None):
+        logger.debug(f"  Classifying {freq_code} at {rec_id} (iter: {reclass_iter})")
         
         # get rates
         try:
@@ -1006,7 +1053,7 @@ class radio_project():
             # export
             #class_dat.to_csv(os.path.join(self.output_dir,'freq_code_%s_rec_%s_class_%s.csv'%(freq_code, rec_id, reclass_iter)))
             
-            print ('Fish %s at receiver %s classified'%(freq_code,rec_id))
+            logger.debug(f"    ✓ {freq_code} at {rec_id}: {sum(classification)} true, {len(classification)-sum(classification)} false")
             # next step looks at results
         
         # else:
@@ -1015,6 +1062,9 @@ class radio_project():
     def classification_summary(self,rec_id,reclass_iter = None): 
         '''if this is not the initial classification we need the trues from the last 
         last classification and falses from the first'''
+        
+        iter_label = f"iteration {reclass_iter}" if reclass_iter else "initial classification"
+        logger.info(f"Generating classification summary for {rec_id} ({iter_label})")
                 
         if reclass_iter == None:
             classified_dat = pd.read_hdf(self.db,
@@ -1024,32 +1074,36 @@ class radio_project():
             classified_dat = pd.read_hdf(self.db,
                                          key = 'classified',
                                          where = f'(iter == {reclass_iter}) & (rec_id == "{rec_id}")')
+        
+        logger.info(f"  Loaded {len(classified_dat)} classified detections")
                     
-        print ("")
-        print ("Classification summary statistics report %s"%(rec_id))
-        print ("----------------------------------------------------------------------------------")
+        logger.info("")
+        logger.info(f"Classification Summary Report: {rec_id}")
+        logger.info("="*80)
         det_class_count = classified_dat.groupby('test')['test'].count().to_frame()
         if len(det_class_count)>1:
-            print ("")
-            print ("%s detection class statistics:"%(rec_id))
-            print ("The probability that a detection was classified as true was %s"%((round(float(det_class_count.at[1,'test'])/float(det_class_count.sum()),3))))
-            print ("The probability that a detection was classified as false positive was %s"%((round(float(det_class_count.at[0,'test'])/float(det_class_count.sum()),3))))
-            print ("")
-            print ("----------------------------------------------------------------------------------")
-            print ("")
+            logger.info("")
+            logger.info(f"{rec_id} detection class statistics:")
+            prob_true = round(float(det_class_count.at[1,'test'])/float(det_class_count.sum()),3)
+            prob_false = round(float(det_class_count.at[0,'test'])/float(det_class_count.sum()),3)
+            logger.info(f"  P(classified as true) = {prob_true}")
+            logger.info(f"  P(classified as false positive) = {prob_false}")
+            logger.info("")
+            logger.info("="*80)
+            logger.info("")
             sta_class_count = classified_dat.groupby(['rec_id','test'])['test'].count().to_frame()#.reset_index(drop = False)
             recs = list(set(sta_class_count.index.levels[0]))
-            print ("Detection Class Counts Across Stations")
-            print ("          Classified     Classified")
-            print ("             False          True")
-            print ("       ______________________________")
-            print ("      |              |              |")
+            logger.info("Detection Class Counts Across Stations")
+            logger.info("          Classified     Classified")
+            logger.info("             False          True")
+            logger.info("       ______________________________")
+            logger.info("      |              |              |")
             for i in recs:
-                print ("%6s|   %8s   |   %8s   |"%(i,sta_class_count.loc[(i,0)].values[0],sta_class_count.loc[(i,1)].values[0]))
-            print ("      |______________|______________|")
-            print ("")
-            print ("----------------------------------------------------------------------------------")
-            print ("----------------------------------------------------------------------------------")
+                logger.info("%6s|   %8s   |   %8s   |"%(i,sta_class_count.loc[(i,0)].values[0],sta_class_count.loc[(i,1)].values[0]))
+            logger.info("      |______________|______________|")
+            logger.info("")
+            logger.info("="*80)
+            logger.info("Compiling classification figures...")
 
             # Plot the log likelihood ratio
             classified_dat['log_posterior_ratio'] = np.log10(classified_dat.posterior_T / classified_dat.posterior_F)
@@ -1152,8 +1206,8 @@ class radio_project():
             # Show the plot
             plt.show()
         else:
-           print("There were insufficient data to quantify summary statistics")
-           print("All remaining were classified as %s suggesting there is no more improvement in the model"%(det_class_count.index[0]))
+           logger.warning("Insufficient data to quantify summary statistics")
+           logger.warning(f"All remaining classified as {det_class_count.index[0]} - no more model improvement expected")
 
     def undo_classification(self, rec_id, freq_code=None, class_iter=None):
         # Read the table from the HDF5 file
@@ -1223,13 +1277,16 @@ class radio_project():
 
     def make_recaptures_table(self, export=True, pit_study=False):
         '''Creates a recaptures key in the HDF5 file, iterating over receivers to manage memory.'''
+        logger.info("Creating recaptures table")
+        logger.info(f"  Processing {len(self.receivers)} receiver(s)")
+        
         if pit_study==False:
             # Convert release dates to datetime if not already done
             self.tags['rel_date'] = pd.to_datetime(self.tags['rel_date'])
             tags_copy = self.tags.copy()
-            for rec in self.receivers.index:
-            #for rec in ['R14a','R14b']:
-                print(f'Processing receiver {rec}...')
+            
+            for rec in tqdm(self.receivers.index, desc="Processing receivers", unit="receiver"):
+                logger.info(f"  Processing receiver {rec}...")
     
                 # Read classified data for this receiver as a Dask DataFrame
                 # Reading the data (assuming self.db and rec are predefined variables)
@@ -1243,12 +1300,12 @@ class radio_project():
                 
                 # Calculate seconds since Unix epoch
                 rec_dat['epoch'] = (rec_dat['time_stamp'] - pd.Timestamp("1970-01-01")) // pd.Timedelta('1s')
-                print(f"Length of rec_dat after initial load: {len(rec_dat)}")
+                logger.debug(f"    Initial load: {len(rec_dat)} detections")
     
                 # Merge with release dates to filter out data before release
                 rec_dat = rec_dat.merge(tags_copy, left_on='freq_code', right_index=True)
                 rec_dat = rec_dat[rec_dat['time_stamp'] >= rec_dat['rel_date']]
-                print(f"Length of rec_dat after merging with release dates: {len(rec_dat)}")
+                logger.debug(f"    After release date filter: {len(rec_dat)} detections")
     
                 # Reset index to avoid ambiguity between index and column labels
                 if 'freq_code' in rec_dat.columns and 'freq_code' in rec_dat.index.names:
@@ -1258,8 +1315,7 @@ class radio_project():
                 idxmax_values = rec_dat.iter.max()
                 rec_dat = rec_dat[rec_dat.iter == idxmax_values]
                 rec_dat = rec_dat[rec_dat['test'] == 1]
-                #print(f"Columns in rec_dat after filtering by iter and test: {rec_dat.columns}")
-                print(f"Length of rec_dat after filtering by iter and test: {len(rec_dat)}")
+                logger.debug(f"    After filtering (iter={idxmax_values}, test=1): {len(rec_dat)} detections")
 
                 # Check if 'presence' exists before trying to read it
                 presence_data = dd.read_hdf(self.db, key='presence')
@@ -1274,12 +1330,12 @@ class radio_project():
                         presence_data = presence_data[presence_data['rec_id'] == rec].compute()
                         presence_data = presence_data[presence_data['freq_code'].isin(self.tags[self.tags.tag_type=='study'].index)]
                         presence_data = presence_data[['freq_code', 'epoch', 'rec_id', 'bout_no']]
-                        print(f"Length of presence_data: {len(presence_data)}")
+                        logger.debug(f"    Presence data: {len(presence_data)} records")
 
                     except KeyError:
-                        print(f"WARNING: No presence data found for receiver {rec}. Skipping presence merge.")
+                        logger.warning(f"    No presence data found for {rec}, skipping presence merge")
                 else:
-                    print(f"WARNING: 'presence' key not found in HDF5. Skipping presence merge.")                    
+                    logger.warning("    'presence' key not found in HDF5, skipping presence merge")                    
     
                 # Read overlap data
                 overlap_data = dd.read_hdf(self.db, key='overlapping')
@@ -1294,13 +1350,12 @@ class radio_project():
                         overlap_data = overlap_data[overlap_data['rec_id'] == rec].compute()
                         overlap_data = overlap_data[overlap_data['freq_code'].isin(self.tags[self.tags.tag_type=='study'].index)]
                         overlap_data = overlap_data.groupby(['freq_code', 'epoch', 'rec_id'])['overlapping'].max().reset_index()
-                        print(f"Length of overlap_data: {len(overlap_data)}")
+                        logger.debug(f"    Overlap data: {len(overlap_data)} records")
 
                     except KeyError:
-                        print(f"WARNING: No overlap data found for receiver {rec}. Skipping overlap merge.")
+                        logger.warning(f"    No overlap data found for {rec}, skipping overlap merge")
                 else:
-                    
-                    print(f"WARNING: 'overlapping' key not found in HDF5. Skipping overlap merge.")
+                    logger.warning("    'overlapping' key not found in HDF5, skipping overlap merge")
     
                 # Merge with presence data
                 if presence_exists:
@@ -1318,8 +1373,7 @@ class radio_project():
                 
                 #rec_dat = rec_dat[rec_dat['overlapping'] != 1]
     
-                #print(f"Columns in rec_dat after merging with presence and overlap data: {rec_dat.columns}")
-                print(f"Length of rec_dat after merging with presence and overlap data: {len(rec_dat)}")
+                logger.debug(f"    After presence/overlap merge: {len(rec_dat)} detections")
     
                 # Check for required columns
                 required_columns = ['freq_code', 'rec_id', 'epoch', 'time_stamp', 'power', 'noise_ratio',
@@ -1328,7 +1382,7 @@ class radio_project():
                 
                 missing_columns = [col for col in required_columns if col not in rec_dat.columns]
                 if missing_columns:
-                    print(f"The following required columns are missing: {missing_columns}")
+                    logger.error(f"    Required columns missing: {missing_columns}")
                     continue
     
                 # Sort by freq code and epoch
@@ -1358,11 +1412,10 @@ class radio_project():
                 })
     
                 # Prompt to confirm importing the data
-                #print(f"Final columns in rec_dat: {rec_dat.columns}")
-                print(f"Final length of rec_dat: {len(rec_dat)}")
+                logger.debug(f"    Final: {len(rec_dat)} detections for {rec}")
                 import_confirmation = input("Do you want to import the data into the database? (yes/no): ").strip().lower()
                 if import_confirmation != 'yes':
-                    print("Data import canceled.")
+                    logger.info("Data import canceled by user")
                     return
     
                 # Append to the HDF5 file
@@ -1371,23 +1424,23 @@ class radio_project():
                                  index=False, min_itemsize={'freq_code': 20, 'rec_id': 20, 'det_hist': 20},
                                  append=True, chunksize=1000000, data_columns=True)
     
-                print(f'Recaps for receiver {rec} compiled.')
+                logger.info(f"  ✓ Recaps for {rec} compiled")
                 
         else:
             # Loop over each receiver in self.receivers
-            for rec in self.receivers.index:
-                print(f'Processing receiver {rec} (PIT study)...')
+            for rec in tqdm(self.receivers.index, desc="Processing PIT receivers", unit="receiver"):
+                logger.info(f"  Processing {rec} (PIT study)...")
         
                 # Read PIT data (already parsed from your text files) from /raw_data in HDF5
                 try:
                     pit_data = pd.read_hdf(self.db, key='raw_data')
                 except KeyError:
-                    print("No 'raw_data' key found in the HDF5 file.")
+                    logger.error("  No 'raw_data' key found in HDF5 file")
                     continue
         
                 # Filter rows so that only the specified receiver is kept
                 pit_data = pit_data[pit_data['rec_id'] == rec]
-                print(f"Length of pit_data after filtering for {rec}: {len(pit_data)}")
+                logger.debug(f"    Filtered PIT data: {len(pit_data)} detections")
         
                 # Add any missing columns to align with the acoustic (non-PIT) columns
                 missing_cols = [
@@ -1413,9 +1466,9 @@ class radio_project():
                             pit_data = pit_data.merge(presence_data, on=['freq_code', 'epoch', 'rec_id'], how='left')
                             pit_data['bout_no'] = pit_data['bout_no'].fillna(0).astype(int)
                     except KeyError:
-                        print(f"WARNING: No presence data found for receiver {rec}. Skipping presence merge.")
+                        logger.warning(f"    No presence data found for {rec}, skipping presence merge")
                 else:
-                    print(f"WARNING: 'presence' key not found in HDF5. Skipping presence merge.")
+                    logger.warning("    'presence' key not found in HDF5, skipping presence merge")
         
                 # Check if 'overlapping' exists before trying to read it
                 with pd.HDFStore(self.db, mode='r') as store:
@@ -1432,9 +1485,9 @@ class radio_project():
                             pit_data = pit_data.merge(overlap_data, on=['freq_code', 'epoch', 'rec_id'], how='left')
                             pit_data['overlapping'] = pit_data['overlapping'].fillna(0).astype(int)
                     except KeyError:
-                        print(f"WARNING: No overlap data found for receiver {rec}. Skipping overlap merge.")
+                        logger.warning(f"    No overlap data found for {rec}, skipping overlap merge")
                 else:
-                    print(f"WARNING: 'overlapping' key not found in HDF5. Skipping overlap merge.")
+                    logger.warning("    'overlapping' key not found in HDF5, skipping overlap merge")
         
                 # Sort PIT data by freq_code and epoch
                 pit_data = pit_data.sort_values(['freq_code', 'epoch'])
@@ -1461,7 +1514,7 @@ class radio_project():
                 # Confirm with user before appending PIT data into 'recaptures'
                 confirm = input("Import PIT data? (yes/no): ").strip().lower()
                 if confirm != 'yes':
-                    print("Import canceled.")
+                    logger.info("PIT data import canceled by user")
                     return
         
                 # Convert 'det_hist' to string to avoid serialization issues
@@ -1481,14 +1534,14 @@ class radio_project():
                         data_columns=True
                     )
         
-                print(f"PIT recaps for receiver {rec} compiled.")
+                logger.info(f"  ✓ PIT recaps for {rec} compiled")
 
 
         if export:
-            print("Exporting to CSV...")
+            logger.info("Exporting recaptures to CSV...")
             rec_data = dd.read_hdf(self.db, 'recaptures').compute()
             rec_data.to_csv(os.path.join(self.output_dir,'recaptures.csv'), index=False)
-            print("Export completed.")
+            logger.info(f"  ✓ Export complete: {os.path.join(self.output_dir,'recaptures.csv')}")
 
                 
     def undo_recaptures(self):
@@ -1499,10 +1552,11 @@ class radio_project():
         h5file (str): The path to the HDF5 file.
         key (str): The key to be removed from the HDF5 file.
         """
+        logger.info("Removing recaptures from database")
         with pd.HDFStore(self.db, mode='a') as store:
             if 'recaptures' in store:
                 store.remove('recaptures')
-                print(f"Recaptures has been removed from the HDF5 file.")
+                logger.info("  ✓ Recaptures removed from HDF5 file")
                     
     def undo_overlap(self):
         """
@@ -1512,10 +1566,11 @@ class radio_project():
         h5file (str): The path to the HDF5 file.
         key (str): The key to be removed from the HDF5 file.
         """
+        logger.info("Removing overlapping from database")
         with pd.HDFStore(self.db, mode='a') as store:
             if 'overlapping' in store:
                 store.remove('overlapping')
-                print(f"Overlapping has been removed from the HDF5 file.")
+                logger.info("  ✓ Overlapping removed from HDF5 file")
                 
     def new_db_version(self, output_h5):
         """
@@ -1529,15 +1584,17 @@ class radio_project():
         Parameters:
         output_h5 (str): The file name for the new HDF5 file.
         """
+        logger.info(f"Creating new database version: {output_h5}")
 
         # Copy the HDF5 file
         shutil.copyfile(self.db, output_h5)
+        logger.info("  Database copied")
 
         # Open the copied HDF5 file
         with h5py.File(output_h5, 'r+') as hdf:
             # List all keys in the file
             keys = list(hdf.keys())
-            print("Keys in HDF5 file:", keys)
+            logger.info(f"  Keys in HDF5 file: {', '.join(keys)}")
 
             # Ask the user to input the keys they want to modify
             selected_keys = input("Enter the keys you want to modify, separated by commas: ").split(',')
@@ -1547,27 +1604,28 @@ class radio_project():
 
             for key in selected_keys:
                 if key in hdf:
-                    print(f"Processing key: '{key}'...")
+                    logger.info(f"  Processing key: '{key}'...")
                     
                     # If it's a group, recursively delete all datasets (subkeys)
                     if isinstance(hdf[key], h5py.Group):
-                        print(f"Key '{key}' is a group. Deleting all subkeys...")
+                        logger.info(f"    Key '{key}' is a group, deleting all subkeys...")
                         for subkey in list(hdf[key].keys()):
-                            print(f"Removing subkey: '{key}/{subkey}'")
+                            logger.debug(f"      Removing subkey: '{key}/{subkey}'")
                             del hdf[key][subkey]
-                        print(f"All subkeys under group '{key}' have been deleted.")
+                        logger.info(f"    All subkeys under '{key}' deleted")
                     else:
                         # It's a dataset, clear the data in the DataFrame
-                        print(f"Clearing data for dataset key: '{key}'")
+                        logger.info(f"    Clearing data for dataset key: '{key}'")
                         df = pd.read_hdf(output_h5, key)
                         df.drop(df.index, inplace=True)
                         df.to_hdf(output_h5, key, mode='a', format='table', data_columns=True)
-                        print(f"Data cleared for key: '{key}'")
+                        logger.info(f"    Data cleared for key: '{key}'")
                 else:
-                    print(f"Key '{key}' not found in HDF5 file.")
+                    logger.warning(f"  Key '{key}' not found in HDF5 file")
 
         # Update the project's database to the new copied database
         self.db = output_h5
+        logger.info(f"✓ New database version created: {output_h5}")
 
             
                     
