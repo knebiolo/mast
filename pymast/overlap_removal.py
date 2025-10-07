@@ -6,9 +6,11 @@ overlapping detections from radio telemetry data.
 
 # import modules required for function dependencies
 import os
+import logging
 import numpy as np
 import pandas as pd
 from concurrent.futures import ProcessPoolExecutor
+from tqdm import tqdm
 
 from scipy.optimize import curve_fit, minimize
 from scipy.interpolate import UnivariateSpline
@@ -701,6 +703,9 @@ class overlap_reduction:
         This method reads and filters data from the project database for each node and stores 
         the processed data in dictionaries (`node_pres_dict` and `node_recap_dict`).
         """
+        logger = logging.getLogger(__name__)
+        logger.info("Initializing overlap_reduction")
+        
         self.db = radio_project.db
         self.project = radio_project
         self.nodes = nodes
@@ -711,8 +716,10 @@ class overlap_reduction:
         self.node_pres_dict = {}
         self.node_recap_dict = {}
         
+        logger.info(f"  Loading data for {len(nodes)} nodes")
+        
         # Read and preprocess data for each node
-        for node in nodes:
+        for node in tqdm(nodes, desc="Loading nodes", unit="node"):
             # Read data from the HDF5 database for the given node, applying filters using the 'where' parameter
             pres_data = pd.read_hdf(
                 self.db,
@@ -742,7 +749,9 @@ class overlap_reduction:
             # Store the processed data in the dictionaries
             self.node_pres_dict[node] = summarized_data
             self.node_recap_dict[node] = recap_data
-            print(f"Completed data management process for node {node}")
+            logger.debug(f"  {node}: {len(pres_data)} presence records, {len(recap_data)} detections")
+        
+        logger.info(f"✓ Data loaded for {len(nodes)} nodes")
 
     def unsupervised_removal(self):
         """
@@ -835,10 +844,14 @@ class overlap_reduction:
         """
         Identify and mark overlapping detections between parent and child nodes.
         """
+        logger = logging.getLogger(__name__)
+        logger.info("Starting nested_doll overlap detection")
+        logger.info("  Method: Interval-based (conservative)")
+        
         overlaps_found = False
         overlap_count = 0
         
-        for i in self.node_recap_dict:
+        for i in tqdm(self.node_recap_dict, desc="Processing nodes", unit="node"):
             fishes = self.node_recap_dict[i].freq_code.unique()
 
             for j in fishes:
@@ -885,9 +898,10 @@ class overlap_reduction:
                 #                   chunksize=1000000)
 
         if overlaps_found:
-            print(f"Overlaps were found and processed. Total number of overlaps: {overlap_count}.")
+            logger.info(f"✓ Nested doll complete")
+            logger.info(f"  Total overlaps found: {overlap_count}")
         else:
-            print("No overlaps were found.")
+            logger.info("✓ Nested doll complete - no overlaps found")
 
     def write_results_to_hdf5(self, df):
         """
@@ -899,6 +913,7 @@ class overlap_reduction:
         The function appends data to the 'overlapping' table in the HDF5 database, ensuring 
         that each record is written incrementally to minimize memory usage.
         """
+        logger = logging.getLogger(__name__)
         try:
             df = df.astype({
                 'freq_code': 'object',
@@ -914,8 +929,10 @@ class overlap_reduction:
                     data_columns=True,
                     min_itemsize={'freq_code': 20, 'rec_id': 20}
                 )
+            logger.debug(f"    Wrote {len(df)} detections to /overlapping")
         except Exception as e:
-            print(f"Error writing to HDF5: {e}")
+            logger.error(f"Error writing to HDF5: {e}")
+            raise
 
 
 
