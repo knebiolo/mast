@@ -395,7 +395,7 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
         self.recap_data = pd.read_hdf(project.db,
                                       'recaptures',
                                       where = qry)#"rec_id == 'R11'")
-        self.recap_data = self.recap_data[self.recap_data.hit_ratio > 0.1]
+        #self.recap_data = self.recap_data[self.recap_data.hit_ratio > 0.1]
         self.recap_data.drop(columns = ['power',
                                         'noise_ratio',
                                         'det_hist',
@@ -558,27 +558,27 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
                                     inplace = True)
             self.start_times.set_index('freq_code', inplace = True) 
         else:
-            # movement from state 1
+            # Model movement from state 1 onwards (competing risks from state 1)
+            # Use the first detection in state 1 as the starting point for each fish
             self.start_times = self.recap_data[self.recap_data.state == 1].\
                 groupby(['freq_code'])['epoch'].min().\
                     to_frame()
             
-            # movement from first recapture        
-            # self.start_times = (
-            #     self.recap_data
-            #     .groupby(['freq_code'])['epoch']
-            #     .min()
-            #     .to_frame()
-            # )
-
             self.start_times.rename(columns = {'epoch':'first_recapture'},
                                     inplace = True)
 
-            # Clean Up stuff that doesn't make sense
-            for fish in self.recap_data.freq_code.unique():
-                # we only care about movements from the initial sstate - this is a competing risks model
-                if fish not in self.start_times.index:
-                    self.recap_data = self.recap_data[self.recap_data.freq_code != fish]
+            # Only keep fish that have detections in state 1 (the starting state for this model)
+            fish_with_state1 = set(self.start_times.index)
+            self.recap_data = self.recap_data[self.recap_data.freq_code.isin(fish_with_state1)]
+            
+            # Remove any detections that occur BEFORE the first state 1 detection for each fish
+            # This prevents negative durations but maintains the competing risks model structure
+            for fish in fish_with_state1:
+                first_state1_time = self.start_times.at[fish, 'first_recapture']
+                self.recap_data = self.recap_data[
+                    (self.recap_data.freq_code != fish) | 
+                    (self.recap_data.epoch >= first_state1_time)
+                ]
 
     def data_prep(self, project, unknown_state=None, bucket_length_min=15, adjacency_filter=None):
         self.project = project
@@ -592,7 +592,10 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
         self.bucket_length = bucket_length_min
     
         # Sorting recap_data by freq_code and epoch for efficient processing
-        self.recap_data.sort_values(by=['freq_code', 'epoch'], ascending=True, inplace=True)
+        # But ensure release records (state 0) always come first for each fish
+        self.recap_data['is_release'] = (self.recap_data['state'] == 0).astype(int)
+        self.recap_data.sort_values(by=['freq_code', 'is_release', 'epoch'], ascending=[True, False, True], inplace=True)
+        self.recap_data.drop('is_release', axis=1, inplace=True)
     
         # if self.initial_state_release == True:
         #     # Merge start_times into recap_data based on freq_code
@@ -612,23 +615,21 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
     
         # Initialize state tracking columns
         self.recap_data['prev_state'] = self.recap_data.groupby('freq_code')['state'].shift(1).fillna(0).astype(int)
-        if self.initial_state_release == False:
-            self.recap_data = self.recap_data[self.recap_data.prev_state > 0]
+        
+        # Fix: Release records (state 0) should always have prev_state = 0 (no previous state)
+        # This prevents impossible transitions like (1→0), (2→0), etc.
+        self.recap_data.loc[self.recap_data['state'] == 0, 'prev_state'] = 0
         # Set time_0 to the previous epoch or first_recapture if it's the first observation
         self.recap_data['time_0'] = self.recap_data.groupby('freq_code')['epoch'].shift(1)
         self.recap_data['time_0'].fillna(self.recap_data['first_recapture'], inplace=True)
     
         self.recap_data['time_delta'] = self.recap_data['epoch'] - self.recap_data['time_0']
     
-        # Identify the rows where state changes or the fish changes (new fish)
+        # Identify the rows where state changes occur (actual transitions only)
         state_change_mask = self.recap_data['state'] != self.recap_data['prev_state']
-        last_recapture_mask = self.recap_data.groupby('freq_code')['epoch'].transform('max') == self.recap_data['epoch']
-        mask = state_change_mask | last_recapture_mask
-    
-        # Filter rows to keep only those where state changes or it's the last record for the fish
-        state_table = self.recap_data[mask].copy()
-    
-        # Fill in the remaining columns
+        
+        # Only keep actual state transitions - no artificial "end of observation" transitions
+        state_table = self.recap_data[state_change_mask].copy()        # Fill in the remaining columns
         state_table['start_state'] = state_table['prev_state'].astype('int32')
         state_table['end_state'] = state_table['state'].astype('int32')
         # drop duplicates 
@@ -792,6 +793,12 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
             self.master_state_table['time_1'].astype('int32') - 
             self.master_state_table['time_0'].astype('int32')
         )
+        
+        # Fix negative durations from release (start_state == 0) due to clock sync issues
+        # Set minimum duration of 1 second for transitions from release
+        release_mask = self.master_state_table['start_state'] == 0
+        negative_mask = self.master_state_table['dur'] < 0
+        self.master_state_table.loc[release_mask & negative_mask, 'dur'] = 1
         
         self.unique_fish_count = len(self.master_state_table['freq_code'].unique())
         self.count_per_state = self.master_state_table.groupby('end_state')['freq_code'].nunique()

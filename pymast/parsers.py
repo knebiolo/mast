@@ -1275,7 +1275,7 @@ def PIT(file_name,
         skiprows=6,
         scan_time=0,
         channels=0,
-        rec_type="PIT_Array",
+        rec_type="PIT",
         ant_to_rec_dict=None):
     
     import pandas as pd
@@ -1481,12 +1481,12 @@ def PIT(file_name,
 def PIT_Multiple(
     file_name,
     db_dir,
+    ant_to_rec_dict,
     study_tags=None,
     skiprows=0,
     scan_time=0,
     channels=0,
     rec_type="PIT_Multiple",
-    ant_to_rec_dict=None
 ):
     # Define column names based on the expected structure of the CSV
     col_names = [
@@ -1510,18 +1510,12 @@ def PIT_Multiple(
     telem_dat["freq_code"] = telem_dat["Tag1Hex"].str.strip()
 
     # Mapping Antennae values to Receiver IDs (R0001, R0002, etc.)
-    antennae_to_rec_id = {
-        1: "R0001",
-        2: "R0002",
-        3: "R0003",
-        4: "R0004",
-        5: "R0005"
-    }
+
     
     # Convert Antennae column to integer and apply mapping
     telem_dat["Antennae"] = telem_dat["Antennae"].astype(str).str.extract(r'(\d+)')  # Extract digits
     telem_dat["Antennae"] = pd.to_numeric(telem_dat["Antennae"], errors='coerce').astype("Int64")  # Convert to int
-    telem_dat["rec_id"] = telem_dat["Antennae"].map(antennae_to_rec_id)  # Map to rec_id
+    telem_dat["rec_id"] = telem_dat["Antennae"].map(ant_to_rec_id)  # Map to rec_id
 
     # Drop rows where Antennae values do not match known receivers
     telem_dat = telem_dat.dropna(subset=["rec_id"])
