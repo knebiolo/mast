@@ -1361,16 +1361,17 @@ class radio_project():
                 logger.debug(f"    After filtering (iter={idxmax_values}, test=1): {len(rec_dat)} detections")
 
                 # Check if 'presence' exists before trying to read it
-                presence_data = dd.read_hdf(self.db, key='presence')
-                
-                if len(presence_data) > 0:
+                try:
+                    presence_data = dd.read_hdf(self.db, key='presence')
+                    # Filter immediately instead of checking len() which triggers expensive compute
+                    presence_data = presence_data[presence_data['rec_id'] == rec]
                     presence_exists = True
-                else:
+                except (KeyError, FileNotFoundError):
                     presence_exists = False
                     
                 if presence_exists:
                     try:
-                        presence_data = presence_data[presence_data['rec_id'] == rec].compute()
+                        presence_data = presence_data.compute()
                         presence_data = presence_data[presence_data['freq_code'].isin(self.tags[self.tags.tag_type=='study'].index)]
                         presence_data = presence_data[['freq_code', 'epoch', 'rec_id', 'bout_no']]
                         logger.debug(f"    Presence data: {len(presence_data)} records")
@@ -1380,17 +1381,18 @@ class radio_project():
                 else:
                     logger.warning("    'presence' key not found in HDF5, skipping presence merge")                    
     
-                # Read overlap data
-                overlap_data = dd.read_hdf(self.db, key='overlapping')
-                
-                if len(overlap_data) > 0:
+                # Read overlap data - filter immediately to avoid expensive len() compute
+                try:
+                    overlap_data = dd.read_hdf(self.db, key='overlapping')
+                    # Filter to this receiver first before checking anything
+                    overlap_data = overlap_data[overlap_data['rec_id'] == rec]
                     overlap_exists = True
-                else:
+                except (KeyError, FileNotFoundError):
                     overlap_exists = False
         
                 if overlap_exists:
                     try:
-                        overlap_data = overlap_data[overlap_data['rec_id'] == rec].compute()
+                        overlap_data = overlap_data.compute()
                         overlap_data = overlap_data[overlap_data['freq_code'].isin(self.tags[self.tags.tag_type=='study'].index)]
                         overlap_data = overlap_data.groupby(['freq_code', 'epoch', 'rec_id'])['overlapping'].max().reset_index()
                         logger.debug(f"    Overlap data: {len(overlap_data)} records")
