@@ -80,8 +80,15 @@ def write_results_to_hdf5(self, df)
 
 ```python
 def unsupervised_removal(self, confidence_threshold=0.1, use_posteriors=True,
-                        fallback_to_power=False):
-    """Use Naive Bayes posterior_T to identify overlaps."""
+                                                fallback_to_power=False, min_detections=2):
+        """Use Naive Bayes posterior_T to identify overlaps.
+
+        Notes:
+        - min_detections (int): minimum number of detections per receiver inside a
+            bout required before making a removal decision. If either side has fewer
+            detections than this threshold the algorithm will conservatively keep both
+            detections for that bout (default: 2).
+        """
     
     # Key changes:
     # 1. Use posterior_T from classification (multi-factor, normalized)
@@ -99,6 +106,13 @@ FOR each parent→child edge:
         FOR each overlapping bout:
             parent_confidence = mean(parent.posterior_T)
             child_confidence = mean(child.posterior_T)
+
+            # Conservative gating: require a minimum number of detections per
+            # receiver inside the bout before making a removal decision. If
+            # either side has fewer than `min_detections`, keep both.
+            if len(parent_in_bout) < min_detections or len(child_in_bout) < min_detections:
+                keep both
+                continue
             
             IF parent_confidence - child_confidence > threshold:
                 # Fish near parent
@@ -384,7 +398,7 @@ edges = [('R01', 'R02'), ('R02', 'R03'), ('R03', 'R04')]
 overlap_obj = overlap_reduction(nodes, edges, project)
 
 # Run posterior-based removal (recommended)
-overlap_obj.unsupervised_removal(confidence_threshold=0.1)
+overlap_obj.unsupervised_removal(confidence_threshold=0.1, min_detections=2)
 
 # Results written to project.db at /overlapping key
 overlaps = pd.read_hdf(project.db, 'overlapping')
@@ -397,7 +411,15 @@ overlap_obj.nested_doll()  # More conservative
 overlap_obj.unsupervised_removal(confidence_threshold=0.2)
 
 # Example 4: Fallback to power (not recommended for mixed receivers)
-overlap_obj.unsupervised_removal(use_posteriors=False)
+overlap_obj.unsupervised_removal(use_posteriors=False, min_detections=2)
+
+### CLI: exposing min_detections
+
+The command-line script should expose the same parameter. Example:
+
+```
+python scripts/run_overlap.py --db project.h5 --method posterior --confidence 0.1 --min-detections 2
+```
 ```
 
 ---

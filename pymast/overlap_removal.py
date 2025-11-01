@@ -10,7 +10,12 @@ import logging
 import numpy as np
 import pandas as pd
 from concurrent.futures import ProcessPoolExecutor
-from tqdm import tqdm
+try:
+    from tqdm import tqdm
+except Exception:
+    # tqdm is optional — provide a lightweight passthrough iterator when not installed
+    def tqdm(iterable, **kwargs):
+        return iterable
 
 from scipy.optimize import curve_fit, minimize
 from scipy.interpolate import UnivariateSpline
@@ -24,7 +29,13 @@ from sklearn.mixture import GaussianMixture
 from sklearn.preprocessing import MinMaxScaler
 import dask.dataframe as dd
 import dask.array as da
-from dask_ml.cluster import KMeans
+try:
+    from dask_ml.cluster import KMeans
+    _KMEANS_IMPL = 'dask'
+except Exception:
+    # dask-ml may not be installed in all environments; fall back to scikit-learn
+    from sklearn.cluster import KMeans
+    _KMEANS_IMPL = 'sklearn'
 from dask import delayed
 import sys
 import matplotlib
@@ -39,6 +50,17 @@ gc.collect()
 font = {'family': 'serif','size': 6}
 rcParams['font.size'] = 6
 rcParams['font.family'] = 'serif'
+
+# Non-interactive helper: if the environment variable PYMAST_NONINTERACTIVE is set, auto-answer prompts
+_NON_INTERACTIVE = os.environ.get('PYMAST_NONINTERACTIVE', '0') in ('1', 'true', 'True')
+
+def _prompt(prompt_text, default=None):
+    if _NON_INTERACTIVE:
+        return default
+    try:
+        return input(prompt_text)
+    except Exception:
+        return default
 
 class bout():
     '''Python class object to delineate when bouts occur at receiver.'''
@@ -84,10 +106,11 @@ class bout():
         
     def prompt_for_params(self, model_type):
         if model_type == 'two_process':
+            # Use non-interactive defaults when required
             print("Please enter the values for the initial quantity (y0), the quantity at time t (yt), and the time t.")
-            y0 = float(input("Enter the initial quantity (y0): "))
-            yt = float(input("Enter the quantity at time t (yt): "))
-            t = float(input("Enter the time at which yt is observed (t): "))
+            y0 = float(_prompt("Enter the initial quantity (y0): ", default=1.0))
+            yt = float(_prompt("Enter the quantity at time t (yt): ", default=0.1))
+            t = float(_prompt("Enter the time at which yt is observed (t): ", default=10.0))
         
             # Calculate decay rate b1 using the provided y0, yt, and t
             b1 = -np.log(yt / y0) / t
@@ -107,48 +130,8 @@ class bout():
             return [a1, b1, a2, b2, t]
         
         else:
-            print ("Sorry, we don't yet support that model type")
-        # get lag frequencies
-        lags = np.arange(0,self.time_limit,2)
-        freqs, bins = np.histogram(np.sort(self.data.lag_binned),lags)
-        bins = bins[np.where(freqs > 0)]
-        freqs = freqs[np.where(freqs > 0)]
-        log_freqs = np.log(freqs)
-        
-        # Plot the raw data
-        plt.scatter(bins, log_freqs, label='Data')
-        plt.xlabel('Lag')
-        plt.ylabel('Lag Frequency')
-        plt.title('Raw Data for Two-Process Model')
-        plt.legend()
-        plt.show()
-        plt.pause(5)
-        # Prompt the user for initial parameters
-        initial_guess = self.prompt_for_params(model_type = 'two_process')
-    
-        # Perform the curve fitting
-        try:
-            params, params_covariance = curve_fit(self.two_process_model, 
-                                                  bins, 
-                                                  log_freqs, 
-                                                  p0=initial_guess)
-            
-            # Plot the fitted function
-            plt.plot(bins, self.two_process_model(bins, *params), 
-                     label='Fitted function',
-                     color='red')
-            
-            plt.scatter(bins, log_freqs, label='Data')
-            plt.legend()
-            plt.xlabel('x')
-            plt.ylabel('y')
-            plt.title('Fitted Two-Process Model')
-            plt.show()
-            plt.pause(1)
-            # Return the fitted parameters
-            return params
-        except RuntimeError as e:
-            print(f"An error occurred during fitting: {e}")
+            logger = logging.getLogger(__name__)
+            logger.warning("Unsupported model type requested in prompt_for_params()")
             return None
         
     def find_knot(self, initial_knot_guess):
@@ -369,10 +352,10 @@ class bout():
         plt.show(block=True)
         plt.pause(5)
         # Step 2: Ask user for initial knots
-        num_knots = int(input("Enter the number of knots (1 for two-process, 2 for three-process): "))
+        num_knots = int(_prompt("Enter the number of knots (1 for two-process, 2 for three-process): ", default=1))
         initial_knots = []
         for i in range(num_knots):
-            knot = float(input(f"Enter initial guess for knot {i+1}: "))
+            knot = float(_prompt(f"Enter initial guess for knot {i+1}: ", default=5.0))
             initial_knots.append(knot)
     
         # Step 3 & 4: Determine the number of processes and fit accordingly
@@ -405,53 +388,54 @@ class bout():
         '''Function takes the break point between a continuous presence and new presence,
         enumerates the presence number at a receiver and writes the data to the
         analysis database.'''
-        response = input ('Satisfied with the bout fitting?')
-        if response in ['yes', 'y', 'T','True']:
-            
-            
+        response = _prompt('Satisfied with the bout fitting?', default='yes')
+        if str(response) in ['yes', 'y', 'T', 'True']:
+
             fishes = self.data.freq_code.unique()
-            
+
             for fish in fishes:
                 fish_dat = self.data[self.data.freq_code == fish]
-            
+
                 # Vectorized classification
                 classifications = np.where(fish_dat.det_lag <= threshold, 'within_bout', 'start_new_bout')
-            
+
                 # Generating bout numbers
                 # Increment bout number each time a new bout starts
                 bout_changes = np.where(classifications == 'start_new_bout', 1, 0)
                 bout_no = np.cumsum(bout_changes)
-            
+
                 # Assigning classifications and bout numbers to the dataframe
                 fish_dat['class'] = classifications
-                fish_dat['bout_no'] = bout_no 
-                
+                fish_dat['bout_no'] = bout_no
+
                 fish_dat = fish_dat.astype({'freq_code': 'object',
                                             # 'epoch': 'float64',
                                             'epoch': 'float32',
-                                            'time_stamp':'datetime64[ns]',
+                                            'time_stamp': 'datetime64[ns]',
                                             'power': 'float32',
                                             'rec_id': 'object',
                                             'class': 'object',
-                                            'bout_no':'int32',
-                                            'det_lag':'int32'})
-        
+                                            'bout_no': 'int32',
+                                            'det_lag': 'int32'})
+
                 # append to hdf5
                 with pd.HDFStore(self.db, mode='a') as store:
-                    store.append(key = 'presence',
-                                 value = fish_dat, 
-                                 format = 'table', 
-                                 index = False,
-                                 min_itemsize = {'freq_code':20,
-                                                 'rec_id':20,
-                                                 'class':20},
-                                 append = True, 
-                                 data_columns = True,
-                                 chunksize = 1000000)
-            
-                print ('bouts classified for fish %s'%(fish))
+                    store.append(key='presence',
+                                 value=fish_dat,
+                                 format='table',
+                                 index=False,
+                                 min_itemsize={'freq_code': 20,
+                                               'rec_id': 20,
+                                               'class': 20},
+                                 append=True,
+                                 data_columns=True,
+                                 chunksize=1000000)
+
+                logger = logging.getLogger(__name__)
+                logger.info('bouts classified for fish %s', fish)
         else:
-            print ('Give the fitting another try')
+            logger = logging.getLogger(__name__)
+            logger.error('Give the fitting another try')
             sys.exit()
  
 # class overlap_reduction():
@@ -721,30 +705,179 @@ class overlap_reduction:
         # Read and preprocess data for each node
         for node in tqdm(nodes, desc="Loading nodes", unit="node"):
             # Read data from the HDF5 database for the given node, applying filters using the 'where' parameter
-            pres_data = pd.read_hdf(
-                self.db,
-                'presence',
-                columns=['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id', 'bout_no'],
-                where=f"rec_id == {node}"
-            )
-            recap_data = pd.read_hdf(
-                self.db,
-                'classified',
-                columns=['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id', 'iter', 'test'],
-                where=f"(rec_id == {node}) & (test == 1)"
-            )
+            pres_where = f"rec_id == '{node}'"
+            used_full_presence_read = False
+            try:
+                pres_data = pd.read_hdf(
+                    self.db,
+                    'presence',
+                    columns=['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id', 'bout_no'],
+                    where=pres_where
+                )
+            except (TypeError, ValueError):
+                # Some stores are fixed-format and don't support column selection — read entire table
+                used_full_presence_read = True
+                pres_data = pd.read_hdf(self.db, 'presence')
+
+            # If we read zero rows, attempt a few fast alternate WHERE clauses that
+            # handle common formatting differences (e.g. 'R02' vs '2' vs '02') before
+            # performing a full-table in-memory fallback which is expensive.
+            if len(pres_data) == 0 and not used_full_presence_read:
+                tried_variants = []
+                node_str = str(node)
+                # generate candidate rec_id variants
+                variants = []
+                variants.append(node_str)
+                if node_str.startswith(('R', 'r')):
+                    variants.append(node_str[1:])
+                # strip leading zeros
+                variants.append(node_str.lstrip('0'))
+                variants.append(node_str.lstrip('R').lstrip('0'))
+                # numeric candidate
+                try:
+                    variants.append(str(int(''.join(filter(str.isdigit, node_str)))))
+                except Exception:
+                    pass
+                # dedupe while preserving order
+                seen = set()
+                variants_clean = []
+                for v in variants:
+                    if not v:
+                        continue
+                    if v not in seen:
+                        seen.add(v)
+                        variants_clean.append(v)
+
+                for cand in variants_clean:
+                    tried_variants.append(cand)
+                    alt_where = f"rec_id == '{cand}'"
+                    try:
+                        alt_pres = pd.read_hdf(
+                            self.db,
+                            'presence',
+                            columns=['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id', 'bout_no'],
+                            where=alt_where
+                        )
+                        if len(alt_pres) > 0:
+                            pres_data = alt_pres
+                            logger.info("Node %s: found %d presence rows using alternate WHERE rec_id == '%s'", node, len(pres_data), cand)
+                            break
+                    except (TypeError, ValueError):
+                        # column/where not supported on this store — give up trying alternates
+                        logger.debug("Node %s: alternate WHERE '%s' not supported by store", node, alt_where)
+                        break
+                    except Exception:
+                        # If this specific candidate failed, try the next
+                        logger.debug("Node %s: alternate WHERE '%s' did not match", node, alt_where)
+                        continue
+
+            classified_where = f"(rec_id == '{node}') & (test == 1)"
+            # Try to read classified with posterior columns if present
+            try:
+                recap_data = pd.read_hdf(
+                    self.db,
+                    'classified',
+                    columns=['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id', 'iter', 'test', 'posterior_T', 'posterior_F'],
+                    where=classified_where
+                )
+            except (KeyError, TypeError, ValueError):
+                # Fallback: read the whole classified table for the node
+                try:
+                    recap_data = pd.read_hdf(self.db, 'classified')
+                    recap_data = recap_data.query(classified_where)
+                except Exception:
+                    # If classified isn't available, try recaptures
+                    try:
+                        recap_data = pd.read_hdf(self.db, 'recaptures')
+                        recap_data = recap_data.query(f"rec_id == '{node}'")
+                    except Exception:
+                        recap_data = pd.DataFrame()
         
             # Further filter recap_data for the max iteration
             recap_data = recap_data[recap_data['iter'] == recap_data['iter'].max()]
 
             # Group presence data by frequency code and bout, then calculate min, max, and median
+            # Ensure presence has a 'power' column by merging power from the
+            # classified/recaptures table when available. We don't change how
+            # presence is originally created (bouts), we only attach power here
+            # for downstream aggregation.
+            if 'power' not in pres_data.columns and not recap_data.empty and 'power' in recap_data.columns:
+                try:
+                    pres_data = pres_data.merge(
+                        recap_data[['freq_code', 'epoch', 'rec_id', 'power']],
+                        on=['freq_code', 'epoch', 'rec_id'],
+                        how='left'
+                    )
+                except Exception:
+                    # If merge fails for any reason, continue without power —
+                    # grouping will produce NaNs for median_power which is OK.
+                    logger.debug('Could not merge power from recap_data into pres_data; continuing without power')
+
+            # Group presence data by frequency code and bout, then calculate min, max, and median power
             summarized_data = pres_data.groupby(['freq_code', 'bout_no', 'rec_id']).agg(
                 min_epoch=('epoch', 'min'),
                 max_epoch=('epoch', 'max'),
                 median_power=('power', 'median')
             ).reset_index()
             
-            print (f"length of presence data {len(pres_data)}")
+            # Log detailed counts so users can see raw vs summarized presence lengths
+            raw_count = len(pres_data)
+            summarized_count = len(summarized_data)
+            logger.info(f"Node {node}: raw presence rows={raw_count}, summarized bouts={summarized_count}")
+
+            # If we had to read the full presence table, warn (this can be slow and surprising)
+            if used_full_presence_read:
+                logger.warning(
+                    "Node %s: had to read entire 'presence' table (fixed-format store); this may be slow and cause large raw counts. WHERE used: %s",
+                    node,
+                    pres_where,
+                )
+
+            # If counts are zero or unexpectedly large, include a small sample and the WHERE clause to help debug
+            if raw_count == 0 or raw_count > 100000:
+                try:
+                    sample_head = pres_data.head(10).to_dict(orient='list')
+                except Exception:
+                    sample_head = '<unavailable>'
+                logger.debug(
+                    "Node %s: pres_data sample (up to 10 rows)=%s; WHERE=%s",
+                    node,
+                    sample_head,
+                    pres_where,
+                )
+
+            # If we got zero rows from the column/where read, try a safe in-memory
+            # fallback: read the full presence table and match rec_id after
+            # normalizing (strip/upper). This can detect formatting mismatches
+            # (e.g. numeric vs string rec_id, padding, whitespace).
+            if raw_count == 0 and not used_full_presence_read:
+                try:
+                    logger.debug(
+                        "Node %s: attempting in-memory fallback full-table read to find rec_id matches",
+                        node,
+                    )
+                    full_pres = pd.read_hdf(self.db, 'presence')
+                    if 'rec_id' in full_pres.columns:
+                        node_norm = str(node).strip().upper()
+                        full_pres['_rec_norm'] = full_pres['rec_id'].astype(str).str.strip().str.upper()
+                        candidate = full_pres[full_pres['_rec_norm'] == node_norm]
+                        if len(candidate) > 0:
+                            # select expected columns if present
+                            cols = [c for c in ['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id', 'bout_no'] if c in candidate.columns]
+                            pres_data = candidate[cols].copy()
+                            raw_count = len(pres_data)
+                            used_full_presence_read = True
+                            logger.info(
+                                "Node %s: found %d presence rows after in-memory normalization of rec_id",
+                                node,
+                                raw_count,
+                            )
+                        else:
+                            logger.debug("Node %s: in-memory full-table read did not find rec_id matches", node)
+                    else:
+                        logger.debug("Node %s: 'rec_id' column not present in full presence table", node)
+                except Exception as e:
+                    logger.debug("Node %s: in-memory fallback failed: %s", node, str(e))
 
             # Store the processed data in the dictionaries
             self.node_pres_dict[node] = summarized_data
@@ -753,92 +886,213 @@ class overlap_reduction:
         
         logger.info(f"✓ Data loaded for {len(nodes)} nodes")
 
-    def unsupervised_removal(self):
+    def unsupervised_removal(self, method='posterior', confidence_threshold=0.1, power_threshold=0.2, min_detections=2, bout_expansion=5):
         """
-        Iterates through each presence bout in the parent data and identifies overlaps
-        in the child data for each fish (freq_code). Uses statistical tests to determine 
-        which receiver has the higher power for the overlapping detections and stores the result.
+        Unsupervised overlap removal supporting multiple methods.
+
+        Parameters
+        ----------
+        method : {'posterior', 'power'}
+            'posterior' (default) uses `posterior_T` columns produced by the
+            Naive Bayes classifier (recommended for radio telemetry).
+            'power' compares median power in overlapping bouts (fallback).
+        confidence_threshold : float
+            Minimum absolute difference in mean posterior_T required to mark the
+            lower-confidence receiver as overlapping.
+        power_threshold : float
+            Relative difference threshold for power-based decisions; computed
+            as (parent_median - child_median) / max(parent_median, child_median).
         """
-        for i, (parent, child) in enumerate(self.edges):
-            print(f"Processing edge {i+1}/{len(self.edges)}: {parent} -> {child}")
-    
-            parent_bouts = self.node_pres_dict[parent]
-            parent_dat = self.node_recap_dict[parent]
-            child_dat = self.node_recap_dict[child]
-    
-            if parent_bouts.empty or parent_dat.empty or child_dat.empty:
+        logger = logging.getLogger(__name__)
+        logger.info(f"Starting unsupervised overlap removal (method={method})")
+        overlaps_processed = 0
+        detections_marked = 0
+        decisions = {'remove_parent': 0, 'remove_child': 0, 'keep_both': 0}
+
+        # Precompute per-node, per-bout summaries (indices, posterior means, median power)
+        # and build IntervalTrees per fish for fast overlap queries. This avoids
+        # repeated mean()/median() computations inside the tight edge loops.
+        node_bout_index = {}   # node -> fish -> list of bout dicts
+        node_bout_trees = {}   # node -> fish -> IntervalTree
+        for node, bouts in self.node_pres_dict.items():
+            recaps = self.node_recap_dict.get(node, pd.DataFrame())
+            node_bout_index[node] = {}
+            node_bout_trees[node] = {}
+            if bouts.empty or recaps.empty:
                 continue
-    
-            # Iterate over each unique fish (freq_code) in the parent data
-            for fish_id in parent_bouts['freq_code'].unique():
-                print(f"Processing fish ID: {fish_id}")
-    
-                # Filter the parent and child data for the current fish
-                parent_fish_bouts = parent_bouts[parent_bouts['freq_code'] == fish_id]
-                parent_fish_dat = parent_dat[parent_dat['freq_code'] == fish_id]
-                child_fish_dat = child_dat[child_dat['freq_code'] == fish_id]
-                
-    
-                max_parent_power = parent_fish_dat.power.max()
-                max_child_power = child_fish_dat.power.max()
-    
-                # Skip if there's no data for this fish in either parent or child
-                if parent_fish_bouts.empty or parent_fish_dat.empty or child_fish_dat.empty:
-                    print(f"No data for fish ID {fish_id} in parent or child receiver")
-                    continue
-    
-                # Iterate over each bout for the current fish in the parent data
-                for _, parent_row in parent_fish_bouts.iterrows():
-                    # Extract and normalize the power values separately for parent and child bouts
-                    parent_power = parent_fish_dat[
-                        (parent_fish_dat['epoch'] <= parent_row['max_epoch']) & 
-                        (parent_fish_dat['epoch'] >= parent_row['min_epoch'])
-                    ].power.values
-                    
-                    child_power = child_fish_dat[
-                        (child_fish_dat['epoch'] <= parent_row['max_epoch']) & 
-                        (child_fish_dat['epoch'] >= parent_row['min_epoch'])
-                    ].power.values
-                    
-                    if len(parent_power) == 0 or len(child_power) == 0:
-                        print(f'No overlapping detections found for fish ID {fish_id} between {parent_row["min_epoch"]} and {parent_row["max_epoch"]}')
-                        continue
+            # ensure epoch dtype numeric for comparisons
+            recaps_epoch = recaps['epoch']
+            for fish_id, fish_bouts in bouts.groupby('freq_code'):
+                r_fish = recaps[recaps['freq_code'] == fish_id]
+                bout_list = []
+                intervals = []
+                for b_idx, bout_row in fish_bouts.reset_index(drop=True).iterrows():
+                    min_epoch = bout_row['min_epoch']
+                    max_epoch = bout_row['max_epoch']
+                    if bout_expansion and bout_expansion > 0:
+                        min_epoch = min_epoch - bout_expansion
+                        max_epoch = max_epoch + bout_expansion
+
+                    if not r_fish.empty:
+                        mask = (r_fish['epoch'] >= min_epoch) & (r_fish['epoch'] <= max_epoch)
+                        in_df = r_fish.loc[mask]
+                        indices = in_df.index.tolist()
+                        posterior = in_df['posterior_T'].mean(skipna=True) if 'posterior_T' in in_df.columns else np.nan
+                        median_power = in_df['power'].median() if 'power' in in_df.columns else np.nan
                     else:
-                        print('Overlapping detections found')
-    
-                    # Normalize the power values separately for parent and child
-                    parent_norm_power = (parent_power - np.min(parent_power)) / (max_parent_power - np.min(parent_power))
-                    child_norm_power = (child_power - np.min(child_power)) / (max_child_power - np.min(child_power))
-    
-                    # Perform a t-test to check if the parent power is significantly higher than the child power
-                    t_stat, p_value = ttest_ind(parent_norm_power, child_norm_power, equal_var=False)
-    
-                    # Classify based on t-test and power mean comparison
-                    if np.mean(parent_norm_power) > np.mean(child_norm_power) and p_value < 0.05:
-                        parent_classification = np.float32(0)  # Near
-                        print(f"Fish ID {fish_id}: Parent classified as NEAR with p-value: {p_value:.4f}")
-                    else:
-                        parent_classification = np.float32(1)  # Far
-                        print(f"Fish ID {fish_id}: Parent classified as FAR with p-value: {p_value:.4f}")
-    
-                    # Update parent data with classification result
-                    parent_fish_dat.loc[
-                        (parent_fish_dat['freq_code'] == fish_id) &
-                        (parent_fish_dat['epoch'] >= parent_row['min_epoch']) &
-                        (parent_fish_dat['epoch'] <= parent_row['max_epoch']),
-                        'overlapping'
-                    ] = parent_classification
-                    
-            cols = parent_dat.columns
-            if 'overlapping' not in cols:
+                        indices = []
+                        posterior = np.nan
+                        median_power = np.nan
+
+                    bout_list.append({'min_epoch': min_epoch, 'max_epoch': max_epoch, 'indices': indices, 'posterior': posterior, 'median_power': median_power})
+                    intervals.append((min_epoch, max_epoch, b_idx))
+
+                node_bout_index[node][fish_id] = bout_list
+                # build IntervalTree for this fish (only include intervals with numeric bounds)
+                try:
+                    tree = IntervalTree(Interval(int(a), int(b), idx) for (a, b, idx) in intervals if not (pd.isna(a) or pd.isna(b)))
+                    node_bout_trees[node][fish_id] = tree
+                except Exception:
+                    node_bout_trees[node][fish_id] = IntervalTree()
+
+        for edge_idx, (parent, child) in enumerate(tqdm(self.edges, desc="Processing edges", unit="edge")):
+            logger.info(f"Edge {edge_idx+1}/{len(self.edges)}: {parent} → {child}")
+
+            parent_bouts = self.node_pres_dict.get(parent, pd.DataFrame())
+            parent_dat = self.node_recap_dict.get(parent, pd.DataFrame()).copy()
+            child_dat = self.node_recap_dict.get(child, pd.DataFrame()).copy()
+
+            # Quick skip when any required table is empty
+            if parent_bouts.empty or parent_dat.empty or child_dat.empty:
+                logger.debug(f"Skipping {parent}->{child}: empty data")
+                continue
+
+            # Normalize freq_code dtype and pre-split recapture tables by freq_code
+            # to avoid repeated full-DataFrame boolean comparisons inside loops.
+            if 'freq_code' in parent_dat.columns:
+                parent_dat['freq_code'] = parent_dat['freq_code'].astype('object')
+            if 'freq_code' in child_dat.columns:
+                child_dat['freq_code'] = child_dat['freq_code'].astype('object')
+
+            parent_by_fish = {k: v for k, v in parent_dat.groupby('freq_code')} if not parent_dat.empty else {}
+            child_by_fish = {k: v for k, v in child_dat.groupby('freq_code')} if not child_dat.empty else {}
+
+            # Initialize overlapping columns if missing
+            if 'overlapping' not in parent_dat.columns:
                 parent_dat['overlapping'] = np.float32(0)
-    
-            # Write the updated parent data to the HDF5 store incrementally
-            self.write_results_to_hdf5(parent_dat)
-    
-            # Cleanup and memory management
+            if 'overlapping' not in child_dat.columns:
+                child_dat['overlapping'] = np.float32(0)
+
+            fishes = parent_bouts['freq_code'].unique()
+            logger.debug(f"  Processing {len(fishes)} fish for edge {parent}->{child}")
+
+            # Buffers for indices to mark as overlapping for this edge
+            parent_mark_idx = []
+            child_mark_idx = []
+
+            for fish_id in fishes:
+                # fast access to precomputed bout lists and trees
+                p_bouts = node_bout_index.get(parent, {}).get(fish_id, [])
+                c_tree = node_bout_trees.get(child, {}).get(fish_id, IntervalTree())
+
+                if not p_bouts or c_tree is None:
+                    continue
+
+                for p_i, p_info in enumerate(p_bouts):
+                    p_indices = p_info['indices']
+                    p_conf = p_info['posterior']
+                    p_power = p_info['median_power']
+
+                    # skip bouts with insufficient detections
+                    if (not p_indices) or len(p_indices) < min_detections:
+                        decisions['keep_both'] += 1
+                        continue
+
+                    # query overlapping child bouts via IntervalTree
+                    overlaps = c_tree.overlap(int(p_info['min_epoch']), int(p_info['max_epoch']))
+                    if not overlaps:
+                        decisions['keep_both'] += 1
+                        continue
+
+                    overlaps_processed += 1
+
+                    for iv in overlaps:
+                        c_idx = iv.data
+                        try:
+                            c_info = node_bout_index[child][fish_id][c_idx]
+                        except Exception:
+                            continue
+
+                        c_indices = c_info['indices']
+                        c_conf = c_info['posterior']
+                        c_power = c_info['median_power']
+
+                        # require minimum detections on both
+                        if (not c_indices) or len(c_indices) < min_detections:
+                            decisions['keep_both'] += 1
+                            continue
+
+                        if method == 'posterior':
+                            if np.isnan(p_conf) or np.isnan(c_conf):
+                                decisions['keep_both'] += 1
+                                continue
+                            diff = p_conf - c_conf
+                            if diff > confidence_threshold:
+                                child_mark_idx.extend(c_indices)
+                                decisions['remove_child'] += 1
+                                detections_marked += len(c_indices)
+                            elif diff < -confidence_threshold:
+                                parent_mark_idx.extend(p_indices)
+                                decisions['remove_parent'] += 1
+                                detections_marked += len(p_indices)
+                            else:
+                                decisions['keep_both'] += 1
+
+                        elif method == 'power':
+                            # compare median power and use relative difference
+                            if pd.isna(p_power) or pd.isna(c_power):
+                                decisions['keep_both'] += 1
+                                continue
+                            denom = max(p_power, c_power)
+                            if denom == 0:
+                                decisions['keep_both'] += 1
+                                continue
+                            rel_diff = (p_power - c_power) / denom
+                            if rel_diff > power_threshold:
+                                child_mark_idx.extend(c_indices)
+                                decisions['remove_child'] += 1
+                                detections_marked += len(c_indices)
+                            elif rel_diff < -power_threshold:
+                                parent_mark_idx.extend(p_indices)
+                                decisions['remove_parent'] += 1
+                                detections_marked += len(p_indices)
+                            else:
+                                decisions['keep_both'] += 1
+
+                        else:
+                            raise ValueError(f"Unknown method: {method}")
+
+            # After processing all fish/bouts for this edge, bulk-assign overlapping flags
+            if parent_mark_idx:
+                parent_dat.loc[sorted(set(parent_mark_idx)), 'overlapping'] = np.float32(1)
+            if child_mark_idx:
+                child_dat.loc[sorted(set(child_mark_idx)), 'overlapping'] = np.float32(1)
+
+            # write results for this edge (both receivers) — one write each
+            logger.debug(f"  Writing results for {parent} and {child} (parent marks={len(parent_mark_idx)}, child marks={len(child_mark_idx)})")
+            if not parent_dat.empty:
+                self.write_results_to_hdf5(parent_dat)
+            if not child_dat.empty:
+                self.write_results_to_hdf5(child_dat)
+
+            # cleanup
             del parent_bouts, parent_dat, child_dat
             gc.collect()
+
+        logger.info("✓ Unsupervised overlap removal complete")
+        logger.info(f"  Overlapping bouts processed: {overlaps_processed}")
+        logger.info(f"  Detections marked as overlapping: {detections_marked}")
+        logger.info(f"  Decision breakdown: {decisions}")
 
     def nested_doll(self):
         """

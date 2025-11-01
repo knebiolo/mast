@@ -15,12 +15,21 @@ import pymast.predictors as predictors
 import matplotlib.pyplot as plt
 from matplotlib import rcParams
 from scipy import interpolate
-from tqdm import tqdm
+try:
+    from tqdm import tqdm
+except Exception:
+    def tqdm(iterable, **kwargs):
+        return iterable
 import shutil
 import warnings
 import dask.dataframe as dd
 import dask.array as da
-from dask_ml.cluster import KMeans
+try:
+    from dask_ml.cluster import KMeans
+    _KMEANS_IMPL = 'dask'
+except Exception:
+    from sklearn.cluster import KMeans
+    _KMEANS_IMPL = 'sklearn'
 warnings.filterwarnings("ignore")
 
 # Initialize logger
@@ -169,6 +178,10 @@ class radio_project():
             os.makedirs(self.figures_dir)
         self.figure_ws = os.path.join(project_dir,'Output','Figures')                         
 
+        # When running in automated/non-interactive mode set this flag True to avoid input() prompts
+        # By default, leave interactive (False) so user can respond to prompts
+        self.non_interactive = False
+
         # create a project database and write initial arrays to HDF
         self.initialize_hdf5()    
         
@@ -204,6 +217,22 @@ class radio_project():
             hdf5.create_group('recaptures')
             
         hdf5.close()
+
+    def _prompt(self, prompt_text, default="no"):
+        """Centralized prompt helper — returns default ONLY when non_interactive is True.
+        
+        By default (non_interactive=False), this will prompt the user interactively.
+        Set project.non_interactive = True to auto-answer with defaults.
+        """
+        if self.non_interactive:
+            logger.debug(f"Non-interactive mode: auto-answering '{prompt_text}' with '{default}'")
+            return default
+        try:
+            return input(prompt_text)
+        except Exception:
+            # In rare environments input() may fail; fall back to default
+            logger.debug("input() failed, returning default in _prompt()")
+            return default
             
     def telem_data_import(self,
                           rec_id,
@@ -837,8 +866,8 @@ class radio_project():
             # Show the figures and block execution until they are closed
             plt.show(block=True)
             
-            # Ask the user if they need another iteration
-            user_input = input("\nDo you need another classification iteration? (yes/no): ").strip().lower()
+            # Ask the user if they need another iteration (use _prompt helper)
+            user_input = str(self._prompt("\nDo you need another classification iteration? (yes/no): ", default="no")).strip().lower()
             
             if user_input in ['yes', 'y']:
                 # If yes, increase class_iter and reclassify
@@ -1279,6 +1308,19 @@ class radio_project():
         '''Creates a recaptures key in the HDF5 file, iterating over receivers to manage memory.'''
         logger.info("Creating recaptures table")
         logger.info(f"  Processing {len(self.receivers)} receiver(s)")
+        # prepare a heartbeat log so long runs can be monitored (one-line per receiver)
+        heartbeat_dir = os.path.join(self.project_dir, 'build')
+        try:
+            os.makedirs(heartbeat_dir, exist_ok=True)
+        except Exception:
+            pass
+        heartbeat_path = os.path.join(heartbeat_dir, 'recaptures_heartbeat.log')
+        print(f"Starting recaptures: {len(self.receivers)} receivers. Heartbeat -> {heartbeat_path}")
+        try:
+            with open(heartbeat_path, 'a') as _hb:
+                _hb.write(f"START {datetime.datetime.now().isoformat()} receivers={len(self.receivers)}\n")
+        except Exception:
+            pass
         
         if pit_study==False:
             # Convert release dates to datetime if not already done
@@ -1287,6 +1329,7 @@ class radio_project():
             
             for rec in tqdm(self.receivers.index, desc="Processing receivers", unit="receiver"):
                 logger.info(f"  Processing receiver {rec}...")
+                print(f"[recaptures] processing receiver {rec}...", flush=True)
     
                 # Read classified data for this receiver as a Dask DataFrame
                 # Reading the data (assuming self.db and rec are predefined variables)
@@ -1413,7 +1456,7 @@ class radio_project():
     
                 # Prompt to confirm importing the data
                 logger.debug(f"    Final: {len(rec_dat)} detections for {rec}")
-                import_confirmation = input("Do you want to import the data into the database? (yes/no): ").strip().lower()
+                import_confirmation = str(self._prompt("Do you want to import the data into the database? (yes/no): ", default="yes")).strip().lower()
                 if import_confirmation != 'yes':
                     logger.info("Data import canceled by user")
                     return
@@ -1423,8 +1466,15 @@ class radio_project():
                     store.append(key='recaptures', value=rec_dat, format='table', 
                                  index=False, min_itemsize={'freq_code': 20, 'rec_id': 20, 'det_hist': 20},
                                  append=True, chunksize=1000000, data_columns=True)
-    
+
                 logger.info(f"  ✓ Recaps for {rec} compiled")
+                print(f"[recaptures] ✓ Recaps for {rec} compiled ({len(rec_dat)} rows)", flush=True)
+                # append heartbeat line
+                try:
+                    with open(heartbeat_path, 'a') as _hb:
+                        _hb.write(f"{datetime.datetime.now().isoformat()} rec={rec} rows={len(rec_dat)}\n")
+                except Exception:
+                    pass
                 
         else:
             # Loop over each receiver in self.receivers
@@ -1512,7 +1562,7 @@ class radio_project():
                         pit_data[col] = pit_data[col].astype(dt)
         
                 # Confirm with user before appending PIT data into 'recaptures'
-                confirm = input("Import PIT data? (yes/no): ").strip().lower()
+                confirm = str(self._prompt("Import PIT data? (yes/no): ", default="no")).strip().lower()
                 if confirm != 'yes':
                     logger.info("PIT data import canceled by user")
                     return
@@ -1535,13 +1585,26 @@ class radio_project():
                     )
         
                 logger.info(f"  ✓ PIT recaps for {rec} compiled")
+                print(f"[recaptures] ✓ PIT recaps for {rec} compiled ({len(pit_data)} rows)", flush=True)
+                try:
+                    with open(heartbeat_path, 'a') as _hb:
+                        _hb.write(f"{datetime.datetime.now().isoformat()} pit_rec={rec} rows={len(pit_data)}\n")
+                except Exception:
+                    pass
 
 
         if export:
             logger.info("Exporting recaptures to CSV...")
+            print("[recaptures] exporting recaptures to CSV...", flush=True)
             rec_data = dd.read_hdf(self.db, 'recaptures').compute()
             rec_data.to_csv(os.path.join(self.output_dir,'recaptures.csv'), index=False)
             logger.info(f"  ✓ Export complete: {os.path.join(self.output_dir,'recaptures.csv')}")
+            print(f"[recaptures] ✓ Export complete: {os.path.join(self.output_dir,'recaptures.csv')}", flush=True)
+            try:
+                with open(heartbeat_path, 'a') as _hb:
+                    _hb.write(f"DONE {datetime.datetime.now().isoformat()} export={os.path.join(self.output_dir,'recaptures.csv')}\n")
+            except Exception:
+                pass
 
                 
     def undo_recaptures(self):
@@ -1597,7 +1660,7 @@ class radio_project():
             logger.info(f"  Keys in HDF5 file: {', '.join(keys)}")
 
             # Ask the user to input the keys they want to modify
-            selected_keys = input("Enter the keys you want to modify, separated by commas: ").split(',')
+            selected_keys = str(self._prompt("Enter the keys you want to modify, separated by commas: ", default="")).split(',')
 
             # Clean up the input (remove whitespace)
             selected_keys = [key.strip() for key in selected_keys]
