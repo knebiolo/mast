@@ -118,6 +118,115 @@ class radio_project():
             self.tags.to_hdf(self.db, key='/project_setup/tags', mode='a')
             self.receivers.to_hdf(self.db, key='/project_setup/receivers', mode='a')
             self.nodes.to_hdf(self.db, key='/project_setup/nodes', mode='a')
+        else:
+            # Project already exists - check for new tags and merge if needed
+            try:
+                existing_tags = pd.read_hdf(self.db, key='/project_setup/tags')
+                
+                # Reset index on incoming tags for comparison (it gets set later in __init__)
+                incoming_tags = self.tags.copy()
+                if incoming_tags.index.name == 'freq_code':
+                    incoming_tags = incoming_tags.reset_index()
+                
+                # Find new tags not in existing database
+                if 'freq_code' in existing_tags.columns:
+                    existing_freq_codes = set(existing_tags['freq_code'])
+                else:
+                    existing_freq_codes = set(existing_tags.index)
+                
+                incoming_freq_codes = set(incoming_tags['freq_code'])
+                new_freq_codes = incoming_freq_codes - existing_freq_codes
+                
+                if new_freq_codes:
+                    print(f"Found {len(new_freq_codes)} new tags to add to database: {sorted(new_freq_codes)}")
+                    
+                    # Merge existing and new tags
+                    new_tags_only = incoming_tags[incoming_tags['freq_code'].isin(new_freq_codes)]
+                    
+                    # Ensure existing_tags has freq_code as column, not index
+                    if existing_tags.index.name == 'freq_code':
+                        existing_tags = existing_tags.reset_index()
+                    
+                    merged_tags = pd.concat([existing_tags, new_tags_only], ignore_index=True)
+                    
+                    # Remove the old tags table and write merged version
+                    with pd.HDFStore(self.db, mode='a') as store:
+                        if '/project_setup/tags' in store:
+                            store.remove('/project_setup/tags')
+                        store.put('/project_setup/tags', 
+                                  merged_tags, 
+                                  format='table',
+                                  data_columns=True)
+                    
+                    # Update self.tags with merged data
+                    self.tags = merged_tags.copy()
+                    self.tags.set_index('freq_code', inplace=True)
+                    
+                    # Update tag type arrays
+                    self.study_tags = self.tags[self.tags.tag_type == 'study'].index.values
+                    self.test_tags = self.tags[self.tags.tag_type == 'TEST'].index.values
+                    self.beacon_tags = self.tags[self.tags.tag_type == 'BEACON'].index.values
+                    
+                    print(f"Successfully added {len(new_freq_codes)} new tags to database.")
+                else:
+                    print("No new tags found - database is up to date.")
+                    
+            except (KeyError, FileNotFoundError):
+                # Tags table doesn't exist yet, write it
+                print("Tags table not found in database, creating it now.")
+                self.tags.to_hdf(self.db, key='/project_setup/tags', mode='a')
+            
+            # Check for new receivers and merge if needed
+            try:
+                existing_receivers = pd.read_hdf(self.db, key='/project_setup/receivers')
+                
+                # Reset index on incoming receivers for comparison
+                incoming_receivers = self.receivers.copy()
+                if incoming_receivers.index.name == 'rec_id':
+                    incoming_receivers = incoming_receivers.reset_index()
+                
+                # Find new receivers not in existing database
+                if 'rec_id' in existing_receivers.columns:
+                    existing_rec_ids = set(existing_receivers['rec_id'])
+                else:
+                    existing_rec_ids = set(existing_receivers.index)
+                
+                incoming_rec_ids = set(incoming_receivers['rec_id'])
+                new_rec_ids = incoming_rec_ids - existing_rec_ids
+                
+                if new_rec_ids:
+                    print(f"Found {len(new_rec_ids)} new receivers to add to database: {sorted(new_rec_ids)}")
+                    
+                    # Merge existing and new receivers
+                    new_receivers_only = incoming_receivers[incoming_receivers['rec_id'].isin(new_rec_ids)]
+                    
+                    # Ensure existing_receivers has rec_id as column, not index
+                    if existing_receivers.index.name == 'rec_id':
+                        existing_receivers = existing_receivers.reset_index()
+                    
+                    merged_receivers = pd.concat([existing_receivers, new_receivers_only], ignore_index=True)
+                    
+                    # Remove the old receivers table and write merged version
+                    with pd.HDFStore(self.db, mode='a') as store:
+                        if '/project_setup/receivers' in store:
+                            store.remove('/project_setup/receivers')
+                        store.put('/project_setup/receivers', 
+                                  merged_receivers, 
+                                  format='table',
+                                  data_columns=True)
+                    
+                    # Update self.receivers with merged data
+                    self.receivers = merged_receivers.copy()
+                    self.receivers.set_index('rec_id', inplace=True)
+                    
+                    print(f"Successfully added {len(new_rec_ids)} new receivers to database.")
+                else:
+                    print("No new receivers found - database is up to date.")
+                    
+            except (KeyError, FileNotFoundError):
+                # Receivers table doesn't exist yet, write it
+                print("Receivers table not found in database, creating it now.")
+                self.receivers.to_hdf(self.db, key='/project_setup/receivers', mode='a')
 
         if 'raw_data' not in hdf5:
             hdf5.create_group("raw_data")  
