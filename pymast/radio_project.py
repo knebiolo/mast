@@ -1416,7 +1416,11 @@ class radio_project():
                 else:
                     rec_dat['overlapping'] = 0
                 
-                #rec_dat = rec_dat[rec_dat['overlapping'] != 1]
+                # Filter out overlapping detections (keep only overlapping=0)
+                before_filter = len(rec_dat)
+                rec_dat = rec_dat[rec_dat['overlapping'] != 1]
+                after_filter = len(rec_dat)
+                logger.debug(f"    Filtered {before_filter - after_filter} overlapping detections")
     
                 logger.debug(f"    After presence/overlap merge: {len(rec_dat)} detections")
     
@@ -1456,8 +1460,11 @@ class radio_project():
                     'overlapping': 'int32'
                 })
     
-                # Prompt to confirm importing the data
+                # Show record counts BEFORE prompting
                 logger.debug(f"    Final: {len(rec_dat)} detections for {rec}")
+                print(f"[recaptures] {rec}: compiled {len(rec_dat)} rows (overlapping={rec_dat['overlapping'].sum()}, bouts={rec_dat['bout_no'].max()})", flush=True)
+                
+                # Prompt to confirm importing the data
                 import_confirmation = str(self._prompt("Do you want to import the data into the database? (yes/no): ", default="yes")).strip().lower()
                 if import_confirmation != 'yes':
                     logger.info("Data import canceled by user")
@@ -1469,8 +1476,8 @@ class radio_project():
                                  index=False, min_itemsize={'freq_code': 20, 'rec_id': 20, 'det_hist': 20},
                                  append=True, chunksize=1000000, data_columns=True)
 
-                logger.info(f"  ✓ Recaps for {rec} compiled")
-                print(f"[recaptures] ✓ Recaps for {rec} compiled ({len(rec_dat)} rows)", flush=True)
+                logger.info(f"  ✓ Recaps for {rec} compiled and written to HDF5")
+                print(f"[recaptures] ✓ {rec} written to database", flush=True)
                 # append heartbeat line
                 try:
                     with open(heartbeat_path, 'a') as _hb:
@@ -1563,6 +1570,9 @@ class radio_project():
                     if col in pit_data.columns:
                         pit_data[col] = pit_data[col].astype(dt)
         
+                # Show record counts BEFORE prompting
+                print(f"[recaptures] {rec}: compiled {len(pit_data)} PIT rows (overlapping={pit_data['overlapping'].sum()}, bouts={pit_data['bout_no'].max()})", flush=True)
+                
                 # Confirm with user before appending PIT data into 'recaptures'
                 confirm = str(self._prompt("Import PIT data? (yes/no): ", default="no")).strip().lower()
                 if confirm != 'yes':
@@ -1586,8 +1596,8 @@ class radio_project():
                         data_columns=True
                     )
         
-                logger.info(f"  ✓ PIT recaps for {rec} compiled")
-                print(f"[recaptures] ✓ PIT recaps for {rec} compiled ({len(pit_data)} rows)", flush=True)
+                logger.info(f"  ✓ PIT recaps for {rec} compiled and written to HDF5")
+                print(f"[recaptures] ✓ {rec} PIT data written to database", flush=True)
                 try:
                     with open(heartbeat_path, 'a') as _hb:
                         _hb.write(f"{datetime.datetime.now().isoformat()} pit_rec={rec} rows={len(pit_data)}\n")
@@ -1611,31 +1621,35 @@ class radio_project():
                 
     def undo_recaptures(self):
         """
-        Remove a specified key from an HDF5 file.
-    
-        Parameters:
-        h5file (str): The path to the HDF5 file.
-        key (str): The key to be removed from the HDF5 file.
+        Remove recaptures data from HDF5 file.
+        Note: File size won't shrink until you manually repack the database.
         """
         logger.info("Removing recaptures from database")
         with pd.HDFStore(self.db, mode='a') as store:
             if 'recaptures' in store:
                 store.remove('recaptures')
-                logger.info("  ✓ Recaptures removed from HDF5 file")
+                logger.info("  ✓ Recaptures key removed")
+            else:
+                logger.info("  No recaptures key found")
+        
+        logger.info("  Data logically deleted (file size unchanged)")
+        logger.info("  To reclaim disk space, manually repack after all deletions complete")
                     
     def undo_overlap(self):
         """
-        Remove a specified key from an HDF5 file.
-    
-        Parameters:
-        h5file (str): The path to the HDF5 file.
-        key (str): The key to be removed from the HDF5 file.
+        Remove overlapping data from HDF5 file.
+        Note: File size won't shrink until you manually repack the database.
         """
         logger.info("Removing overlapping from database")
         with pd.HDFStore(self.db, mode='a') as store:
             if 'overlapping' in store:
                 store.remove('overlapping')
-                logger.info("  ✓ Overlapping removed from HDF5 file")
+                logger.info("  ✓ Overlapping key removed")
+            else:
+                logger.info("  No overlapping key found")
+        
+        logger.info("  Data logically deleted (file size unchanged)")
+        logger.info("  To reclaim disk space, manually repack after all deletions complete")
                 
     def new_db_version(self, output_h5):
         """

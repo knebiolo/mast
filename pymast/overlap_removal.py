@@ -886,9 +886,10 @@ class overlap_reduction:
         
         logger.info(f"✓ Data loaded for {len(nodes)} nodes")
 
-    def unsupervised_removal(self, method='posterior', confidence_threshold=0.1, power_threshold=0.2, min_detections=2, bout_expansion=5):
+    def unsupervised_removal(self, method='posterior', p_value_threshold=0.05, effect_size_threshold=0.3, 
+                            power_threshold=0.2, min_detections=3, bout_expansion=0):
         """
-        Unsupervised overlap removal supporting multiple methods.
+        Unsupervised overlap removal supporting multiple methods with statistical testing.
 
         Parameters
         ----------
@@ -896,18 +897,29 @@ class overlap_reduction:
             'posterior' (default) uses `posterior_T` columns produced by the
             Naive Bayes classifier (recommended for radio telemetry).
             'power' compares median power in overlapping bouts (fallback).
-        confidence_threshold : float
-            Minimum absolute difference in mean posterior_T required to mark the
-            lower-confidence receiver as overlapping.
+        p_value_threshold : float, default=0.05
+            Maximum p-value for t-test to consider difference statistically significant.
+            Only applies when method='posterior'.
+        effect_size_threshold : float, default=0.3
+            Minimum Cohen's d effect size required (in addition to statistical significance).
+            0.2 = small, 0.5 = medium, 0.8 = large effect. Lower values (0.3) are more
+            conservative for radio telemetry where small differences matter.
         power_threshold : float
             Relative difference threshold for power-based decisions; computed
             as (parent_median - child_median) / max(parent_median, child_median).
+        min_detections : int, default=3
+            Minimum number of detections required in a bout for statistical comparison.
+        bout_expansion : int, default=0
+            Seconds to expand bout windows before/after (0 = no expansion, recommended
+            for cleaner movement trajectories).
         """
         logger = logging.getLogger(__name__)
         logger.info(f"Starting unsupervised overlap removal (method={method})")
         overlaps_processed = 0
         detections_marked = 0
         decisions = {'remove_parent': 0, 'remove_child': 0, 'keep_both': 0}
+        skip_reasons = {'parent_too_small': 0, 'no_overlap': 0, 'child_too_small': 0, 
+                       'no_posterior_data': 0, 'insufficient_after_nan': 0}
 
         # Precompute per-node, per-bout summaries (indices, posterior means, median power)
         # and build IntervalTrees per fish for fast overlap queries. This avoids
@@ -985,12 +997,16 @@ class overlap_reduction:
 
             fishes = parent_bouts['freq_code'].unique()
             logger.debug(f"  Processing {len(fishes)} fish for edge {parent}->{child}")
+            print(f"  [overlap] {parent}→{child}: processing {len(fishes)} fish")
 
             # Buffers for indices to mark as overlapping for this edge
             parent_mark_idx = []
             child_mark_idx = []
 
-            for fish_id in fishes:
+            for fish_idx, fish_id in enumerate(fishes, 1):
+                # Progress update every 10 fish or for the last fish
+                if fish_idx % 10 == 0 or fish_idx == len(fishes):
+                    print(f"    [overlap] {parent}→{child}: fish {fish_idx}/{len(fishes)} ({fish_id})", end='\r')
                 # fast access to precomputed bout lists and trees
                 p_bouts = node_bout_index.get(parent, {}).get(fish_id, [])
                 c_tree = node_bout_trees.get(child, {}).get(fish_id, IntervalTree())
@@ -1006,12 +1022,14 @@ class overlap_reduction:
                     # skip bouts with insufficient detections
                     if (not p_indices) or len(p_indices) < min_detections:
                         decisions['keep_both'] += 1
+                        skip_reasons['parent_too_small'] += 1
                         continue
 
                     # query overlapping child bouts via IntervalTree
                     overlaps = c_tree.overlap(int(p_info['min_epoch']), int(p_info['max_epoch']))
                     if not overlaps:
                         decisions['keep_both'] += 1
+                        skip_reasons['no_overlap'] += 1
                         continue
 
                     overlaps_processed += 1
@@ -1030,28 +1048,92 @@ class overlap_reduction:
                         # require minimum detections on both
                         if (not c_indices) or len(c_indices) < min_detections:
                             decisions['keep_both'] += 1
+                            skip_reasons['child_too_small'] += 1
                             continue
 
                         if method == 'posterior':
-                            if np.isnan(p_conf) or np.isnan(c_conf):
+                            # Statistical test approach: use t-test and Cohen's d on posterior_T
+                            # Get actual posterior_T values for both receivers
+                            p_posteriors = parent_dat.loc[p_indices, 'posterior_T'].values if 'posterior_T' in parent_dat.columns else []
+                            c_posteriors = child_dat.loc[c_indices, 'posterior_T'].values if 'posterior_T' in child_dat.columns else []
+                            
+                            # Validate we have data
+                            if len(p_posteriors) == 0 or len(c_posteriors) == 0:
                                 decisions['keep_both'] += 1
+                                skip_reasons['no_posterior_data'] += 1
                                 continue
-                            diff = p_conf - c_conf
-                            if diff > confidence_threshold:
-                                child_mark_idx.extend(c_indices)
-                                decisions['remove_child'] += 1
-                                detections_marked += len(c_indices)
-                            elif diff < -confidence_threshold:
-                                parent_mark_idx.extend(p_indices)
-                                decisions['remove_parent'] += 1
-                                detections_marked += len(p_indices)
-                            else:
+                            
+                            # Remove NaN values
+                            p_posteriors = p_posteriors[~np.isnan(p_posteriors)]
+                            c_posteriors = c_posteriors[~np.isnan(c_posteriors)]
+                            
+                            if len(p_posteriors) < min_detections or len(c_posteriors) < min_detections:
                                 decisions['keep_both'] += 1
+                                skip_reasons['insufficient_after_nan'] += 1
+                                continue
+                            
+                            # Perform Welch's t-test (unequal variances)
+                            t_stat, p_value = ttest_ind(p_posteriors, c_posteriors, equal_var=False)
+                            
+                            # Calculate Cohen's d effect size
+                            mean_diff = np.mean(p_posteriors) - np.mean(c_posteriors)
+                            n1, n2 = len(p_posteriors), len(c_posteriors)
+                            var1, var2 = np.var(p_posteriors, ddof=1), np.var(c_posteriors, ddof=1)
+                            pooled_std = np.sqrt(((n1-1)*var1 + (n2-1)*var2) / (n1+n2-2)) if (n1+n2-2) > 0 else 1.0
+                            cohens_d = mean_diff / pooled_std if pooled_std > 0 else 0.0
+                            
+                            # Decision: require BOTH statistical significance AND meaningful effect size
+                            if p_value < p_value_threshold and abs(cohens_d) >= effect_size_threshold:
+                                if cohens_d > 0:  # parent has significantly higher posterior_T
+                                    child_mark_idx.extend(c_indices)
+                                    decisions['remove_child'] += 1
+                                    detections_marked += len(c_indices)
+                                else:  # child has significantly higher posterior_T
+                                    parent_mark_idx.extend(p_indices)
+                                    decisions['remove_parent'] += 1
+                                    detections_marked += len(p_indices)
+                            else:
+                                # No significant difference - use combined score as tiebreaker
+                                # Weighted combination: 70% posterior_T (classifier confidence) + 30% normalized power
+                                # This accounts for both detection quality AND signal strength
+                                p_mean_posterior = np.mean(p_posteriors)
+                                c_mean_posterior = np.mean(c_posteriors)
+                                
+                                # Normalize power relative to each other (handles different receiver types)
+                                if not pd.isna(p_power) and not pd.isna(c_power) and (p_power + c_power) > 0:
+                                    p_norm_power = p_power / (p_power + c_power)
+                                    c_norm_power = c_power / (p_power + c_power)
+                                else:
+                                    # Power not available, use equal weights
+                                    p_norm_power = c_norm_power = 0.5
+                                
+                                # Combined score: 70% posterior_T, 30% power
+                                p_score = 0.7 * p_mean_posterior + 0.3 * p_norm_power
+                                c_score = 0.7 * c_mean_posterior + 0.3 * c_norm_power
+                                
+                                if p_score > c_score:
+                                    child_mark_idx.extend(c_indices)
+                                    decisions['remove_child'] += 1
+                                    detections_marked += len(c_indices)
+                                else:
+                                    parent_mark_idx.extend(p_indices)
+                                    decisions['remove_parent'] += 1
+                                    detections_marked += len(p_indices)
 
                         elif method == 'power':
                             # compare median power and use relative difference
                             if pd.isna(p_power) or pd.isna(c_power):
-                                decisions['keep_both'] += 1
+                                # Missing power data - use whichever has data, or skip if both missing
+                                if pd.isna(p_power) and not pd.isna(c_power):
+                                    parent_mark_idx.extend(p_indices)
+                                    decisions['remove_parent'] += 1
+                                    detections_marked += len(p_indices)
+                                elif not pd.isna(p_power) and pd.isna(c_power):
+                                    child_mark_idx.extend(c_indices)
+                                    decisions['remove_child'] += 1
+                                    detections_marked += len(c_indices)
+                                else:
+                                    decisions['keep_both'] += 1
                                 continue
                             denom = max(p_power, c_power)
                             if denom == 0:
@@ -1067,32 +1149,53 @@ class overlap_reduction:
                                 decisions['remove_parent'] += 1
                                 detections_marked += len(p_indices)
                             else:
-                                decisions['keep_both'] += 1
+                                # Difference exists but below threshold - still pick the stronger one
+                                if p_power > c_power:
+                                    child_mark_idx.extend(c_indices)
+                                    decisions['remove_child'] += 1
+                                    detections_marked += len(c_indices)
+                                else:
+                                    parent_mark_idx.extend(p_indices)
+                                    decisions['remove_parent'] += 1
+                                    detections_marked += len(p_indices)
 
                         else:
                             raise ValueError(f"Unknown method: {method}")
 
             # After processing all fish/bouts for this edge, bulk-assign overlapping flags
+            print(f"\n  [overlap] {parent}→{child}: marking {len(set(parent_mark_idx))} parent + {len(set(child_mark_idx))} child detections as overlapping")
             if parent_mark_idx:
                 parent_dat.loc[sorted(set(parent_mark_idx)), 'overlapping'] = np.float32(1)
             if child_mark_idx:
                 child_dat.loc[sorted(set(child_mark_idx)), 'overlapping'] = np.float32(1)
 
-            # write results for this edge (both receivers) — one write each
+            # Write ONLY the marked detections (not all data for this receiver pair)
             logger.debug(f"  Writing results for {parent} and {child} (parent marks={len(parent_mark_idx)}, child marks={len(child_mark_idx)})")
-            if not parent_dat.empty:
-                self.write_results_to_hdf5(parent_dat)
-            if not child_dat.empty:
-                self.write_results_to_hdf5(child_dat)
+            print(f"  [overlap] {parent}→{child}: writing overlapping detections to HDF5...")
+            
+            # Only write detections that were marked as overlapping
+            if parent_mark_idx:
+                parent_overlapping = parent_dat.loc[sorted(set(parent_mark_idx))]
+                self.write_results_to_hdf5(parent_overlapping)
+            if child_mark_idx:
+                child_overlapping = child_dat.loc[sorted(set(child_mark_idx))]
+                self.write_results_to_hdf5(child_overlapping)
+            print(f"  [overlap] ✓ {parent}→{child} complete\n")
 
             # cleanup
             del parent_bouts, parent_dat, child_dat
             gc.collect()
 
+        print("\n" + "="*80)
         logger.info("✓ Unsupervised overlap removal complete")
         logger.info(f"  Overlapping bouts processed: {overlaps_processed}")
         logger.info(f"  Detections marked as overlapping: {detections_marked}")
         logger.info(f"  Decision breakdown: {decisions}")
+        logger.info(f"  Skip reasons: {skip_reasons}")
+        print(f"[overlap] ✓ Complete: {overlaps_processed} overlaps processed, {detections_marked} detections marked")
+        print(f"[overlap] Decisions: remove_parent={decisions['remove_parent']}, remove_child={decisions['remove_child']}, keep_both={decisions['keep_both']}")
+        print(f"[overlap] Skip breakdown: parent_too_small={skip_reasons['parent_too_small']}, child_too_small={skip_reasons['child_too_small']}, no_posterior={skip_reasons['no_posterior_data']}, insufficient_after_nan={skip_reasons['insufficient_after_nan']}")
+        print("="*80)
 
     def nested_doll(self):
         """

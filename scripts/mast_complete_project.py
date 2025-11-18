@@ -24,7 +24,7 @@ import matplotlib.pyplot as plt
 
 #%% set up project
 project_dir = r"C:\Users\Kevin.Nebiolo\Desktop\Scotland KPN"
-db_name = 'Scotland'
+db_name = 'Scotland_repacked'
 
 detection_count = 5
 duration = 1
@@ -47,7 +47,7 @@ project = radio_project(project_dir,
 #project.new_db_version(os.path.join(project_dir,'Nuyakuk_v2.h5'))
 #,presence,classified,trained
 
-# #%%  import data
+#%%  import data
 # rec_id = 'R15'
 # rec_type = 'srx800'
 #  #TODO - remove these directory arguments - the project is smart
@@ -69,7 +69,7 @@ project = radio_project(project_dir,
 # # undo import
 # # project.undo_import(rec_id)
 
-# #%%  train data
+#%%  train data
 # # set parameters and get a list of fish to iterate over
 # rec_id = 'R15'
 # rec_type = 'srx800'
@@ -100,10 +100,10 @@ project = radio_project(project_dir,
 # # undo classification 
 # # project.undo_classification(rec_id)
 
-# #%% cross validate
+#%% cross validate
 
 
-# #%% calculate bouts
+#%% calculate bouts
 # # get nodes
 # node = 'R15'
 
@@ -124,72 +124,81 @@ project = radio_project(project_dir,
 # Choose overlap reduction method, we have an unsupervised method or the nested doll
 
 # unsupervised - initialize one overlap object for all receiver pairs (much faster)
-# """ nodes = list(project.receivers.index)
-# edges = [(i, j) for i in nodes for j in nodes if i != j]
+nodes = list(project.receivers.index)
+edges = [(i, j) for i in nodes for j in nodes if i != j]
 
-# # create single overlap object (loads data once)
-# print('Initializing overlap reduction for all nodes...')
-# import time
-# start_t = time.time()
-# doll = pymast.overlap_reduction(nodes, edges, project)
-# print('Running unsupervised removal (single pass)')
-# # Less conservative defaults: lower confidence threshold, allow single-detection bouts, small bout expansion
-# doll.unsupervised_removal(method='posterior', confidence_threshold=0.03, min_detections=1, bout_expansion=10)
-# print('Overlap reduction took', time.time() - start_t, 'seconds')
+# create single overlap object (loads data once)
+print('Initializing overlap reduction for all nodes...')
+import time
+start_t = time.time()
 
-# # nested doll
-# # create edges showing parent:child relationships for nodes in network
-# edges =[('R04','R15'),('R04','R14'),('R04','R13'),('R04','R12'),('R04','R10'),('R04','R08'),('R04','R09'),('R04','R05'),('R04','R03'),
-#         ('R03','R15'),('R03','R14'),('R03','R13'),('R03','R12'),('R03','R10'),('R03','R08'),('R03','R09'),('R03','R05'),('R03','R04'),
-#         ('R08','R10'),
-#         ('R09','R10')]
-# nodes = ['R03','R04','R05','R08','R09','R10','R12','R13','R14','R15']
-# nested = pymast.overlap_reduction(nodes, edges, project)
-# nested.nested_doll()  """
+doll = pymast.overlap_removal.overlap_reduction(nodes, edges, project)
+print('Running unsupervised removal with statistical testing (t-test + Cohen\'s d)')
+# Statistical approach: uses t-test + effect size for cleaner movement trajectories
+# p_value_threshold=0.05: require statistical significance
+# effect_size_threshold=0.2: small effect size (more sensitive to differences)
+# min_detections=2: allow smaller bouts (need at least 2 for t-test)
+# bout_expansion=30: ±30 second buffer to catch near-overlaps
+doll.unsupervised_removal(method='posterior', 
+                         p_value_threshold=0.05, 
+                         effect_size_threshold=0.2, 
+                         min_detections=1, 
+                         bout_expansion=30)
+print('Overlap reduction took', time.time() - start_t, 'seconds')
 
-# #project.undo_overlap()
+# nested doll
+# create edges showing parent:child relationships for nodes in network
+edges =[('R04','R15'),('R04','R14'),('R04','R13'),('R04','R12'),('R04','R10'),('R04','R08'),('R04','R09'),('R04','R05'),('R04','R03'),
+        ('R03','R15'),('R03','R14'),('R03','R13'),('R03','R12'),('R03','R10'),('R03','R08'),('R03','R09'),('R03','R05'),('R03','R04'),
+        ('R08','R10'),
+        ('R09','R10')]
+nodes = ['R03','R04','R05','R08','R09','R10','R12','R13','R14','R15']
+nested = pymast.overlap_reduction(nodes, edges, project)
+nested.nested_doll()  
 
-# #%% create a recaptures table
-# #project.undo_recaptures()
-project.make_recaptures_table(export = True) 
+# project.undo_overlap()
 
-# #%% create Time to Event Model
+#%% create a recaptures table
+# project.undo_recaptures()
+#project.make_recaptures_table(export = True) 
+
+#%% create Time to Event Model
     
-# # what is the Node to State relationship - use Python dictionary
-# # node_to_state = {'T5':1,'T6':1,'T7':2,'T15':3,'T3':4}
-# upstream_states = {'R15':1,'R14':1,    # occum
-#                  'R13':2,'R12':2,    # downstream gate
-#                  'R10':3,            # tailrace
-#                  'R11':4,            # fish lift entrance
-#                  'R08':5,'R09':5,    # spillway
-#                  'R06':6,'R07':6,    # surface bypasss
-#                  'R05':7,            # submerged bypass
-#                  'R04':8,            # fish lift exit
-#                  'R03':9,            # forebay
-#                  'R01':10,'R02':10}  # windham
+# what is the Node to State relationship - use Python dictionary
+# node_to_state = {'T5':1,'T6':1,'T7':2,'T15':3,'T3':4}
+upstream_states = {'R15':1,'R14':1,    # occum
+                 'R13':2,'R12':2,    # downstream gate
+                 'R10':3,            # tailrace
+                 'R11':4,            # fish lift entrance
+                 'R08':5,'R09':5,    # spillway
+                 'R06':6,'R07':6,    # surface bypasss
+                 'R05':7,            # submerged bypass
+                 'R04':8,            # fish lift exit
+                 'R03':9,            # forebay
+                 'R01':10,'R02':10}  # windham
 
-# downstream_states = {'R15':1,'R14':1,# occum
-#                  'R13':2,'R12':2,    # downstream gate
-#                  'R10':2,            # tailrace
-#                  'R11':2,            # fish lift entrance
-#                  'R08':3,'R09':3,    # spillway
-#                  'R06':6,'R07':6,    # surface bypasss
-#                  'R05':7,            # submerged bypass
-#                  'R04':9,            # fish lift exit
-#                  'R03':9,            # forebay
-#                  'R01':10,'R02':10}  # windham
+downstream_states = {'R15':1,'R14':1,# occum
+                 'R13':2,'R12':2,    # downstream gate
+                 'R10':2,            # tailrace
+                 'R11':2,            # fish lift entrance
+                 'R08':3,'R09':3,    # spillway
+                 'R06':6,'R07':6,    # surface bypasss
+                 'R05':7,            # submerged bypass
+                 'R04':9,            # fish lift exit
+                 'R03':9,            # forebay
+                 'R01':10,'R02':10}  # windham
                                    
 
-# # Step 1, create time to event data class 
-# tte = formatter.time_to_event(downstream_states,
-#                               project,
-#                               initial_state_release = True,
-#                               last_presence_time0 = False,
-#                               cap_loc = None,
-#                               rel_loc = 'windham',
-#                               species = None,
-#                               rel_date = None,
-#                               recap_date = None)
+# Step 1, create time to event data class 
+tte = formatter.time_to_event(upstream_states,
+                              project,
+                              initial_state_release = True,
+                              last_presence_time0 = False,
+                              cap_loc = None,
+                              rel_loc = 'windham',
+                              species = None,
+                              rel_date = None,
+                              recap_date = None)
 
 # upstream_adjacency_filter = [(9, 1),(9, 2),(9, 3),(9, 5),(9, 8),(9, 9),(9, 6),
 #                               (8, 1),(8, 2),(8, 3),(8, 5),(8, 9),(8, 8),(8, 6),
@@ -201,11 +210,11 @@ project.make_recaptures_table(export = True)
 #                                (2, 9),(2, 7),(2, 6),(2, 10),(2, 3),
 #                                (3, 2),(3, 9)]
 
-# # Step 2, format data - without covariates
-# tte.data_prep(project, adjacency_filter = downstream_adjacency_filter)
-# # Step 3, generate a summary
-# stats = tte.summary()
-# #tte.master_state_table.to_csv(os.path.join(project_dir,'Output','thompson_falls.csv'))
+# Step 2, format data - without covariates
+tte.data_prep(project)#, adjacency_filter = downstream_adjacency_filter)
+# Step 3, generate a summary
+stats = tte.summary()
+#tte.master_state_table.to_csv(os.path.join(project_dir,'Output','thompson_falls.csv'))
 
 
 
