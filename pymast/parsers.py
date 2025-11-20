@@ -1479,13 +1479,28 @@ def PIT(file_name,
                         "Temperature_C", "Signal_mV", "Is Duplicate"]
             print("Using format without latitude/longitude")
 
-        # Read the fixed-width file
-        telem_dat = pd.read_fwf(
-            file_name,
-            colspecs=colspecs,
-            names=col_names,
-            skiprows=skiprows
-        )
+        # Try different encodings if UTF-8 fails
+        encodings_to_try = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
+        telem_dat = None
+        
+        for encoding in encodings_to_try:
+            try:
+                print(f"Attempting to read file with encoding: {encoding}")
+                telem_dat = pd.read_fwf(
+                    file_name,
+                    colspecs=colspecs,
+                    names=col_names,
+                    skiprows=skiprows,
+                    encoding=encoding
+                )
+                print(f"Successfully read with encoding: {encoding}")
+                break
+            except UnicodeDecodeError:
+                print(f"Failed with {encoding}, trying next...")
+                continue
+        
+        if telem_dat is None:
+            raise ValueError(f"Could not read file with any supported encoding: {encodings_to_try}")
         
         print(f"Fixed-width parsing complete. Shape: {telem_dat.shape}")
         
