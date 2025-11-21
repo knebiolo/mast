@@ -416,7 +416,18 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
         # remove any row where df['your_column'] is NaN
         self.recap_data.dropna(subset=['rel_date'], inplace=True)
         df = self.recap_data
+        
+        # Filter out overlapping detections (keep only overlapping=0)
         self.recap_data = self.recap_data[self.recap_data.overlapping == 0]
+        
+        # Filter out ambiguous overlaps if column exists (keep only ambiguous_overlap=0)
+        # For time-to-event models, fish can only be in one place at once
+        if 'ambiguous_overlap' in self.recap_data.columns:
+            before_ambig_filter = len(self.recap_data)
+            self.recap_data = self.recap_data[self.recap_data.ambiguous_overlap == 0]
+            after_ambig_filter = len(self.recap_data)
+            print(f"[TTE] Filtered {before_ambig_filter - after_ambig_filter} ambiguous overlap detections")
+        
         self.recap_data['rel_date'] = pd.to_datetime(self.recap_data.rel_date)
         
         self.recap_data.drop(columns = ['pulse_rate',
