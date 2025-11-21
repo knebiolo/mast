@@ -24,7 +24,7 @@ import matplotlib.pyplot as plt
 
 #%% set up project
 project_dir = r"C:\Users\Kevin.Nebiolo\Desktop\Scotland KPN"
-db_name = 'Scotland_repacked'
+db_name = 'Scotland'
 
 detection_count = 5
 duration = 1
@@ -104,21 +104,28 @@ project = radio_project(project_dir,
 
 
 #%% calculate bouts
-# # get nodes
-# node = 'R15'
 
-# # create a bout object
-# bout = pymast.bout(project, node, 2, 21600)
-    
-# # Find the threshold
-# threshold = bout.fit_processes()
-    
-# # calculate presences - or pass float
-# bout.presence(threshold)
-# # bout.presence(120)
+receivers = list(project.receivers.index)
 
-# # undo bouts
-# # project.undo_bouts(node)
+for rec_id in receivers:
+    print(f"Processing bouts for {rec_id}")
+    
+    # Recommended parameters:
+    # - eps_multiplier=5: longer bouts for better overlap detection (5x pulse rate)
+    # - lag_window=2: tighter temporal window (2 sec) to reduce false positives
+    bout = pymast.bout(project, rec_id, eps_multiplier=5, lag_window=2)
+    
+    # Fit mixture model to find threshold
+    threshold = bout.fit_processes()
+    
+    # Calculate presences
+    bout.presence(threshold)
+    
+    print(f"  ✓ Completed {rec_id}: threshold={threshold:.1f} seconds")
+
+print(f"\nBouts complete for {len(receivers)} receivers")
+
+# project.undo_bouts()
     
 #%% reduce overlap
 # Choose overlap reduction method, we have an unsupervised method or the nested doll
@@ -160,6 +167,8 @@ nested.nested_doll()
 
 #%% create a recaptures table
 # project.undo_recaptures()
+# project.repack_database()
+
 #project.make_recaptures_table(export = True) 
 
 #%% create Time to Event Model

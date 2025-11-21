@@ -1270,18 +1270,26 @@ class radio_project():
                           data_columns=True,
                           append = False)       
 
-    def undo_bouts(self, rec_id):
+    def undo_bouts(self, rec_id=None):
+        """
+        Remove bouts from the presence table.
+        
+        Args:
+            rec_id (str, optional): Specific receiver ID to remove bouts for.
+                                   If None, removes all bouts.
+        """
         # Read the table from the HDF5 file
         with pd.HDFStore(self.db, 'r+') as store:
             if 'presence' in store:
                 df = store['presence'] 
         
                 # Build the condition based on provided arguments
-                condition = (df['rec_id'] == rec_id)
-        
-                # Update or delete the rows based on your requirement
-                # For deletion:
-                df = df[~condition]
+                if rec_id is not None:
+                    condition = (df['rec_id'] == rec_id)
+                    df = df[~condition]
+                else:
+                    # Remove all presence data
+                    df = pd.DataFrame(columns=df.columns)
                 
                 df = df.astype({'freq_code': 'object',
                                 'epoch': 'float32',
@@ -1302,7 +1310,79 @@ class radio_project():
                                           'rec_id':20,
                                           'class':20},
                           data_columns=True, 
-                          append = False)   
+                          append = False)
+
+    def repack_database(self, output_path=None):
+        """
+        Repack HDF5 database to reclaim disk space and improve performance.
+        
+        Uses PyTables to copy all nodes (Groups, Tables, Arrays) recursively
+        with compression enabled. This fixes the bloat from repeated append operations.
+        
+        Args:
+            output_path (str, optional): Path for repacked database.
+                                        If None, uses '{db_name}_repacked.h5'
+        
+        Returns:
+            str: Path to the repacked database
+        """
+        import tables
+        import logging
+        import time
+        
+        logger = logging.getLogger(__name__)
+        
+        if output_path is None:
+            base_name = os.path.splitext(self.db)[0]
+            output_path = f"{base_name}_repacked.h5"
+        
+        logger.info(f"Repacking database: {self.db} → {output_path}")
+        print(f"[repack] Starting database repack...")
+        print(f"  Source: {self.db}")
+        print(f"  Target: {output_path}")
+        
+        # Get original size
+        orig_size = os.path.getsize(self.db)
+        print(f"  Original size: {orig_size / (1024**3):.2f} GB")
+        
+        start_time = time.time()
+        
+        # Open both files with PyTables
+        with tables.open_file(self.db, mode='r') as h5in:
+            with tables.open_file(output_path, mode='w') as h5out:
+                
+                # Set compression filters
+                filters = tables.Filters(complevel=5, complib='blosc:zstd')
+                
+                # Copy all top-level nodes recursively
+                for node in h5in.root:
+                    node_path = node._v_pathname
+                    print(f"  Copying {node_path}...")
+                    
+                    try:
+                        # Use recursive=True to copy entire subtree (Groups, Tables, Arrays, etc.)
+                        h5in.copy_node(
+                            where=node_path,
+                            newparent=h5out.root,
+                            recursive=True,
+                            filters=filters
+                        )
+                    except Exception as e:
+                        logger.warning(f"Could not copy {node_path}: {e}")
+                        continue
+        
+        # Get new size
+        new_size = os.path.getsize(output_path)
+        savings = (1 - new_size / orig_size) * 100
+        elapsed = time.time() - start_time
+        
+        print(f"\n[repack] ✓ Repack complete in {elapsed:.1f} seconds")
+        print(f"  New size: {new_size / (1024**3):.2f} GB")
+        print(f"  Savings: {savings:.1f}%")
+        
+        logger.info(f"Repack complete: {new_size / (1024**3):.2f} GB ({savings:.1f}% reduction)")
+        
+        return output_path   
 
     def make_recaptures_table(self, export=True, pit_study=False):
         '''Creates a recaptures key in the HDF5 file, iterating over receivers to manage memory.'''

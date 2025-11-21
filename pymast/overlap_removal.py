@@ -63,46 +63,151 @@ def _prompt(prompt_text, default=None):
         return default
 
 class bout():
-    '''Python class object to delineate when bouts occur at receiver.'''
-    def __init__ (self, radio_project, node, lag_window, time_limit):
-        self.lag_window = lag_window
-        self.time_limit = time_limit
-        self.db = radio_project.db
-
-        # get the receivers associated with this particular network node
-        recs = radio_project.receivers[radio_project.receivers.index == node]
-        self.receivers = recs.index  # get the unique receivers associated with this node
-        self.data = pd.DataFrame(columns = ['freq_code','epoch','power','rec_id'])            # set up an empty data frame
-
-        # for every receiver
-        for i in self.receivers:
-            # get this receivers data from the classified key
-            rec_dat = pd.read_hdf(self.db,
-                                  'classified',
-                                  where = 'rec_id = %s'%(i))
-            rec_dat = rec_dat[rec_dat.iter == rec_dat.iter.max()]
-            rec_dat = rec_dat[rec_dat.test == 1]
-            rec_dat = rec_dat[['freq_code','epoch','time_stamp','power','rec_id']]
-            rec_dat = rec_dat.astype({'freq_code':'object',
-                            'epoch':'float32',
-                            'time_stamp':'datetime64[ns]',
-                            'power':'float32',
-                            'rec_id':'object'})
-            
-            self.data = pd.concat([self.data,rec_dat])
-
-        # Define the bin size (5 seconds)
-        bin_size = 30
+    '''
+    DBSCAN-based bout detection for a single receiver.
     
-        # clean up and bin the lengths
-        self.data.drop_duplicates(keep = 'first', inplace = True)
-        self.data.sort_values(by = ['freq_code','time_stamp'], inplace = True)
-        self.data['epoch'] = (self.data['time_stamp'] - pd.Timestamp("1970-01-01")) // pd.Timedelta('1s')
-        self.data['det_lag'] = self.data.groupby('freq_code')['epoch'].diff().abs() // lag_window * lag_window
-        self.data['lag_binned'] = (self.data['det_lag'] // bin_size) * bin_size
-        self.data.dropna(axis = 0, inplace = True)   # drop Nan from the data
-        self.node = node
+    Uses temporal clustering to identify continuous presence periods.
+    Physics-based epsilon: pulse_rate * eps_multiplier (typically 5-10x pulse rate)
+    '''
+    def __init__(self, radio_project, rec_id, eps_multiplier=5, lag_window=9):
+        """
+        Initialize bout detection for a specific receiver.
+        
+        Args:
+            radio_project: Project object with database and tags
+            rec_id (str): Receiver ID to process (e.g., 'R03')
+            eps_multiplier (int): Multiplier for pulse rate to set DBSCAN epsilon
+                                 Default 5 = ~40-50 sec for typical tags
+            lag_window (int): Time window in seconds for lag calculations
+                             Default 9 seconds (kept for compatibility, not used in DBSCAN)
+        """
+        from sklearn.cluster import DBSCAN
+        
+        self.db = radio_project.db
+        self.rec_id = rec_id
+        self.eps_multiplier = eps_multiplier
+        self.lag_window = lag_window
+        self.tags = radio_project.tags
+        
+        # Load classified data for this receiver
+        print(f"[bout] Loading classified data for {rec_id}")
+        rec_dat = pd.read_hdf(self.db, 'classified', where=f'rec_id == "{rec_id}"')
+        rec_dat = rec_dat[rec_dat.iter == rec_dat.iter.max()]
+        rec_dat = rec_dat[rec_dat.test == 1]
+        rec_dat = rec_dat[['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id']]
+        rec_dat = rec_dat.astype({
+            'freq_code': 'object',
+            'epoch': 'float32',
+            'time_stamp': 'datetime64[ns]',
+            'power': 'float32',
+            'rec_id': 'object'
+        })
+        
+        # Clean up
+        rec_dat.drop_duplicates(keep='first', inplace=True)
+        rec_dat.sort_values(by=['freq_code', 'time_stamp'], inplace=True)
+        
+        self.data = rec_dat
         self.fishes = self.data.freq_code.unique()
+        
+        print(f"[bout] Loaded {len(self.data)} detections for {len(self.fishes)} fish")
+        
+        # Run DBSCAN bout detection immediately
+        self._detect_bouts()
+        
+    def _detect_bouts(self):
+        """
+        Run DBSCAN temporal clustering to identify bouts.
+        Called automatically during __init__.
+        """
+        from sklearn.cluster import DBSCAN
+        import logging
+        
+        logger = logging.getLogger(__name__)
+        
+        print(f"[bout] Running DBSCAN bout detection for {self.rec_id}")
+        presence_list = []
+        
+        for fish in self.fishes:
+            fish_dat = self.data[self.data.freq_code == fish].copy()
+            
+            if len(fish_dat) == 0:
+                continue
+            
+            # Get pulse rate for this fish
+            try:
+                pulse_rate = self.tags.loc[fish, 'pulse_rate']
+            except (KeyError, AttributeError):
+                pulse_rate = 8.0  # Default if not found
+            
+            # Calculate epsilon: pulse_rate * multiplier
+            eps = pulse_rate * self.eps_multiplier
+            
+            # DBSCAN clustering on epoch (1D temporal data)
+            epochs = fish_dat[['epoch']].values
+            clustering = DBSCAN(eps=eps, min_samples=1).fit(epochs)
+            fish_dat['bout_no'] = clustering.labels_
+            
+            # Filter out noise points (label = -1, though shouldn't happen with min_samples=1)
+            fish_dat = fish_dat[fish_dat.bout_no != -1]
+            
+            # Assign to each detection
+            for idx, row in fish_dat.iterrows():
+                presence_list.append({
+                    'freq_code': row['freq_code'],
+                    'epoch': row['epoch'],
+                    'time_stamp': row['time_stamp'],
+                    'power': row['power'],
+                    'rec_id': row['rec_id'],
+                    'bout_no': row['bout_no'],
+                    'class': 'study',
+                    'det_lag': 0  # Not meaningful for DBSCAN, kept for compatibility
+                })
+        
+        # Store results
+        if presence_list:
+            self.presence_df = pd.DataFrame(presence_list)
+            print(f"[bout] Detected {self.presence_df.bout_no.nunique()} bouts across {len(self.fishes)} fish")
+        else:
+            self.presence_df = pd.DataFrame()
+            print(f"[bout] No bouts detected for {self.rec_id}")
+    
+    def presence(self):
+        """
+        Write bout results to /presence table in HDF5.
+        Call this after __init__ to save results to database.
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        if self.presence_df.empty:
+            print(f"[bout] No presence data to write for {self.rec_id}")
+            return
+        
+        # Prepare data for storage
+        presence_df = self.presence_df.astype({
+            'freq_code': 'object',
+            'rec_id': 'object',
+            'epoch': 'float32',
+            'time_stamp': 'datetime64[ns]',
+            'power': 'float32',
+            'bout_no': 'int32',
+            'class': 'object',
+            'det_lag': 'int32'
+        })
+        
+        # Write to HDF5
+        with pd.HDFStore(self.db, mode='a') as store:
+            store.append(
+                key='presence',
+                value=presence_df[['freq_code', 'epoch', 'time_stamp', 'rec_id', 'class', 'bout_no', 'det_lag']],
+                format='table',
+                data_columns=True,
+                min_itemsize={'freq_code': 20, 'rec_id': 20, 'class': 20}
+            )
+        
+        logger.debug(f"Wrote {len(presence_df)} detections ({presence_df.bout_no.nunique()} bouts) to /presence for {self.rec_id}")
+        print(f"[bout] ✓ Wrote {len(presence_df)} detections to database")
         
     def prompt_for_params(self, model_type):
         if model_type == 'two_process':
