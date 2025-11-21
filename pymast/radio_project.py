@@ -1413,8 +1413,14 @@ class radio_project():
                 if overlap_exists:
                     rec_dat = rec_dat.merge(overlap_data, on=['freq_code', 'epoch', 'rec_id'], how='left')
                     rec_dat['overlapping'] = rec_dat['overlapping'].fillna(0).astype(int)
+                    # Add ambiguous_overlap if it exists in overlap data
+                    if 'ambiguous_overlap' in overlap_data.columns:
+                        rec_dat['ambiguous_overlap'] = rec_dat['ambiguous_overlap'].fillna(0).astype('float32')
+                    else:
+                        rec_dat['ambiguous_overlap'] = np.float32(0)
                 else:
                     rec_dat['overlapping'] = 0
+                    rec_dat['ambiguous_overlap'] = np.float32(0)
                 
                 # Filter out overlapping detections (keep only overlapping=0)
                 before_filter = len(rec_dat)
@@ -1427,7 +1433,7 @@ class radio_project():
                 # Check for required columns
                 required_columns = ['freq_code', 'rec_id', 'epoch', 'time_stamp', 'power', 'noise_ratio',
                                     'lag', 'det_hist', 'hit_ratio', 'cons_det', 'cons_length', 
-                                    'likelihood_T', 'likelihood_F', 'bout_no', 'overlapping']
+                                    'likelihood_T', 'likelihood_F', 'bout_no', 'overlapping', 'ambiguous_overlap']
                 
                 missing_columns = [col for col in required_columns if col not in rec_dat.columns]
                 if missing_columns:
@@ -1457,7 +1463,8 @@ class radio_project():
                     'likelihood_T': 'float32',
                     'likelihood_F': 'float32',
                     'bout_no': 'int32',
-                    'overlapping': 'int32'
+                    'overlapping': 'int32',
+                    'ambiguous_overlap': 'float32'
                 })
     
                 # Show record counts BEFORE prompting
@@ -1504,11 +1511,14 @@ class radio_project():
                 # Add any missing columns to align with the acoustic (non-PIT) columns
                 missing_cols = [
                     'lag', 'det_hist', 'hit_ratio', 'cons_det', 'cons_length',
-                    'likelihood_T', 'likelihood_F', 'bout_no', 'overlapping'
+                    'likelihood_T', 'likelihood_F', 'bout_no', 'overlapping', 'ambiguous_overlap'
                 ]
                 for col in missing_cols:
                     if col not in pit_data.columns:
-                        pit_data[col] = 0
+                        if col == 'ambiguous_overlap':
+                            pit_data[col] = np.float32(0)
+                        else:
+                            pit_data[col] = 0
         
                 # Check if 'presence' exists before trying to read it
                 with pd.HDFStore(self.db, mode='r') as store:
@@ -1538,11 +1548,17 @@ class radio_project():
                         overlap_data = dd.read_hdf(self.db, key='overlapping')
                         overlap_data = overlap_data[overlap_data['rec_id'] == rec].compute()
                         overlap_data = overlap_data[overlap_data['freq_code'].isin(self.tags[self.tags.tag_type=='study'].index)]
-                        overlap_data = overlap_data.groupby(['freq_code', 'epoch', 'rec_id'])['overlapping'].max().reset_index()
-        
+                        # Aggregate: take max for both overlapping and ambiguous_overlap
+                        agg_dict = {'overlapping': 'max'}
+                        if 'ambiguous_overlap' in overlap_data.columns:
+                            agg_dict['ambiguous_overlap'] = 'max'
+                        overlap_data = overlap_data.groupby(['freq_code', 'epoch', 'rec_id']).agg(agg_dict).reset_index()
+
                         if not overlap_data.empty:
                             pit_data = pit_data.merge(overlap_data, on=['freq_code', 'epoch', 'rec_id'], how='left')
                             pit_data['overlapping'] = pit_data['overlapping'].fillna(0).astype(int)
+                            if 'ambiguous_overlap' in overlap_data.columns:
+                                pit_data['ambiguous_overlap'] = pit_data['ambiguous_overlap'].fillna(0).astype('float32')
                     except KeyError:
                         logger.warning(f"    No overlap data found for {rec}, skipping overlap merge")
                 else:
@@ -1554,7 +1570,7 @@ class radio_project():
                 # Keep only the columns needed in `recaptures`
                 required_columns = [
                     'freq_code', 'rec_id', 'epoch', 'time_stamp', 'power', 'noise_ratio', 'lag', 'det_hist',
-                    'hit_ratio', 'cons_det', 'cons_length', 'likelihood_T', 'likelihood_F', 'bout_no', 'overlapping'
+                    'hit_ratio', 'cons_det', 'cons_length', 'likelihood_T', 'likelihood_F', 'bout_no', 'overlapping', 'ambiguous_overlap'
                 ]
                 pit_data = pit_data[[c for c in required_columns if c in pit_data.columns]]
         
@@ -1564,7 +1580,7 @@ class radio_project():
                     'time_stamp': 'datetime64[ns]', 'power': 'float32', 'noise_ratio': 'float32',
                     'lag': 'float32', 'det_hist': 'object', 'hit_ratio': 'float32',
                     'cons_det': 'int32', 'cons_length': 'float32', 'likelihood_T': 'float32',
-                    'likelihood_F': 'float32', 'bout_no': 'int32', 'overlapping': 'int32'
+                    'likelihood_F': 'float32', 'bout_no': 'int32', 'overlapping': 'int32', 'ambiguous_overlap': 'float32'
                 }
                 for col, dt in dtypes_map.items():
                     if col in pit_data.columns:
