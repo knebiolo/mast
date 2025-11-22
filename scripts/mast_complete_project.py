@@ -103,29 +103,60 @@ project = radio_project(project_dir,
 #%% cross validate
 
 
-#%% calculate bouts
+#%% Calculate bouts using DBSCAN (receiver-based)
+"""
+DBSCAN-based bout detection with physics-based epsilon.
+- Runs automatically during initialization (no fit_processes needed)
+- epsilon = pulse_rate * eps_multiplier (default 5x)
+- Recommended: eps_multiplier=5, lag_window=2
+"""
+
+# Undo existing bouts if rerunning
+# project.undo_bouts()
+
+print("\n" + "="*80)
+print("BOUT DETECTION (DBSCAN)")
+print("="*80)
 
 receivers = list(project.receivers.index)
+print(f"Processing {len(receivers)} receivers with DBSCAN clustering...")
+
+successful_receivers = []
+failed_receivers = []
 
 for rec_id in receivers:
-    print(f"Processing bouts for {rec_id}")
-    
-    # Recommended parameters:
-    # - eps_multiplier=5: longer bouts for better overlap detection (5x pulse rate)
-    # - lag_window=2: tighter temporal window (2 sec) to reduce false positives
-    bout = pymast.bout(project, rec_id, eps_multiplier=5, lag_window=2)
-    
-    # Fit mixture model to find threshold
-    threshold = bout.fit_processes()
-    
-    # Calculate presences
-    bout.presence(threshold)
-    
-    print(f"  ✓ Completed {rec_id}: threshold={threshold:.1f} seconds")
+    try:
+        print(f"\n[{rec_id}] Starting bout detection...")
+        
+        # Create bout object - DBSCAN runs automatically during __init__
+        # eps_multiplier=5: epsilon = 5x pulse rate (~40-50 sec for 8-10 sec tags)
+        # lag_window=2: kept for compatibility (not used in DBSCAN)
+        bout = pymast.bout(project, rec_id, eps_multiplier=5, lag_window=2)
+        
+        # Write results to database
+        bout.presence()
+        
+        successful_receivers.append(rec_id)
+        print(f"[{rec_id}] ✓ Complete")
+        
+    except Exception as e:
+        print(f"[{rec_id}] ✗ Error: {e}")
+        failed_receivers.append(rec_id)
+        continue
 
-print(f"\nBouts complete for {len(receivers)} receivers")
+print("\n" + "="*80)
+print(f"BOUT DETECTION SUMMARY")
+print("="*80)
+print(f"Successful: {len(successful_receivers)}/{len(receivers)} receivers")
+if successful_receivers:
+    print(f"  {', '.join(successful_receivers)}")
+if failed_receivers:
+    print(f"Failed: {len(failed_receivers)} receivers")
+    print(f"  {', '.join(failed_receivers)}")
+print("="*80 + "\n")
 
-# project.undo_bouts()
+# To undo all bouts: project.undo_bouts()
+# To undo specific receiver: project.undo_bouts(rec_id='R03')
     
 #%% reduce overlap
 # Choose overlap reduction method, we have an unsupervised method or the nested doll
@@ -146,7 +177,7 @@ print('Running unsupervised removal with statistical testing (t-test + Cohen\'s 
 # effect_size_threshold=0.2: small effect size (more sensitive to differences)
 # min_detections=2: allow smaller bouts (need at least 2 for t-test)
 # bout_expansion=30: ±30 second buffer to catch near-overlaps
-doll.unsupervised_removal(method='posterior', 
+doll.unsupervised_removal(method='power', 
                          p_value_threshold=0.05, 
                          effect_size_threshold=0.2, 
                          min_detections=1, 
@@ -155,13 +186,13 @@ print('Overlap reduction took', time.time() - start_t, 'seconds')
 
 # nested doll
 # create edges showing parent:child relationships for nodes in network
-edges =[('R04','R15'),('R04','R14'),('R04','R13'),('R04','R12'),('R04','R10'),('R04','R08'),('R04','R09'),('R04','R05'),('R04','R03'),
-        ('R03','R15'),('R03','R14'),('R03','R13'),('R03','R12'),('R03','R10'),('R03','R08'),('R03','R09'),('R03','R05'),('R03','R04'),
-        ('R08','R10'),
-        ('R09','R10')]
-nodes = ['R03','R04','R05','R08','R09','R10','R12','R13','R14','R15']
-nested = pymast.overlap_reduction(nodes, edges, project)
-nested.nested_doll()  
+# edges =[('R04','R15'),('R04','R14'),('R04','R13'),('R04','R12'),('R04','R10'),('R04','R08'),('R04','R09'),('R04','R05'),('R04','R03'),
+#         ('R03','R15'),('R03','R14'),('R03','R13'),('R03','R12'),('R03','R10'),('R03','R08'),('R03','R09'),('R03','R05'),('R03','R04'),
+#         ('R08','R10'),
+#         ('R09','R10')]
+# nodes = ['R03','R04','R05','R08','R09','R10','R12','R13','R14','R15']
+# nested = pymast.overlap_reduction(nodes, edges, project)
+# nested.nested_doll()  
 
 # project.undo_overlap()
 
@@ -204,7 +235,7 @@ tte = formatter.time_to_event(upstream_states,
                               initial_state_release = True,
                               last_presence_time0 = False,
                               cap_loc = None,
-                              rel_loc = 'windham',
+                              rel_loc = 'sprague',
                               species = None,
                               rel_date = None,
                               recap_date = None)

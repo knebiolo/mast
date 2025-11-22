@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 '''
 Module contains all of the methods and classes required to identify and remove
 overlapping detections from radio telemetry data.
@@ -19,7 +19,6 @@ except Exception:
 
 from scipy.optimize import curve_fit, minimize
 from scipy.interpolate import UnivariateSpline
-from scipy.stats import ttest_ind
 import matplotlib.pyplot as plt
 import networkx as nx
 from matplotlib import rcParams
@@ -201,7 +200,7 @@ class bout():
         with pd.HDFStore(self.db, mode='a') as store:
             store.append(
                 key='presence',
-                value=presence_df[['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id', 'class', 'bout_no', 'det_lag']],
+                value=presence_df[['freq_code', 'epoch', 'time_stamp', 'rec_id', 'class', 'bout_no', 'det_lag']],
                 format='table',
                 data_columns=True,
                 min_itemsize={'freq_code': 20, 'rec_id': 20, 'class': 20}
@@ -210,6 +209,561 @@ class bout():
         logger.debug(f"Wrote {len(presence_df)} detections ({presence_df.bout_no.nunique()} bouts) to /presence for {self.rec_id}")
         print(f"[bout] ✓ Wrote {len(presence_df)} detections to database")
 
+
+from scipy.stats import ttest_ind
+
+
+class overlap_reduction:
+    """
+            print("Please enter the values for the initial quantity (y0), the quantity at time t (yt), and the time t.")
+            y0 = float(_prompt("Enter the initial quantity (y0): ", default=1.0))
+            yt = float(_prompt("Enter the quantity at time t (yt): ", default=0.1))
+            t = float(_prompt("Enter the time at which yt is observed (t): ", default=10.0))
+        
+            # Calculate decay rate b1 using the provided y0, yt, and t
+            b1 = -np.log(yt / y0) / t
+        
+            # Assume that the decay rate b2 after the knot is the same as b1 before the knot
+            # This is a simplifying assumption; you may want to calculate b2 differently based on additional data or domain knowledge
+            b2 = b1
+        
+            # For the two-process model, we'll assume a1 is the initial quantity y0
+            a1 = y0
+        
+            # We'll calculate a2 such that the function is continuous at the knot
+            # This means solving the equation a1 * exp(-b1 * k) = a2 * exp(-b2 * k)
+            # Since we've assumed b1 = b2, this simplifies to a2 = a1 * exp(-b1 * k)
+            a2 = a1 * np.exp(-b1 * t)
+        
+            return [a1, b1, a2, b2, t]
+        
+        else:
+            logger = logging.getLogger(__name__)
+            logger.warning("Unsupported model type requested in prompt_for_params()")
+            return None
+        
+    def find_knot(self, initial_knot_guess):
+        # get lag frequencies
+        lags = np.arange(0, self.time_limit, 2)
+        freqs, bins = np.histogram(np.sort(self.data.lag_binned), lags)
+        bins = bins[:-1][freqs > 0]  # Ensure the bins array is the right length
+        freqs = freqs[freqs > 0]
+        log_freqs = np.log(freqs)
+        
+        # Define a two-segment exponential decay function
+        def two_exp_decay(x, a1, b1, a2, b2, k):
+            condlist = [x < k, x >= k]
+            funclist = [
+                lambda x: a1 * np.exp(-b1 * x),
+                lambda x: a2 * np.exp(-b2 * (x - k))
+            ]
+            return np.piecewise(x, condlist, funclist)
+
+
+        # Objective function for two-segment model
+        def objective_function(knot, bins, log_freqs):
+            # Fit the model without bounds on the knot
+            try:
+                params, _ = curve_fit(lambda x, a1, b1, a2, b2: two_exp_decay(x, a1, b1, a2, b2, knot),
+                                      bins, 
+                                      log_freqs, 
+                                      p0=[log_freqs[0], 0.001, 
+                                          log_freqs[0], 0.001])
+                y_fit = two_exp_decay(bins, *params, knot)
+                error = np.sum((log_freqs - y_fit) ** 2)
+                return error
+            except RuntimeError:
+                return np.inf
+
+        # Use minimize to find the optimal knot
+        result = minimize(
+            fun=objective_function,
+            x0=[initial_knot_guess],
+            args=(bins, log_freqs),
+            bounds=[(bins.min(), bins.max())]
+        )
+
+        # Check if the optimization was successful and extract the results
+        if result.success:
+            optimized_knot = result.x[0]
+
+            # Refit with the optimized knot to get all parameters
+            p0 = [log_freqs[0], 0.001, 
+                  log_freqs[0], 0.001,
+                  optimized_knot]
+            
+            bounds_lower = [0, 0, 
+                            0, 0, 
+                            bins.min()]
+            
+            bounds_upper = [np.inf, np.inf, 
+                            np.inf, np.inf, 
+                            bins.max()]
+
+            optimized_params, _ = curve_fit(
+                two_exp_decay,
+                bins,
+                log_freqs,
+                p0=p0,
+                bounds=(bounds_lower, bounds_upper)
+            )
+
+            # Visualization of the final fit with the estimated knot
+            plt.figure(figsize=(12, 6))
+            
+            plt.scatter(bins, 
+                        log_freqs, 
+                        label='Data', 
+                        alpha=0.6)
+            
+            x_range = np.linspace(bins.min(), bins.max(), 1000)
+            
+            plt.plot(x_range, 
+                     two_exp_decay(x_range, *optimized_params),
+                     label='Fitted function', 
+                     color='red')
+            
+            plt.axvline(x=optimized_knot, color='orange', linestyle='--')#, label=f'Knot at x={optimized_knot:.2f}')
+            plt.title('Fitted Two-Process Model')
+            plt.xlabel('Lag Time')
+            plt.ylabel('Frequency')
+            plt.legend()
+            plt.show()
+            
+            return optimized_params[-1]
+        
+        else:
+            print("Optimization failed:", result.message)
+            return None
+    
+    def find_knots(self, initial_knot_guesses):
+        # get lag frequencies
+        lags = np.arange(0, self.time_limit, 2)
+        freqs, bins = np.histogram(np.sort(self.data.lag_binned), lags)
+        bins = bins[:-1][freqs > 0]  # Ensure the bins array is the right length
+        freqs = freqs[freqs > 0]
+        log_freqs = np.log(freqs)
+        # Assuming initial_knot_guesses is a list of two knot positions
+        # This method should fit a three-process model
+
+        # Define bounds for parameters outside of objective_function
+        bounds_lower = [0, 0, 0, 0, 0, 0, bins.min(), initial_knot_guesses[0]]
+        bounds_upper = [np.inf, np.inf, np.inf, np.inf, np.inf, np.inf, initial_knot_guesses[1], bins.max()]
+    
+        # Define a three-segment exponential decay function
+        #TODO - is the math correct?
+        def three_exp_decay(x, a1, b1, a2, b2, a3, b3, k1, k2):
+            condlist = [x < k1, (k1 <= x) & (x < k2), x >= k2]
+            funclist = [
+                lambda x: a1 * np.exp(-b1 * x),
+                lambda x: a2 * np.exp(-b2 * (x - k1)),
+                lambda x: a3 * np.exp(-b3 * (x - k2))
+            ]
+            return np.piecewise(x, condlist, funclist)
+    
+        # Objective function for three-segment model
+        def objective_function(knots, bins, log_freqs):
+            # Unpack knots
+            k1, k2 = knots
+            # Initial parameter guesses (3 amplitudes, 3 decay rates)
+            p0 = [log_freqs[0], 0.001, log_freqs[0], 0.001, log_freqs[0], 0.001, k1, k2]
+
+            # Fit the three-segment model
+            params, _ = curve_fit(three_exp_decay,
+                                  bins, 
+                                  log_freqs,
+                                  p0=p0, 
+                                  bounds=(bounds_lower, bounds_upper))            # Calculate the errors
+            #TODO - AIC or BIC possible expansion?
+            y_fit = three_exp_decay(bins, *params)
+            error = np.sum((log_freqs - y_fit) ** 2)
+            return error
+    
+        # Perform the optimization with the initial guesses
+        result = minimize(
+            fun=objective_function,
+            x0=initial_knot_guesses,  # Initial guesses for the knot positions
+            args=(bins, log_freqs),
+            bounds=[(bins.min(), initial_knot_guesses[1]),  # Ensure k1 < k2
+                    (initial_knot_guesses[0], bins.max())]
+        )
+
+            
+    
+        # Check if the optimization was successful and extract the results
+        if result.success:
+            optimized_knots = result.x  # These should be the optimized knots
+    
+            # Now we refit the model with the optimized knots to get all the parameters
+            p0 = [log_freqs[0], 0.001, 
+                  log_freqs[0], 0.001, 
+                  log_freqs[0], 0.001, 
+                  optimized_knots[0], optimized_knots[1]]
+            
+            bounds_lower = [0, 0, 
+                            0, 0, 
+                            0, 0, 
+                            bins.min(), optimized_knots[0]]
+            
+            bounds_upper = [np.inf, np.inf, 
+                            np.inf, np.inf, 
+                            np.inf, np.inf, 
+                            optimized_knots[1], bins.max()]
+    
+            optimized_params, _ = curve_fit(
+                three_exp_decay,
+                bins,
+                log_freqs,
+                p0=p0,
+                bounds=(bounds_lower, bounds_upper)
+            )           
+
+            # Visualization of the final fit with the estimated knots
+            plt.figure(figsize=(12, 6))
+            plt.scatter(bins, log_freqs, label='Data', alpha=0.6)
+
+            # Create a range of x values for plotting the fitted function
+            x_range = np.linspace(bins.min(), bins.max(), 1000)
+            plt.plot(x_range, 
+                     three_exp_decay(x_range, *optimized_params), 
+                     label='Fitted function', color='red')
+
+            plt.axvline(x=optimized_knots[0], color='orange', linestyle='--')
+            plt.axvline(x=optimized_knots[1], color='green', linestyle='--')
+
+            plt.title('Fitted Three-Process Model')
+            plt.xlabel('Lag Time')
+            plt.ylabel('Frequency')
+            plt.legend()
+            plt.show()
+            plt.pause(5)
+        else:
+            print("Try again, optimization failed:", result.message)
+            sys.exit()
+
+        return optimized_params[-1]
+    
+    def fit_processes(self):
+        # Step 1: Plot bins vs log frequencies
+        lags = np.arange(0, self.time_limit, 2)
+        freqs, bins = np.histogram(np.sort(self.data.lag_binned), lags)
+        bins = bins[:-1][freqs > 0]  # Ensure the bins array is the right length
+        freqs = freqs[freqs > 0]
+        log_freqs = np.log(freqs)
+        
+        plt.figure(figsize=(12, 6))
+        plt.scatter(bins, log_freqs, label='Log of Frequencies', alpha=0.6)
+        plt.title('Initial Data Plot')
+        plt.xlabel('Bins')
+        plt.ylabel('Log Frequencies')
+        plt.legend()
+        plt.show(block=True)
+        plt.pause(5)
+        # Step 2: Ask user for initial knots
+        num_knots = int(_prompt("Enter the number of knots (1 for two-process, 2 for three-process): ", default=1))
+        initial_knots = []
+        for i in range(num_knots):
+            knot = float(_prompt(f"Enter initial guess for knot {i+1}: ", default=5.0))
+            initial_knots.append(knot)
+    
+        # Step 3 & 4: Determine the number of processes and fit accordingly
+        if num_knots == 1:
+            # Fit a two-process model
+            self.initial_knot_guess = initial_knots[0]
+            self.find_knot(self.initial_knot_guess)
+        elif num_knots == 2:
+            # Fit a three-process model (you will need to implement this method)
+            self.initial_knot_guesses = initial_knots
+            self.find_knots(self.initial_knot_guesses)
+        else:
+            print("Invalid number of knots. Please enter 1 or 2.")
+            
+        # Fit the model based on the number of knots
+        optimized_knots = None
+        if num_knots == 1:
+            # Fit a two-process model
+            optimized_knots = self.find_knot(initial_knots[0])
+        elif num_knots == 2:
+            # Fit a three-process model
+            optimized_knots = self.find_knots(initial_knots)
+        else:
+            print("Invalid number of knots. Please enter 1 or 2.")
+        
+        # Return the optimized knot(s)
+        return optimized_knots
+      
+    def presence(self, threshold):
+        '''Function takes the break point between a continuous presence and new presence,
+        enumerates the presence number at a receiver and writes the data to the
+        analysis database.'''
+        response = _prompt('Satisfied with the bout fitting?', default='yes')
+        if str(response) in ['yes', 'y', 'T', 'True']:
+
+            fishes = self.data.freq_code.unique()
+
+            for fish in fishes:
+                fish_dat = self.data[self.data.freq_code == fish]
+
+                # Vectorized classification
+                classifications = np.where(fish_dat.det_lag <= threshold, 'within_bout', 'start_new_bout')
+
+                # Generating bout numbers
+                # Increment bout number each time a new bout starts
+                bout_changes = np.where(classifications == 'start_new_bout', 1, 0)
+                bout_no = np.cumsum(bout_changes)
+
+                # Assigning classifications and bout numbers to the dataframe
+                fish_dat['class'] = classifications
+                fish_dat['bout_no'] = bout_no
+
+                fish_dat = fish_dat.astype({'freq_code': 'object',
+                                            # 'epoch': 'float64',
+                                            'epoch': 'float32',
+                                            'time_stamp': 'datetime64[ns]',
+                                            'power': 'float32',
+                                            'rec_id': 'object',
+                                            'class': 'object',
+                                            'bout_no': 'int32',
+                                            'det_lag': 'int32'})
+
+                # append to hdf5
+                with pd.HDFStore(self.db, mode='a') as store:
+                    store.append(key='presence',
+                                 value=fish_dat,
+                                 format='table',
+                                 index=False,
+                                 min_itemsize={'freq_code': 20,
+                                               'rec_id': 20,
+                                               'class': 20},
+                                 append=True,
+                                 data_columns=True,
+                                 chunksize=1000000)
+
+                logger = logging.getLogger(__name__)
+                logger.info('bouts classified for fish %s', fish)
+        else:
+            logger = logging.getLogger(__name__)
+            logger.error('Give the fitting another try')
+            sys.exit()
+ 
+# class overlap_reduction():
+#     """
+#     Class to reduce redundant detections at overlapping receivers.
+
+#     Attributes:
+#         db (str): Path to the project database.
+#         G (networkx.DiGraph): Directed graph representing the relationships between receivers.
+#         node_pres_dict (dict): Dictionary storing presence data for each node (receiver).
+#         node_recap_dict (dict): Dictionary storing recapture data for each node (receiver).
+#     """
+
+#     def __init__(self, nodes, edges, radio_project):
+#         """
+#         Initializes the OverlapReduction class by creating a directed graph and
+#         importing the necessary data for each node (receiver).
+#         """
+#         self.db = radio_project.db
+#         self.project = radio_project
+#         # Create a directed graph from the list of edges
+#         self.G = nx.DiGraph()
+#         self.G.add_edges_from(edges)
+        
+#         # Initialize dictionaries for presence and recap data
+#         self.node_pres_dict = {}
+#         self.node_recap_dict = {}
+#         self.nodes = nodes
+#         self.edges = edges
+        
+#         for node in nodes:
+#             # Load the entire dataset or relevant columns, and then filter it in memory
+#             pres_data = dd.read_hdf(self.db, 'presence', columns=['freq_code', 'epoch','time_stamp', 'power', 'rec_id', 'bout_no'])
+#             recap_data = dd.read_hdf(self.db, 'classified', columns=['freq_code', 'epoch','time_stamp', 'power', 'rec_id', 'iter', 'test'])
+#             pres_data['epoch'] = (pres_data['time_stamp'] - pd.Timestamp("1970-01-01")) // pd.Timedelta('1s')
+#             recap_data['epoch'] = (recap_data['time_stamp'] - pd.Timestamp("1970-01-01")) // pd.Timedelta('1s')
+
+#             # Filter the data for the specific node
+#             pres_data = pres_data[pres_data['rec_id'] == node]
+#             recap_data = recap_data[recap_data['rec_id'] == node]
+
+#             # We only want good data in our recaps
+#             recap_data = recap_data[recap_data['iter'] == recap_data['iter'].max()]
+#             recap_data = recap_data[recap_data['test'] == 1]
+#             recap_data = recap_data[['freq_code', 'epoch','time_stamp', 'power', 'rec_id']]            
+            
+#             # Grouping with shuffle-based aggregation
+#             summarized_data = pres_data.groupby(['freq_code', 'bout_no', 'rec_id']).agg({
+#                 'epoch': ['min', 'max'],
+#                 'power': 'median'
+#             }, shuffle='tasks').reset_index()
+
+#             # Flatten multi-index columns
+#             summarized_data.columns = ['freq_code', 'bout_no', 'rec_id', 
+#                                         'min_epoch', 'max_epoch', 'median_power']
+            
+#             # normalize power
+#             recap_data['norm_power'] = (recap_data.power - recap_data.power.min()) / (recap_data.power.max() - recap_data.power.min())
+#             summarized_data['norm_power'] = (summarized_data.median_power - summarized_data.median_power.min()) / \
+#                 (summarized_data.median_power.max() - summarized_data.median_power.min())
+
+#             self.node_pres_dict[node] = summarized_data
+#             self.node_recap_dict[node] = recap_data
+#             print(f"Completed data management process for node {node}")
+
+#         #self.visualize_graph()
+
+#         # Visualize the graph
+#         #self.visualize_graph()
+
+#     def visualize_graph(self):
+#         """
+#         Visualizes the directed graph representing the relationships between nodes.
+#         """
+#         pos = nx.circular_layout(self.G)
+#         nx.draw(self.G, pos, node_color='r', node_size=400, with_labels=True)
+#         plt.axis('off')
+#         plt.show()
+
+#     def unsupervised_removal(self):
+#         for i in self.edges:
+#             parent = i[0]
+#             child = i[1]
+            
+#             # get bout data
+#             parent_bouts = self.node_pres_dict[parent]
+#             child_bouts = self.node_pres_dict[child]
+            
+#             # get parent data to label
+#             parent_dat = self.node_recap_dict[parent]
+            
+#             if child_bouts.shape[0].compute() == 0:
+#                 continue
+    
+#             print (f'Identifying overlapping bouts between {parent} and {child}')
+            
+#             # 1. Perform an inner merge on 'freq_code'
+#             merged_ddf = dd.merge(parent_bouts, child_bouts, on='freq_code', suffixes=('_parent', '_child'))
+            
+#             # 2. Define a function to check for overlaps
+#             def check_overlap(row):
+#                 return max(row['min_epoch_parent'], row['min_epoch_child']) <= min(row['max_epoch_parent'], row['max_epoch_child'])
+            
+#             # 3. Apply overlap check row-wise
+#             merged_ddf['overlap'] = merged_ddf.apply(check_overlap, axis=1, meta=('overlap', 'bool'))
+            
+#             # 4. Filter rows where overlap is True
+#             overlap_ddf = merged_ddf[merged_ddf['overlap']]
+            
+#             # *** Delete intermediate object 'merged_ddf' since it's no longer needed ***
+#             del merged_ddf
+#             gc.collect()
+            
+#             print ('Creating intermediate dataframes and removing duplicates created in previous step')
+    
+#             # get overlapping parent and child dataframes
+#             ovlp_parent_bouts = overlap_ddf[['freq_code','bout_no_parent','rec_id_parent', 'min_epoch_parent','max_epoch_parent','norm_power_parent']]
+#             ovlp_parent_bouts = ovlp_parent_bouts.rename(columns={
+#                 'bout_no_parent':'bout_no', 'rec_id_parent':'rec_id',
+#                 'min_epoch_parent':'min_epoch', 'max_epoch_parent':'max_epoch',
+#                 'norm_power_parent':'norm_power'})
+#             ovlp_parent_bouts = ovlp_parent_bouts.drop_duplicates(subset=['freq_code', 'bout_no'])
+    
+#             ovlp_child_bouts = overlap_ddf[['freq_code','bout_no_child','rec_id_child', 'min_epoch_child','max_epoch_child','norm_power_child']]
+#             ovlp_child_bouts = ovlp_child_bouts.rename(columns={
+#                 'bout_no_child':'bout_no', 'rec_id_child':'rec_id',
+#                 'min_epoch_child':'min_epoch', 'max_epoch_child':'max_epoch',
+#                 'norm_power_child':'norm_power'})
+#             ovlp_child_bouts = ovlp_child_bouts.drop_duplicates(subset=['freq_code', 'bout_no'])
+    
+#             # *** Delete 'overlap_ddf' after use ***
+#             del overlap_ddf
+#             gc.collect()
+    
+#             # get power and create an array for processing with gmm
+#             parent_column = ovlp_parent_bouts['norm_power']
+#             child_column = ovlp_child_bouts['norm_power']
+    
+#             combined_columns = dd.concat([parent_column, child_column])
+#             combined_array = combined_columns.to_dask_array(lengths=True)
+#             combined_array = combined_array.rechunk({0: 10000})
+    
+#             # *** Delete 'ovlp_parent_bouts' and 'ovlp_child_bouts' after their usage ***
+#             del ovlp_parent_bouts, ovlp_child_bouts
+#             gc.collect()
+    
+#             print ('Performing Gaussian Mixture to identify differences between detection power')
+#             try:
+#                 gmm = GaussianMixture(n_components=2)
+#                 gmm.fit(combined_array.reshape(-1, 1))
+    
+#                 means = gmm.means_.flatten()
+#                 sorted_means = np.sort(means)
+#                 split_point = (sorted_means[0] + sorted_means[1]) / 2
+#                 print(f'Split point: {split_point}')
+                
+#                 # *** Delete 'combined_array' after GaussianMixture ***
+#                 del combined_array
+#                 gc.collect()
+                
+#             except ValueError:
+#                 print(f'GMM failed')
+#                 split_point = 0.0
+#                 continue
+            
+#             print ('Classifying rows in parent dataframe')
+#             parent_bouts['overlapping_bout'] = parent_bouts['norm_power'].apply(
+#                 lambda x: 1 if x < split_point else 0, meta=('classification', 'int')
+#             )
+    
+#             # Step 1: Merge on 'freq_code'
+#             merged_df = dd.merge(parent_dat, parent_bouts, on='freq_code', how='left')
+    
+#             # *** Delete 'parent_dat' and 'parent_bouts' after merging ***
+#             del parent_dat, parent_bouts
+#             gc.collect()
+    
+#             # Step 2: Filter where 'epoch' falls within the 'min_epoch' and 'max_epoch'
+#             merged_df['in_bout'] = (merged_df['epoch'] >= merged_df['min_epoch']) & (merged_df['epoch'] <= merged_df['max_epoch'])
+    
+#             # Step 3: Classify the detections
+#             merged_df['overlapping'] = merged_df['overlapping_bout'].where(merged_df['in_bout'], other=None)
+    
+#             # Step 1: Keep necessary columns
+#             merged_df = merged_df[['freq_code', 'epoch', 'time_stamp', 'rec_id_x', 'in_bout', 'overlapping']]
+#             merged_df = merged_df.rename(columns={'rec_id_x': 'rec_id'})
+    
+#             # Step 2: Filter rows
+#             merged_df = merged_df[merged_df['in_bout'] == True]
+    
+#             # Step 3: Convert string columns to object-type strings
+#             merged_df['freq_code'] = merged_df['freq_code'].astype('object')
+#             merged_df['rec_id'] = merged_df['rec_id'].astype('object')
+    
+#             # Repartition the DataFrame
+#             merged_df = merged_df.repartition(npartitions=500)
+    
+#             # Write each partition to HDF5
+#             for i, partition in enumerate(merged_df.partitions):
+#                 partition_df = partition.compute()
+#                 partition_df['freq_code'] = partition_df['freq_code'].astype('object')
+#                 partition_df['rec_id'] = partition_df['rec_id'].astype('object')
+    
+#                 with pd.HDFStore(self.project.db, mode='a') as store:
+#                     store.append(
+#                         key='overlapping',
+#                         value=partition_df,
+#                         format='table',
+#                         index=False,
+#                         min_itemsize={'freq_code': 20, 'rec_id': 20},
+#                         data_columns=True
+#                     )
+#                 print(f"Partition {i + 1} written to HDF5.")
+            
+#             # *** Delete 'merged_df' after writing to HDF5 ***
+#             del merged_df
+#             gc.collect()
+
+
+from scipy.stats import ttest_ind
 
 
 class overlap_reduction:
@@ -368,20 +922,11 @@ class overlap_reduction:
                     logger.debug('Could not merge power from recap_data into pres_data; continuing without power')
 
             # Group presence data by frequency code and bout, then calculate min, max, and median power
-            # Check if power column exists first
-            if 'power' in pres_data.columns:
-                summarized_data = pres_data.groupby(['freq_code', 'bout_no', 'rec_id']).agg(
-                    min_epoch=('epoch', 'min'),
-                    max_epoch=('epoch', 'max'),
-                    median_power=('power', 'median')
-                ).reset_index()
-            else:
-                logger.warning(f'Node {node}: Power column not found in presence data. Run bout detection first to populate power.')
-                summarized_data = pres_data.groupby(['freq_code', 'bout_no', 'rec_id']).agg(
-                    min_epoch=('epoch', 'min'),
-                    max_epoch=('epoch', 'max')
-                ).reset_index()
-                summarized_data['median_power'] = None
+            summarized_data = pres_data.groupby(['freq_code', 'bout_no', 'rec_id']).agg(
+                min_epoch=('epoch', 'min'),
+                max_epoch=('epoch', 'max'),
+                median_power=('power', 'median')
+            ).reset_index()
             
             # Log detailed counts so users can see raw vs summarized presence lengths
             raw_count = len(pres_data)
@@ -444,8 +989,7 @@ class overlap_reduction:
 
             # Store the processed data in the dictionaries
             self.node_pres_dict[node] = summarized_data
-            # Don't store recap_data - load on-demand per edge (memory efficient)
-            self.node_recap_dict[node] = len(recap_data)  # Just track count
+            self.node_recap_dict[node] = recap_data
             logger.debug(f"  {node}: {len(pres_data)} presence records, {len(recap_data)} detections")
         
         logger.info(f"✓ Data loaded for {len(nodes)} nodes")
@@ -490,18 +1034,8 @@ class overlap_reduction:
         # repeated mean()/median() computations inside the tight edge loops.
         node_bout_index = {}   # node -> fish -> list of bout dicts
         node_bout_trees = {}   # node -> fish -> IntervalTree
-        node_recap_cache = {}  # node -> recap DataFrame (cache for edge loop)
         for node, bouts in self.node_pres_dict.items():
-            # Load recap data and cache it for use in edge loop
-            try:
-                recaps = pd.read_hdf(self.db, 'classified', where=f"(rec_id == '{node}') & (test == 1)",
-                                    columns=['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id', 'iter', 'test', 'posterior_T', 'posterior_F'])
-                recaps = recaps[recaps['iter'] == recaps['iter'].max()]
-                node_recap_cache[node] = recaps  # Cache for later use
-            except Exception:
-                recaps = pd.DataFrame()
-                node_recap_cache[node] = pd.DataFrame()
-            
+            recaps = self.node_recap_dict.get(node, pd.DataFrame())
             node_bout_index[node] = {}
             node_bout_trees[node] = {}
             if bouts.empty or recaps.empty:
@@ -545,10 +1079,8 @@ class overlap_reduction:
             logger.info(f"Edge {edge_idx+1}/{len(self.edges)}: {parent} → {child}")
 
             parent_bouts = self.node_pres_dict.get(parent, pd.DataFrame())
-            
-            # Use cached recap data (already loaded during precomputation)
-            parent_dat = node_recap_cache.get(parent, pd.DataFrame())
-            child_dat = node_recap_cache.get(child, pd.DataFrame())
+            parent_dat = self.node_recap_dict.get(parent, pd.DataFrame()).copy()
+            child_dat = self.node_recap_dict.get(child, pd.DataFrame()).copy()
 
             # Quick skip when any required table is empty
             if parent_bouts.empty or parent_dat.empty or child_dat.empty:
@@ -581,11 +1113,9 @@ class overlap_reduction:
             logger.debug(f"  Processing {len(fishes)} fish for edge {parent}->{child}")
             print(f"  [overlap] {parent}→{child}: processing {len(fishes)} fish")
 
-            # Buffers for indices to mark as overlapping or ambiguous for this edge
+            # Buffers for indices to mark as overlapping for this edge
             parent_mark_idx = []
             child_mark_idx = []
-            parent_ambiguous_idx = []
-            child_ambiguous_idx = []
 
             for fish_idx, fish_id in enumerate(fishes, 1):
                 # Progress update every 10 fish or for the last fish
@@ -812,9 +1342,11 @@ class overlap_reduction:
                             
                             # Store ambiguous flags in the dataframe
                             if p_ambiguous == 1:
-                                parent_ambiguous_idx.extend(p_indices)
+                                for idx in p_indices:
+                                    parent_dat.loc[idx, 'ambiguous_overlap'] = np.float32(1)
                             if c_ambiguous == 1:
-                                child_ambiguous_idx.extend(c_indices)
+                                for idx in c_indices:
+                                    child_dat.loc[idx, 'ambiguous_overlap'] = np.float32(1)
 
                         else:
                             raise ValueError(f"Unknown method: {method}")
@@ -826,26 +1358,16 @@ class overlap_reduction:
             if child_mark_idx:
                 child_dat.loc[sorted(set(child_mark_idx)), 'overlapping'] = np.float32(1)
 
-            # Bulk-assign ambiguous_overlap flags
-            if parent_ambiguous_idx:
-                parent_dat.loc[sorted(set(parent_ambiguous_idx)), 'ambiguous_overlap'] = np.float32(1)
-            if child_ambiguous_idx:
-                child_dat.loc[sorted(set(child_ambiguous_idx)), 'ambiguous_overlap'] = np.float32(1)
-
-            # Write ONLY the marked detections (overlapping=1 OR ambiguous_overlap=1)
-            # Combine overlapping and ambiguous indices (use set to avoid duplicates)
-            parent_write_idx = sorted(set(parent_mark_idx + parent_ambiguous_idx))
-            child_write_idx = sorted(set(child_mark_idx + child_ambiguous_idx))
-            
-            logger.debug(f"  Writing results for {parent} and {child} (parent overlapping={len(parent_mark_idx)}, ambiguous={len(parent_ambiguous_idx)}, child overlapping={len(child_mark_idx)}, ambiguous={len(child_ambiguous_idx)})")
+            # Write ONLY the marked detections (not all data for this receiver pair)
+            logger.debug(f"  Writing results for {parent} and {child} (parent marks={len(parent_mark_idx)}, child marks={len(child_mark_idx)})")
             print(f"  [overlap] {parent}→{child}: writing overlapping detections to HDF5...")
             
-            # Only write detections that were marked as overlapping or ambiguous
-            if parent_write_idx:
-                parent_overlapping = parent_dat.loc[parent_write_idx]
+            # Only write detections that were marked as overlapping
+            if parent_mark_idx:
+                parent_overlapping = parent_dat.loc[sorted(set(parent_mark_idx))]
                 self.write_results_to_hdf5(parent_overlapping)
-            if child_write_idx:
-                child_overlapping = child_dat.loc[child_write_idx]
+            if child_mark_idx:
+                child_overlapping = child_dat.loc[sorted(set(child_mark_idx))]
                 self.write_results_to_hdf5(child_overlapping)
             print(f"  [overlap] ✓ {parent}→{child} complete\n")
 
