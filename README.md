@@ -1,7 +1,13 @@
 # PyMAST - Movement Analysis Software for Telemetry
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+<p align="center">
+  <img src="pymast_logo.png" alt="PyMAST Logo" width="400"/>
+</p>
+
+<p align="center">
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"/></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.8+-blue.svg" alt="Python 3.8+"/></a>
+</p>
 
 **PyMAST** (Movement Analysis Software for Telemetry) is a comprehensive Python toolkit for processing, analyzing, and modeling radio telemetry data. From data import to statistical model export, PyMAST provides a complete solution for aquatic telemetry studies.
 
@@ -455,6 +461,10 @@ fh.fish_plot('164.123 45')
 
 ## 🔬 Scientific Background
 
+PyMAST implements validated algorithms for radio telemetry data processing, peer-reviewed and published in *Animal Biotelemetry*:
+
+> **Nebiolo, K.P., & Castro-Santos, T.** (2024). MAST: Movement Analysis Software for Telemetry data. Part I: the semi-automated removal of false positives from radio telemetry data. *Animal Biotelemetry*, 12(1), 11. https://doi.org/10.1186/s40317-024-00358-1
+
 ### False Positive Detection Algorithm
 
 MAST uses a **Naive Bayes classifier** with the conditional independence assumption:
@@ -515,19 +525,35 @@ pip install -e .
 
 ## 📄 Citation
 
-If you use MAST in your research, please cite:
+If you use PyMAST in your research, please cite:
 
 ```bibtex
-@software{nebiolo2025mast,
+@article{nebiolo2024mast,
   author = {Nebiolo, Kevin P. and Castro-Santos, Theodore},
-  title = {MAST: Movement Analysis Software for Telemetry},
+  title = {MAST: Movement Analysis Software for Telemetry data. Part I: the semi-automated removal of false positives from radio telemetry data},
+  journal = {Animal Biotelemetry},
+  year = {2024},
+  volume = {12},
+  number = {1},
+  pages = {11},
+  doi = {10.1186/s40317-024-00358-1},
+  url = {https://doi.org/10.1186/s40317-024-00358-1}
+}
+```
+
+**Software Citation:**
+
+```bibtex
+@software{nebiolo2025pymast,
+  author = {Nebiolo, Kevin P. and Castro-Santos, Theodore},
+  title = {PyMAST: Movement Analysis Software for Telemetry},
   year = {2025},
   publisher = {GitHub},
   url = {https://github.com/knebiolo/mast}
 }
 ```
 
-**Key Publications:**
+**Additional Key Publications:**
 
 - Beeman, J.W., & Perry, R.W. (2012). *Bias from False-Positive Detections and Strategies for their Removal in Studies Using Telemetry.* American Fisheries Society.
 - Sibly, R.M., Nott, H.M., & Fletcher, D.J. (1990). *Splitting Behavior into Bouts.* Animal Behavior.
