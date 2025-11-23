@@ -1,24 +1,29 @@
-# MAST - Movement Analysis Software for Telemetry
+# PyMAST - Movement Analysis Software for Telemetry
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 
-**MAST** (Movement Analysis Software for Telemetry) is a comprehensive Python toolkit for processing, analyzing, and modeling radio telemetry data. From false positive removal to 1D movement analysis, MAST provides a complete solution for aquatic telemetry studies.
+**PyMAST** (Movement Analysis Software for Telemetry) is a comprehensive Python toolkit for processing, analyzing, and modeling radio telemetry data. From data import to statistical model export, PyMAST provides a complete solution for aquatic telemetry studies.
 
 ## 🎯 Key Features
 
-- **Automated False Positive Detection** - Naive Bayes classifier with customizable likelihood models
-- **Multi-Manufacturer Support** - Import data from Lotek (SRX600/800/1200), SigmaEight (Orion, Ares), and Vemco (VR2) receivers
-- **Overlap Removal** - Nested Doll algorithm for handling overlapping detection zones
-- **Bout Detection** - Identify presence/absence patterns using piecewise exponential decay models
-- **Statistical Formatting** - Export data for Cormack-Jolly-Seber, Competing Risks, and LRDR models
-- **HDF5 Database** - Efficient storage and querying of large telemetry datasets
-- **Interactive Visualizations** - 3D fish movement histories and network diagrams
-- **Reproducible Workflow** - Complete audit trail from raw data to statistical models
+- **Multi-Manufacturer Support** - Import from Lotek (SRX600/800/1200), Orion, ARES, and VR2 receivers
+- **Automated Classification** - Naive Bayes classifier removes false positives
+- **Bout Detection** - DBSCAN clustering identifies continuous presence periods
+- **Overlap Resolution** - Signal quality comparison resolves spatial ambiguity
+- **Movement Filtering** - Adjacency filter removes impossible transitions
+- **Statistical Export** - CJS, LRDR, and Time-to-Event formats for Program MARK/R
+- **HDF5 Database** - Fast queries and efficient storage for large datasets
+- **Comprehensive Documentation** - All modules accessible via Python `help()` system
+- **Visualization Suite** - Network graphs, bout distributions, overlap analysis, 3D fish tracks
 
 ---
 
 ## 🚀 Quick Start
+
+**👉 New users: Start with [GETTING_STARTED.md](GETTING_STARTED.md) for a complete walkthrough!**
+
+**👉 New users: Start with [GETTING_STARTED.md](GETTING_STARTED.md) for a complete walkthrough!**
 
 ### Installation
 
@@ -26,78 +31,98 @@
 pip install pymast
 ```
 
-Or install from source:
+Or from source:
 
 ```bash
-git clone https://github.com/knebiolo/mast.git
 cd mast
 pip install -e .
 ```
 
-### Basic Usage
+### 30-Second Example
 
 ```python
-import os
-import pandas as pd
 from pymast.radio_project import radio_project
+import pandas as pd
 
-# Set up your project
-project_dir = r"path/to/your/project"
-db_name = 'my_telemetry_study'
-
-# Load metadata
-tags = pd.read_csv(os.path.join(project_dir, 'tblMasterTag.csv'))
-receivers = pd.read_csv(os.path.join(project_dir, 'tblMasterReceiver.csv'))
-nodes = pd.read_csv(os.path.join(project_dir, 'tblNodes.csv'))
-
-# Create project
-project = radio_project(
-    project_dir=project_dir,
-    db_name=db_name,
-    detection_count=5,
-    duration=1,
-    tag_data=tags,
-    receiver_data=receivers,
-    nodes_data=nodes
+# Initialize project
+proj = radio_project(
+    project_dir='C:/my_study',
+    db_name='study.h5',
+    tag_list=pd.read_csv('tags.csv'),
+    rec_list=pd.read_csv('receivers.csv')
 )
 
-# Import raw data
-project.telem_data_import(
-    rec_id='R01',
-    rec_type='srx800',
-    file_dir=os.path.join(project_dir, 'Data', 'Training_Files'),
-    db_dir=os.path.join(project_dir, f'{db_name}.h5'),
-    scan_time=1,
-    channels=1,
-    ant_to_rec_dict={'A0': 'R01'}
+# Import receiver data
+proj.import_data(
+    file_name='receiver_001.csv',
+    receiver_make='srx1200',
+    rec_id='REC001',
+    scan_time=2.5,
+    channels=1
 )
 
-# Train classifier
-fishes = project.get_fish(rec_id='R01')
-for fish in fishes:
-    project.train(fish, 'R01')
-
-# Classify detections
-project.reclassify(
-    project=project,
-    rec_id='R01',
-    rec_type='srx800',
-    threshold_ratio=1.0,
-    likelihood_model=['hit_ratio', 'cons_length', 'noise_ratio', 'power', 'lag_diff']
-)
-
-# Create recaptures table
-project.make_recaptures_table(export=True)
+# Process and analyze
+proj.make_recaptures_table()
 ```
+
+See [GETTING_STARTED.md](GETTING_STARTED.md) for complete workflows.
 
 ---
 
 ## 📚 Documentation
 
-### System Requirements
+| Document | Description |
+|----------|-------------|
+| **[GETTING_STARTED.md](GETTING_STARTED.md)** | 👈 **Start here!** Complete setup guide |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | System design, database structure, workflow |
+| [docs/TUTORIAL.md](docs/TUTORIAL.md) | Step-by-step analysis examples |
+| [docs/API_REFERENCE.md](docs/API_REFERENCE.md) | Detailed function documentation |
+| [CHANGELOG.md](CHANGELOG.md) | Version history and updates |
+
+### In-Code Documentation
+
+All modules support Python's `help()` system:
+
+```python
+import pymast
+help(pymast.parsers)              # Module overview
+help(pymast.overlap_removal.bout) # Class documentation  
+help(pymast.naive_bayes.calculate_likelihood)  # Function details
+```
+
+---
+
+## 🏗️ System Architecture
+
+```
+Raw Receiver Files
+       ↓
+   [Parsers] → Import to HDF5
+       ↓
+   [Classification] → Remove false positives
+       ↓
+   [Recaptures] → Link detections to locations
+       ↓
+   [Bout Detection] → Identify presence periods
+       ↓
+   [Overlap Resolution] → Resolve spatial ambiguity
+       ↓
+   [Adjacency Filter] → Remove impossible movements
+       ↓
+   [Formatter] → Export CJS/LRDR/TTE
+       ↓
+Program MARK / R Analysis
+```
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for details.
+
+---
+
+## 📋 System Requirements
 
 - **Python**: 3.8 or higher
-- **RAM**: Minimum 8 GB recommended
+- **RAM**: 8+ GB recommended for large datasets
+- **Storage**: HDF5 database typically 20-50% of raw data size
 - **Disk Space**: 10+ GB for large projects with beacon tags
 - **Operating System**: Windows, macOS, or Linux
 
