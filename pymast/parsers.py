@@ -1,4 +1,81 @@
 # -*- coding: utf-8 -*-
+"""
+Data parsers for radio telemetry receiver file formats.
+
+This module provides parser functions to import raw detection data from various
+radio telemetry receiver manufacturers into the MAST HDF5 database. Each parser
+handles manufacturer-specific file formats and standardizes the data into a common
+schema for downstream processing.
+
+Supported Receiver Types
+------------------------
+- **ARES**: Lotek Advanced Radio Telemetry Systems
+- **Orion**: Sigma Eight Orion receivers
+- **SRX-1200**: Lotek SRX 1200 receivers (fixed-width format)
+- **SRX-800**: Lotek SRX 800 receivers (fixed-width format)
+- **SRX-600**: Lotek SRX 600 receivers (fixed-width format)
+- **VR2**: Vemco VR2 acoustic receivers (CSV format)
+- **PIT**: Passive Integrated Transponder readers
+
+Common Data Pipeline
+--------------------
+All parsers follow this workflow:
+1. Read raw receiver file (CSV, fixed-width, or vendor format)
+2. Parse timestamps, frequencies, codes, power, antenna information
+3. Calculate derived fields: epoch, noise_ratio
+4. Standardize column names and data types
+5. Append to HDF5 `/raw_data` table
+
+Standardized Output Schema
+--------------------------
+All parsers produce these columns:
+- `time_stamp` : datetime64 - Detection timestamp
+- `epoch` : float32 - Seconds since 1970-01-01
+- `freq_code` : object - Frequency + code (e.g., "166.380 7")
+- `power` : float32 - Signal power (dB or raw)
+- `rec_id` : object - Receiver identifier
+- `rec_type` : object - Receiver type (ares, orion, srx1200, etc.)
+- `channels` : int32 - Number of receiver channels
+- `scan_time` : float32 - Scan duration per channel (seconds)
+- `noise_ratio` : float32 - Ratio of miscoded to total detections
+
+Typical Usage
+-------------
+>>> import pymast.parsers as parsers
+>>> 
+>>> # Import ARES data
+>>> parsers.ares(
+...     file_name='receiver_001.csv',
+...     db_dir='project.h5',
+...     rec_id='REC001',
+...     study_tags=['166.380 7', '166.380 12'],
+...     scan_time=1.0,
+...     channels=1
+... )
+>>> 
+>>> # Import SRX-1200 data
+>>> parsers.srx1200(
+...     file_name='srx_detections.txt',
+...     db_dir='project.h5',
+...     rec_id='SRX123',
+...     study_tags=['166.380 7'],
+...     scan_time=2.5,
+...     channels=1
+... )
+
+Notes
+-----
+- Frequency values are rounded to nearest 5 kHz then converted to MHz with 3 decimal precision
+- Noise ratio calculated using 5-minute moving window (see `predictors.noise_ratio`)
+- All parsers append to existing HDF5 `/raw_data` table (mode='a')
+- Timestamps assumed to be in UTC or project-specific timezone
+- PIT readers have different schemas due to antenna-based detection logic
+
+See Also
+--------
+radio_project.import_data : High-level batch import interface
+predictors.noise_ratio : Miscoded detection ratio calculation
+"""
 
 import pandas as pd
 import numpy as np
@@ -14,6 +91,60 @@ def ares(file_name,
                  scan_time = 1, 
                  channels = 1, 
                  ant_to_rec_dict = None):
+    """
+    Import Lotek ARES receiver data into MAST HDF5 database.
+    
+    Parses CSV format detection files from Lotek Advanced Radio Telemetry Systems
+    (ARES) receivers. Automatically detects file format variant based on header row
+    and standardizes data into common schema.
+    
+    Parameters
+    ----------
+    file_name : str
+        Absolute path to ARES CSV file
+    db_dir : str
+        Absolute path to project HDF5 database
+    rec_id : str
+        Unique receiver identifier (e.g., 'REC001', 'SITE_A')
+    study_tags : list of str
+        List of valid freq_code tags deployed in study (e.g., ['166.380 7', '166.380 12'])
+        Used to calculate noise_ratio
+    scan_time : float, optional
+        Scan duration per channel in seconds (default: 1.0)
+    channels : int, optional
+        Number of receiver channels (default: 1)
+    ant_to_rec_dict : dict, optional
+        Mapping of antenna IDs to receiver IDs (not currently used)
+    
+    Returns
+    -------
+    None
+        Data appended directly to HDF5 `/raw_data` table
+    
+    Notes
+    -----
+    - Handles two ARES file format variants (detected via header row)
+    - Frequencies rounded to nearest 5 kHz, formatted as 3-decimal MHz
+    - Calculates noise_ratio using 5-minute moving window
+    - All timestamps converted to epoch (seconds since 1970-01-01)
+    
+    Examples
+    --------
+    >>> import pymast.parsers as parsers
+    >>> parsers.ares(
+    ...     file_name='C:/data/ares_001.csv',
+    ...     db_dir='C:/project/study.h5',
+    ...     rec_id='ARES001',
+    ...     study_tags=['166.380 7', '166.380 12', '166.380 19'],
+    ...     scan_time=1.0,
+    ...     channels=1
+    ... )
+    
+    See Also
+    --------
+    radio_project.import_data : High-level batch import
+    predictors.noise_ratio : Noise ratio calculation
+    """
     # identify the receiver type 
     rec_type = 'ares'
     
@@ -107,11 +238,58 @@ def orion_import(file_name,
                  scan_time = 1., 
                  channels = 1, 
                  ant_to_rec_dict = None):
-    '''Function imports raw Sigma Eight orion data.
-
-    Text parser uses simple column fixed column widths.
-
-    '''
+    """
+    Import Sigma Eight Orion receiver data into MAST HDF5 database.
+    
+    Parses fixed-width format detection files from Sigma Eight Orion receivers.
+    Automatically detects firmware version based on header row and adjusts
+    column parsing accordingly.
+    
+    Parameters
+    ----------
+    file_name : str
+        Absolute path to Orion fixed-width text file
+    db_dir : str
+        Absolute path to project HDF5 database
+    rec_id : str
+        Unique receiver identifier (e.g., 'ORION_01')
+    study_tags : list of str
+        List of valid freq_code tags deployed in study
+    scan_time : float, optional
+        Scan duration per channel in seconds (default: 1.0)
+    channels : int, optional
+        Number of receiver channels (default: 1)
+    ant_to_rec_dict : dict, optional
+        Mapping of antenna IDs to receiver IDs (not currently used)
+    
+    Returns
+    -------
+    None
+        Data appended directly to HDF5 `/raw_data` table
+    
+    Notes
+    -----
+    - Handles two Orion firmware variants: with/without 'Type' column
+    - Fixed-width column parsing using pandas read_fwf
+    - Filters out 'STATUS' messages (firmware-specific)
+    - Frequencies formatted as 3-decimal MHz
+    
+    Examples
+    --------
+    >>> parsers.orion_import(
+    ...     file_name='C:/data/orion_site1.txt',
+    ...     db_dir='C:/project/study.h5',
+    ...     rec_id='ORION_SITE1',
+    ...     study_tags=['166.380 7'],
+    ...     scan_time=1.0,
+    ...     channels=1
+    ... )
+    
+    See Also
+    --------
+    ares : Similar parser for Lotek ARES receivers
+    srx1200 : Parser for Lotek SRX 1200 receivers
+    """
     # identify the receiver type
     rec_type = 'orion'
 

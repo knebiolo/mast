@@ -1474,7 +1474,14 @@ class radio_project():
                     try:
                         overlap_data = overlap_data.compute()
                         overlap_data = overlap_data[overlap_data['freq_code'].isin(self.tags[self.tags.tag_type=='study'].index)]
-                        overlap_data = overlap_data.groupby(['freq_code', 'epoch', 'rec_id'])['overlapping'].max().reset_index()
+                        # Aggregate both overlapping and ambiguous_overlap columns
+                        if 'ambiguous_overlap' in overlap_data.columns:
+                            overlap_data = overlap_data.groupby(['freq_code', 'epoch', 'rec_id']).agg({
+                                'overlapping': 'max',
+                                'ambiguous_overlap': 'max'
+                            }).reset_index()
+                        else:
+                            overlap_data = overlap_data.groupby(['freq_code', 'epoch', 'rec_id'])['overlapping'].max().reset_index()
                         logger.debug(f"    Overlap data: {len(overlap_data)} records")
 
                     except KeyError:
@@ -1547,16 +1554,10 @@ class radio_project():
                     'ambiguous_overlap': 'float32'
                 })
     
-                # Show record counts BEFORE prompting
+                # Show record counts
                 logger.debug(f"    Final: {len(rec_dat)} detections for {rec}")
                 print(f"[recaptures] {rec}: compiled {len(rec_dat)} rows (overlapping={rec_dat['overlapping'].sum()}, bouts={rec_dat['bout_no'].max()})", flush=True)
                 
-                # Prompt to confirm importing the data
-                import_confirmation = str(self._prompt("Do you want to import the data into the database? (yes/no): ", default="yes")).strip().lower()
-                if import_confirmation != 'yes':
-                    logger.info("Data import canceled by user")
-                    return
-    
                 # Append to the HDF5 file
                 with pd.HDFStore(self.db, mode='a') as store:
                     store.append(key='recaptures', value=rec_dat, format='table', 

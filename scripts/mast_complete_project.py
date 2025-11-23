@@ -125,36 +125,20 @@ successful_receivers = []
 failed_receivers = []
 
 for rec_id in receivers:
-    try:
-        print(f"\n[{rec_id}] Starting bout detection...")
+    print(f"\n[{rec_id}] Starting bout detection...")
+    
+    # Create bout object - DBSCAN runs automatically during __init__
+    # eps_multiplier=5: epsilon = 5x pulse rate (~40-50 sec for 8-10 sec tags)
+    # lag_window=2: kept for compatibility (not used in DBSCAN)
+    bout = pymast.bout(project, rec_id, eps_multiplier=60, lag_window=2)
+    
+    # Write results to database
+    bout.presence()
+    bout.visualize_bout_lengths()  # Creates plots and statistics
+    
+    successful_receivers.append(rec_id)
+    print(f"[{rec_id}] ✓ Complete")
         
-        # Create bout object - DBSCAN runs automatically during __init__
-        # eps_multiplier=5: epsilon = 5x pulse rate (~40-50 sec for 8-10 sec tags)
-        # lag_window=2: kept for compatibility (not used in DBSCAN)
-        bout = pymast.bout(project, rec_id, eps_multiplier=5, lag_window=2)
-        
-        # Write results to database
-        bout.presence()
-        
-        successful_receivers.append(rec_id)
-        print(f"[{rec_id}] ✓ Complete")
-        
-    except Exception as e:
-        print(f"[{rec_id}] ✗ Error: {e}")
-        failed_receivers.append(rec_id)
-        continue
-
-print("\n" + "="*80)
-print(f"BOUT DETECTION SUMMARY")
-print("="*80)
-print(f"Successful: {len(successful_receivers)}/{len(receivers)} receivers")
-if successful_receivers:
-    print(f"  {', '.join(successful_receivers)}")
-if failed_receivers:
-    print(f"Failed: {len(failed_receivers)} receivers")
-    print(f"  {', '.join(failed_receivers)}")
-print("="*80 + "\n")
-
 # To undo all bouts: project.undo_bouts()
 # To undo specific receiver: project.undo_bouts(rec_id='R03')
     
@@ -172,16 +156,12 @@ start_t = time.time()
 
 doll = pymast.overlap_removal.overlap_reduction(nodes, edges, project)
 print('Running unsupervised removal with statistical testing (t-test + Cohen\'s d)')
-# Statistical approach: uses t-test + effect size for cleaner movement trajectories
-# p_value_threshold=0.05: require statistical significance
-# effect_size_threshold=0.2: small effect size (more sensitive to differences)
-# min_detections=2: allow smaller bouts (need at least 2 for t-test)
-# bout_expansion=30: ±30 second buffer to catch near-overlaps
 doll.unsupervised_removal(method='power', 
-                         p_value_threshold=0.05, 
-                         effect_size_threshold=0.2, 
-                         min_detections=1, 
-                         bout_expansion=30)
+                         p_value_threshold=0.05,     # p_value_threshold=0.05: require statistical significanc
+                         effect_size_threshold=0.1,  # effect_size_threshold=0.2: small effect size (more sensitive to differences)
+                         min_detections=5,           # min_detections=2: allow smaller bouts (need at least 2 for t-test)
+                         bout_expansion=60)          # bout_expansion=30: ±30 second buffer to catch near-overlaps
+doll.visualize_overlaps()  # Creates comprehensive visualization
 print('Overlap reduction took', time.time() - start_t, 'seconds')
 
 # nested doll
@@ -230,7 +210,7 @@ downstream_states = {'R15':1,'R14':1,# occum
                                    
 
 # Step 1, create time to event data class 
-tte = formatter.time_to_event(upstream_states,
+tte = formatter.time_to_event(downstream_states,
                               project,
                               initial_state_release = True,
                               last_presence_time0 = False,

@@ -1,10 +1,63 @@
 # -*- coding: utf-8 -*-
 """
-Modules contains all of the functions and classes required to format radio
-telemetry data for statistical testing.
+Statistical Model Data Formatting Module
+========================================
 
-currently we can set up models for Cormack Jolly Seber mark recapture, Time-to-
-Event modeling, and Live Recapture Dead Recovery Mark Recapture.
+This module contains classes for formatting cleaned radio telemetry data
+into input files for various statistical survival and movement models.
+
+Classes
+-------
+cjs_data_prep : Cormack-Jolly-Seber (CJS) mark-recapture formatting
+    Creates encounter history matrices for Program MARK survival analysis.
+    
+lrdr_data_prep : Live Recapture Dead Recovery (LRDR) formatting
+    Combines live detections with mobile tracking mortality surveys.
+    Used for post-passage survival estimation with recovery data.
+    
+time_to_event : Multi-state time-to-event (competing risks) formatting
+    Creates counting-process style data for multi-state survival models.
+    Most commonly used class for fish passage and movement studies.
+
+Typical Usage
+-------------
+>>> import pymast
+>>> project = pymast.radio_project('path/to/project')
+>>> 
+>>> # Time-to-event model (most common)
+>>> receiver_to_state = {'R01': 1, 'R02': 2, 'R03': 9}  # Map receivers to states
+>>> tte = pymast.formatter.time_to_event(receiver_to_state, project)
+>>> tte.data_prep(project, adjacency_filter=[(9,1), (9,2)])  # Remove illegal movements
+>>> stats = tte.summary()  # Print movement statistics
+>>> tte.master_state_table.to_csv('output.csv')  # Export for R/msm
+>>>
+>>> # CJS model
+>>> receiver_to_recap = {'R01': 'R00', 'R02': 'R01', 'R03': 'R02'}
+>>> cjs = pymast.formatter.cjs_data_prep(receiver_to_recap, project)
+>>> cjs.input_file('model_name', 'output_dir')  # Creates .inp for MARK
+
+Notes
+-----
+- All classes expect data from a pymast.radio_project with complete pipeline:
+  1. Data imported (parsers)
+  2. Classified (naive_bayes)
+  3. Bouts detected (overlap_removal.bout)
+  4. Overlaps removed (overlap_removal.overlap_reduction)
+  5. Recaptures built (radio_project.make_recaptures_table)
+  
+- The time_to_event class automatically filters:
+  - Overlapping detections (overlapping == 1)
+  - Ambiguous overlaps (ambiguous_overlap == 1)
+  - Small bouts (< 3 detections)
+  
+- Adjacency filter removes biologically impossible state transitions
+  based on study site geography (e.g., downstream → upstream without ladder).
+
+See Also
+--------
+pymast.radio_project : Project management and database
+pymast.overlap_removal : Bout detection and overlap resolution
+pymast.naive_bayes : Classification of true detections
 """
 
 # import modules required for function dependencies
@@ -357,19 +410,171 @@ class lrdr_data_prep():
         # Check your work
         self.inp.to_csv(os.path.join(outputWS,'%s_lrdr.csv'%(modelName)))
 
-class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, covariates = None, bucket_length = 15):
-    '''Class imports standardized raw state presences and converts data structure
-    into counting process style data appropriate for time to event analysis.
-
-    Function inputs:
-        input file = directory with file name of raw timestamped state presence
-        output file = directory with file name for formatted data files.
-        covariates = directory that contains covariates
-        time_dependent_covariates = True/False (default = False) field indicating
-        whether or not time dependnent covariates are incorporated into the
-        counting process style
-        bucket_length = covariate time interval, default 15 minutes
-    '''
+class time_to_event():
+    """
+    Multi-state Time-to-Event Data Formatter
+    
+    Formats radio telemetry recapture data into counting-process style records
+    for multi-state survival models (competing risks, Cox proportional hazards).
+    
+    This is the primary class for fish passage and movement studies using
+    state-based survival models in R (msm, mstate packages).
+    
+    Parameters
+    ----------
+    receiver_to_state : dict
+        Mapping of receiver IDs to integer state codes.
+        Example: {'R_forebay': 1, 'R_powerhouse': 2, 'R_tailrace': 9}
+        
+    project : pymast.radio_project
+        Project object with completed data pipeline (imported, classified,
+        bouts detected, overlaps removed, recaptures built).
+        
+    input_type : str, optional
+        Legacy parameter, always uses 'query' from HDF5. Default 'query'.
+        
+    initial_state_release : bool, optional
+        If True, models movement from release point (state 0).
+        If False, models from first recapture at state 1. Default False.
+        
+    last_presence_time0 : bool, optional
+        If True, uses last presence at initial state as time_0 (for
+        downstream migration studies where fish linger upstream). Default False.
+        
+    cap_loc : str, optional
+        Filter by capture location. Default None (all fish).
+        
+    rel_loc : str, optional
+        Filter by release location. Default None (all fish).
+        
+    species : str, optional
+        Filter by species code. Default None (all species).
+        
+    rel_date : str, optional
+        Filter fish released after this date (YYYY-MM-DD). Default None.
+        
+    recap_date : str, optional
+        Filter recaptures after this date (YYYY-MM-DD). Default None.
+    
+    Attributes
+    ----------
+    recap_data : pd.DataFrame
+        Loaded recapture data after all filtering (overlapping, ambiguous,
+        bout size, species/location filters).
+        
+    master_state_table : pd.DataFrame
+        Final formatted output with columns:
+        - freq_code : Fish ID
+        - species : Species code
+        - start_state : State at time_0 (integer)
+        - end_state : State at time_1 (integer)
+        - presence : Presence number for this fish
+        - time_stamp : Datetime of transition
+        - time_delta : Duration in state (seconds)
+        - first_obs : Binary flag for first observation
+        - time_0 : Entry time (epoch seconds)
+        - time_1 : Exit time (epoch seconds)
+        - transition : Tuple (start_state, end_state)
+        
+    fish : np.ndarray
+        Array of unique fish IDs in dataset.
+        
+    start_times : pd.DataFrame
+        First recapture time per fish (for time_0 initialization).
+    
+    Methods
+    -------
+    data_prep(project, unknown_state=None, bucket_length_min=15, adjacency_filter=None)
+        Process recapture data into state transitions. Applies adjacency filter
+        if provided to remove biologically impossible movements.
+        
+    summary()
+        Calculate and print movement statistics (transition counts, durations).
+        Returns dict with statistics and saves CSV files to output directory.
+    
+    Examples
+    --------
+    >>> import pymast
+    >>> project = pymast.radio_project('path/to/project')
+    >>> 
+    >>> # Define state mapping
+    >>> receiver_to_state = {
+    ...     'R_release': 0,      # Release location
+    ...     'R_forebay': 1,      # Upstream of dam
+    ...     'R_powerhouse': 2,   # At turbines
+    ...     'R_tailrace': 9      # Downstream of dam
+    ... }
+    >>> 
+    >>> # Initialize formatter
+    >>> tte = pymast.formatter.time_to_event(
+    ...     receiver_to_state,
+    ...     project,
+    ...     species='Chinook',
+    ...     initial_state_release=True
+    ... )
+    >>> 
+    >>> # Define illegal movements (downstream can't go upstream without ladder)
+    >>> adjacency_filter = [
+    ...     (9, 1),  # Tailrace to forebay
+    ...     (9, 2),  # Tailrace to powerhouse
+    ...     (2, 1),  # Powerhouse to forebay
+    ... ]
+    >>> 
+    >>> # Process data
+    >>> tte.data_prep(project, adjacency_filter=adjacency_filter)
+    >>> 
+    >>> # Get statistics
+    >>> stats = tte.summary()
+    >>> 
+    >>> # Export for R analysis
+    >>> tte.master_state_table.to_csv('tte_data.csv', index=False)
+    >>> 
+    >>> # In R:
+    >>> # library(msm)
+    >>> # data <- read.csv('tte_data.csv')
+    >>> # model <- msm(end_state ~ time_1, subject=freq_code,
+    >>> #              data=data, qmatrix=Q, ...)
+    
+    Notes
+    -----
+    **Automatic Filtering**:
+    
+    The class automatically removes:
+    - Detections with overlapping == 1 (removed during overlap resolution)
+    - Detections with ambiguous_overlap == 1 (couldn't resolve receiver conflict)
+    - Bouts with < 3 detections (likely false positives)
+    
+    **Adjacency Filter**:
+    
+    Removes biologically impossible state transitions based on site geography.
+    Iteratively processes each fish until all illegal movements are removed.
+    
+    Works by:
+    1. Finding rows with illegal transitions
+    2. Carrying forward the start_state and time_0 to next row
+    3. Deleting the illegal row
+    4. Recalculating transitions
+    5. Repeating until clean
+    
+    **State Coding**:
+    
+    Common conventions:
+    - 0: Release location (if initial_state_release=True)
+    - 1: Initial study area state
+    - 2-8: Intermediate states
+    - 9: Terminal/downstream state
+    
+    **Time Format**:
+    
+    All times are Unix epoch (seconds since 1970-01-01 00:00:00 UTC).
+    Convert in R: `as.POSIXct(time_0, origin='1970-01-01')`
+    
+    See Also
+    --------
+    pymast.radio_project.make_recaptures_table : Builds input recaptures table
+    pymast.overlap_removal.overlap_reduction : Marks overlapping detections
+    cjs_data_prep : For standard CJS survival models in Program MARK
+    """
     def __init__(self, 
                  receiver_to_state,
                  project, 
@@ -395,6 +600,11 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
         self.recap_data = pd.read_hdf(project.db,
                                       'recaptures',
                                       where = qry)#"rec_id == 'R11'")
+        
+        # Debug: check if ambiguous_overlap column exists
+        print(f"[TTE] Columns in recaptures table: {self.recap_data.columns.tolist()}")
+        print(f"[TTE] Has ambiguous_overlap: {'ambiguous_overlap' in self.recap_data.columns}")
+        
         self.recap_data = self.recap_data[self.recap_data.hit_ratio > 0.1]
         self.recap_data.drop(columns = ['power',
                                         'noise_ratio',
@@ -427,6 +637,23 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
             self.recap_data = self.recap_data[self.recap_data.ambiguous_overlap == 0]
             after_ambig_filter = len(self.recap_data)
             print(f"[TTE] Filtered {before_ambig_filter - after_ambig_filter} ambiguous overlap detections")
+        
+        # Filter out detections from small bouts (likely false positives)
+        # Calculate bout size for each bout and filter
+        if 'bout_no' in self.recap_data.columns:
+            # Count detections per bout (per fish, per receiver, per bout_no)
+            bout_sizes = self.recap_data.groupby(['freq_code', 'rec_id', 'bout_no']).size().reset_index(name='bout_size')
+            self.recap_data = self.recap_data.merge(bout_sizes, on=['freq_code', 'rec_id', 'bout_no'], how='left')
+            
+            # Filter out bouts with < 3 detections (single spurious detections)
+            min_bout_size = 3
+            before_bout_filter = len(self.recap_data)
+            self.recap_data = self.recap_data[self.recap_data['bout_size'] >= min_bout_size]
+            after_bout_filter = len(self.recap_data)
+            print(f"[TTE] Filtered {before_bout_filter - after_bout_filter} detections from bouts with < {min_bout_size} detections")
+            
+            # Drop the bout_size column (no longer needed)
+            self.recap_data = self.recap_data.drop(columns=['bout_size'])
         
         self.recap_data['rel_date'] = pd.to_datetime(self.recap_data.rel_date)
         
@@ -693,12 +920,12 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
 
                     # for every known bad movement
                     for j in adjacency_filter:
-                        print ("Starting %s filter"%(i))
                         # find those rows where this movement exists
                         try:
                             fish_dat['transition_filter'] = np.where(fish_dat.transition == j,1,0)
                         except:
-                            bad_moves_present == False
+                            bad_moves_present = False  # Fixed: was == instead of =
+                            break
                         #fish_dat.set_index(['time_0'], inplace = True)
 
                         if fish_dat.transition_filter.sum() > 0:
@@ -737,22 +964,19 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
                             fish_dat.time_0 = time0
 
                             # create a new transition field
-                            fish_dat['transition'] = tuple(zip(fish_dat.start_state.values.astype(int),
-                                                              fish_dat.end_state.values.astype(int)))
+                            fish_dat['transition'] = list(zip(fish_dat.start_state.values.astype(int),
+                                                              fish_dat.end_state.values.astype(int)))  # Fixed: was tuple, should be list
                             
                             #fish_dat.reset_index(inplace = True)
                         else:
-                            print ("No illegal movements identified")
+                            pass  # No illegal movements for this transition type
                             #fish_dat.reset_index(inplace = True)
 
                     if filtered_rows == 0.0:
-                        print ("All illegal movements for fish %s removed"%(i))
                         # stop that loop
                         bad_moves_present = False
-
                     else:
-                        # i feel bad for you son
-                        print ("%s illegal movements present in iteration, go again"%(filtered_rows))
+                        pass  # Continue filtering
                 
                 # we can only have 1 transmission to point of no return - let's grab the last recapture
                 equal_rows = fish_dat[fish_dat['start_state'] == fish_dat['end_state']]
@@ -773,8 +997,18 @@ class time_to_event():#inputFile,outputFile,time_dependent_covariates = False, c
     
                     fish_dat.drop(labels = ['transition_filter'], axis = 1, inplace = True)
                     filtered = pd.concat([filtered, fish_dat])
-                except:
-                    print ("check")
+                except Exception as e:
+                    print (f"[TTE] Warning: Error processing fish {i}: {e}")
+            
+            # Print summary statistics
+            initial_transitions = len(self.master_state_table)
+            final_transitions = len(filtered)
+            removed = initial_transitions - final_transitions
+            print(f"\n[TTE] Adjacency filter complete:")
+            print(f"  Initial transitions: {initial_transitions:,}")
+            print(f"  Final transitions: {final_transitions:,}")
+            print(f"  Removed illegal movements: {removed:,} ({removed/initial_transitions*100:.1f}%)")
+            
             if self.initial_state_release == False:
                 self.master_state_table 
 
