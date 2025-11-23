@@ -1,6 +1,86 @@
 # -*- coding: utf-8 -*-
-'''
-Module contains all of the functions to create a radio telemetry project.'''
+"""
+Radio telemetry project management and HDF5 database operations.
+
+This module provides the `radio_project` class, the central object for managing
+radio telemetry studies. It handles project initialization, data import, metadata
+storage, and database operations using HDF5 format.
+
+Core Responsibilities
+---------------------
+- **Project Initialization**: Create HDF5 database with standardized table structure
+- **Data Import**: Batch import from multiple receiver types and file formats
+- **Metadata Management**: Store tags, receivers, recaptures, nodes, lines
+- **Recapture Generation**: Process raw detections into spatiotemporal recaptures
+- **Query Interface**: Retrieve fish tracks, detection statistics, project metadata
+
+HDF5 Database Structure
+-----------------------
+The project database contains these primary tables:
+
+- `/raw_data`: Imported receiver detections (time_stamp, freq_code, power, etc.)
+- `/tblMasterTag`: Tag metadata (freq_code, pulse_rate, tag_type, release info)
+- `/tblMasterReceiver`: Receiver metadata (rec_id, rec_type, latitude, longitude)
+- `/recaptures`: Processed detections linked to spatial locations and tags
+- `/nodes`: Spatial nodes for state-space modeling
+- `/lines`: Connectivity between nodes for movement modeling
+
+Classification and Filtering Tables:
+
+- `/training`: Hand-labeled detections for classifier training
+- `/test`: Detections scored by Naive Bayes classifier
+- `/overlapping`: Overlapping detection decisions from overlap_reduction
+- `/bouts`: Bout summaries from DBSCAN clustering
+- `/presence`: Presence/absence by bout and receiver
+
+Statistical Model Tables:
+
+- `/cjs`: Cormack-Jolly-Seber capture history
+- `/lrdr`: Live-recapture dead-recovery format
+- `/tte`: Time-to-event format for survival analysis
+
+Typical Usage
+-------------
+>>> from pymast.radio_project import radio_project
+>>> 
+>>> # Initialize new project
+>>> proj = radio_project(
+...     project_dir='C:/projects/my_study',
+...     db_name='my_study.h5',
+...     rec_list='receivers.csv',
+...     tag_list='tags.csv',
+...     node_list='nodes.csv',
+...     line_list='lines.csv'
+... )
+>>> 
+>>> # Import raw receiver data
+>>> proj.import_data(
+...     file_name='receiver_001.csv',
+...     receiver_make='ares',
+...     rec_id='REC001',
+...     scan_time=1.0,
+...     channels=1
+... )
+>>> 
+>>> # Generate recaptures table
+>>> proj.make_recaptures_table()
+>>> 
+>>> # Query fish tracks
+>>> tracks = proj.get_fish_tracks(freq_code='166.380 7')
+
+Notes
+-----
+- HDF5 format provides fast queries, compression, and hierarchical organization
+- All tables use indexed columns for performance (freq_code, rec_id, time_stamp)
+- Receiver imports are append-only (no overwrites unless db_dir deleted)
+- Project metadata stored in HDF5 attributes for provenance
+
+See Also
+--------
+parsers : Data import from various receiver formats
+overlap_removal : Detection filtering and bout analysis
+formatter : Statistical model output generation
+"""
 
 # import modules required for function dependencies
 import numpy as np

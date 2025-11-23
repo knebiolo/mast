@@ -27,12 +27,65 @@ rcParams['font.size'] = 6
 rcParams['font.family'] = 'serif'
 
 class fish_history():
-    '''A class object to examine fish histories through space and time.
-
-    When initialized, the class object connects to the project database and
-    creates a dataframe of all recaptures, filtered or unfiltered.
-
-    Then, methods allow the end user to change fish and view plots.'''
+    """
+    Interactive visualization of fish movement histories through space and time.
+    
+    Provides 3D matplotlib plots showing fish tracks through receiver network,
+    helping identify remaining false positives, overlapping detections, and
+    movement anomalies before statistical analysis.
+    
+    Attributes
+    ----------
+    filtered : bool
+        If True, shows only filtered detections (test==0)
+    nodes : pandas.DataFrame
+        Node locations (X, Y, Node, Seconds)
+    receivers : pandas.DataFrame
+        Receiver metadata (rec_id, node, coordinates)
+    detections : pandas.DataFrame
+        Fish detections (time_stamp, rec_id, freq_code, power, etc.)
+    current_fish : str
+        Currently displayed freq_code
+    
+    Methods
+    -------
+    __init__(projectDB, filtered=True, overlapping=False, rec_list=None, filter_date=None)
+        Initialize connection to project database and load detections
+    
+    change_fish(freq_code)
+        Switch to different fish and update plots
+    
+    plot_3d_trajectory()
+        Create 3D visualization of fish movement through network
+    
+    Notes
+    -----
+    - Uses matplotlib 3D plotting (Axes3D)
+    - X/Y coordinates from node locations
+    - Time on Z-axis for temporal progression
+    - Color-coded by receiver or detection quality
+    - Useful for quality control before final analysis
+    
+    Examples
+    --------
+    >>> from pymast.fish_history import fish_history
+    >>> 
+    >>> # Load fish tracks (filtered only)
+    >>> fh = fish_history(
+    ...     projectDB='C:/project/study.h5',
+    ...     filtered=True,
+    ...     overlapping=False
+    ... )
+    >>> 
+    >>> # View specific fish
+    >>> fh.change_fish('166.380 7')
+    >>> fh.plot_3d_trajectory()
+    
+    See Also
+    --------
+    overlap_removal.visualize_overlaps : Overlap analysis plots
+    formatter.time_to_event : Statistical model output
+    """
 
     def __init__(self,projectDB,filtered = True, overlapping = False, rec_list = None,filter_date = None):
         ''' when this class is initialized, we connect to the project databae and

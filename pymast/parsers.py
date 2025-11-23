@@ -443,11 +443,49 @@ def orion_import(file_name,
         sys.exit()
         
                     
-                    
 def vr2_import(file_name,db_dir,study_tags, rec_id):
-    '''Function imports raw VEMCO VR2 acoustic data.
-
-    '''
+    """
+    Import Vemco VR2 acoustic receiver data into MAST HDF5 database.
+    
+    Parses CSV format detection files from Vemco VR2 acoustic receivers.
+    VR2 data uses acoustic tags instead of radio frequencies, with different
+    field names and data structure.
+    
+    Parameters
+    ----------
+    file_name : str
+        Absolute path to VR2 CSV file
+    db_dir : str
+        Absolute path to project HDF5 database
+    study_tags : list of str
+        List of valid acoustic tag codes deployed in study
+    rec_id : str
+        Unique receiver identifier
+    
+    Returns
+    -------
+    None
+        Data appended directly to HDF5 `/raw_data` table
+    
+    Notes
+    -----
+    - Acoustic receivers use different schema than radio receivers
+    - VR2 files typically have standardized CSV format from Vemco software
+    - Converts acoustic tag IDs to freq_code format for consistency
+    
+    Examples
+    --------
+    >>> parsers.vr2_import(
+    ...     file_name='C:/data/vr2_001.csv',
+    ...     db_dir='C:/project/acoustic_study.h5',
+    ...     study_tags=['A69-1601-12345', 'A69-1601-12346'],
+    ...     rec_id='VR2_001'
+    ... )
+    
+    See Also
+    --------
+    ares : Parser for radio telemetry receivers
+    """
 
     recType = 'vr2'
 
@@ -501,6 +539,7 @@ def vr2_import(file_name,db_dir,study_tags, rec_id):
                                          'rec_id':20},
                          append = True, 
                          chunksize = 1000000)        
+
 def srx1200(file_name,
              db_dir,
              rec_id, 
@@ -509,6 +548,61 @@ def srx1200(file_name,
              channels = 1, 
              ant_to_rec_dict = None,
              ka_format = False):
+    """
+    Import Lotek SRX-1200 receiver data into MAST HDF5 database.
+    
+    Parses fixed-width format detection files from Lotek SRX-1200 receivers.
+    Supports both standard Lotek format and custom Kleinschmidt Associates (KA) format.
+    
+    Parameters
+    ----------
+    file_name : str
+        Absolute path to SRX-1200 fixed-width text file
+    db_dir : str
+        Absolute path to project HDF5 database
+    rec_id : str
+        Unique receiver identifier (e.g., 'SRX1200_001')
+    study_tags : list of str
+        List of valid freq_code tags deployed in study
+    scan_time : float, optional
+        Scan duration per channel in seconds (default: 1.0)
+    channels : int, optional
+        Number of receiver channels (default: 1)
+    ant_to_rec_dict : dict, optional
+        Mapping of antenna IDs to receiver IDs for multi-antenna setups
+    ka_format : bool, optional
+        If True, parse Kleinschmidt Associates custom format (default: False)
+    
+    Returns
+    -------
+    None
+        Data appended directly to HDF5 `/raw_data` table
+    
+    Notes
+    -----
+    - Fixed-width column parsing optimized for SRX-1200 output
+    - Handles multi-antenna configurations via ant_to_rec_dict
+    - KA format includes additional metadata fields
+    - Power values typically in dB
+    
+    Examples
+    --------
+    >>> parsers.srx1200(
+    ...     file_name='C:/data/srx1200_site1.txt',
+    ...     db_dir='C:/project/study.h5',
+    ...     rec_id='SRX1200_SITE1',
+    ...     study_tags=['166.380 7', '166.380 12'],
+    ...     scan_time=2.5,
+    ...     channels=1,
+    ...     ka_format=False
+    ... )
+    
+    See Also
+    --------
+    srx800 : Parser for SRX-800 receivers
+    srx600 : Parser for SRX-600 receivers
+    ares : Parser for ARES receivers
+    """
     rec_type = 'srx1200'
     
     # create empty dictionary to hold Lotek header data indexed by line number - to be imported to Pandas dataframe
@@ -840,6 +934,57 @@ def srx800(file_name,
              scan_time = 1, 
              channels = 1, 
              ant_to_rec_dict = None):
+    """
+    Import Lotek SRX-800 receiver data into MAST HDF5 database.
+    
+    Parses fixed-width format detection files from Lotek SRX-800 receivers.
+    Similar to SRX-1200 but with different column widths and firmware-specific
+    header parsing.
+    
+    Parameters
+    ----------
+    file_name : str
+        Absolute path to SRX-800 fixed-width text file
+    db_dir : str
+        Absolute path to project HDF5 database
+    rec_id : str
+        Unique receiver identifier
+    study_tags : list of str
+        List of valid freq_code tags deployed in study
+    scan_time : float, optional
+        Scan duration per channel in seconds (default: 1.0)
+    channels : int, optional
+        Number of receiver channels (default: 1)
+    ant_to_rec_dict : dict, optional
+        Mapping of antenna IDs to receiver IDs
+    
+    Returns
+    -------
+    None
+        Data appended directly to HDF5 `/raw_data` table
+    
+    Notes
+    -----
+    - Parses SRX-800 specific header format for scan configuration
+    - Fixed-width column parsing adjusted for SRX-800 output
+    - Handles multi-antenna configurations
+    
+    Examples
+    --------
+    >>> parsers.srx800(
+    ...     file_name='C:/data/srx800_detections.txt',
+    ...     db_dir='C:/project/study.h5',
+    ...     rec_id='SRX800_001',
+    ...     study_tags=['166.380 7'],
+    ...     scan_time=2.0,
+    ...     channels=1
+    ... )
+    
+    See Also
+    --------
+    srx1200 : Parser for SRX-1200 receivers
+    srx600 : Parser for SRX-600 receivers
+    """
     
     rec_type = 'srx800'
     
@@ -1152,6 +1297,57 @@ def srx600(file_name,
              scan_time = 1, 
              channels = 1, 
              ant_to_rec_dict = None):
+    """
+    Import Lotek SRX-600 receiver data into MAST HDF5 database.
+    
+    Parses fixed-width format detection files from Lotek SRX-600 receivers.
+    Similar to SRX-800/1200 but with SRX-600 specific column widths and
+    header structure.
+    
+    Parameters
+    ----------
+    file_name : str
+        Absolute path to SRX-600 fixed-width text file
+    db_dir : str
+        Absolute path to project HDF5 database
+    rec_id : str
+        Unique receiver identifier
+    study_tags : list of str
+        List of valid freq_code tags deployed in study
+    scan_time : float, optional
+        Scan duration per channel in seconds (default: 1.0)
+    channels : int, optional
+        Number of receiver channels (default: 1)
+    ant_to_rec_dict : dict, optional
+        Mapping of antenna IDs to receiver IDs
+    
+    Returns
+    -------
+    None
+        Data appended directly to HDF5 `/raw_data` table
+    
+    Notes
+    -----
+    - Parses SRX-600 specific header format
+    - Fixed-width column parsing adjusted for SRX-600 output
+    - Older receiver model with slightly different data structure
+    
+    Examples
+    --------
+    >>> parsers.srx600(
+    ...     file_name='C:/data/srx600_detections.txt',
+    ...     db_dir='C:/project/study.h5',
+    ...     rec_id='SRX600_001',
+    ...     study_tags=['166.380 7'],
+    ...     scan_time=1.5,
+    ...     channels=1
+    ... )
+    
+    See Also
+    --------
+    srx1200 : Parser for SRX-1200 receivers
+    srx800 : Parser for SRX-800 receivers
+    """
     
     rec_type = 'srx600'
     
@@ -1455,6 +1651,61 @@ def PIT(file_name,
         channels=0,
         rec_type="PIT_Array",
         ant_to_rec_dict=None):
+    """
+    Import PIT (Passive Integrated Transponder) reader data into MAST HDF5 database.
+    
+    Parses detection files from PIT tag readers. PIT systems use different
+    technology (RFID) than radio telemetry but data can be analyzed with
+    similar methods.
+    
+    Parameters
+    ----------
+    file_name : str
+        Absolute path to PIT reader CSV/text file
+    db_dir : str
+        Absolute path to project HDF5 database
+    rec_id : str
+        Unique reader identifier
+    study_tags : list of str
+        List of valid PIT tag IDs deployed in study
+    skiprows : int, optional
+        Number of header rows to skip (default: 6)
+    scan_time : float, optional
+        Not used for PIT readers (default: 0)
+    channels : int, optional
+        Not used for PIT readers (default: 0)
+    rec_type : str, optional
+        Reader type identifier (default: 'PIT_Array')
+    ant_to_rec_dict : dict, optional
+        Mapping of antenna IDs to reader IDs for multi-antenna arrays
+    
+    Returns
+    -------
+    None
+        Data appended directly to HDF5 `/raw_data` table
+    
+    Notes
+    -----
+    - PIT readers have antenna-based detection logic (different from radio receivers)
+    - Tag IDs converted to freq_code format for consistency with radio data
+    - Typically used at fixed locations (weirs, ladders, bypass systems)
+    - scan_time and channels not applicable to PIT technology
+    
+    Examples
+    --------
+    >>> parsers.PIT(
+    ...     file_name='C:/data/pit_reader_001.csv',
+    ...     db_dir='C:/project/pit_study.h5',
+    ...     rec_id='PIT_WEIR_01',
+    ...     study_tags=['3D9.1BF3C5A8B2', '3D9.1BF3C5A8C1'],
+    ...     skiprows=6,
+    ...     rec_type='PIT_Array'
+    ... )
+    
+    See Also
+    --------
+    PIT_Multiple : Parser for multi-antenna PIT arrays
+    """
     
     import pandas as pd
     
@@ -1651,6 +1902,7 @@ def PIT(file_name,
     with pd.HDFStore(db_dir, 'r') as store:
         print("Store keys after append:", store.keys())
 
+
 def PIT_Multiple(
     file_name,
     db_dir,
@@ -1661,6 +1913,63 @@ def PIT_Multiple(
     rec_type="PIT_Multiple",
     ant_to_rec_dict=None
 ):
+    """
+    Import multi-antenna PIT array data into MAST HDF5 database.
+    
+    Parses detection files from PIT reader arrays with multiple antennas at
+    a single location. Handles antenna-to-receiver mapping and converts
+    multi-antenna detections to individual receiver records.
+    
+    Parameters
+    ----------
+    file_name : str
+        Absolute path to PIT array CSV file
+    db_dir : str
+        Absolute path to project HDF5 database
+    study_tags : list of str, optional
+        List of valid PIT tag IDs deployed in study
+    skiprows : int, optional
+        Number of header rows to skip (default: 0)
+    scan_time : float, optional
+        Not used for PIT readers (default: 0)
+    channels : int, optional
+        Not used for PIT readers (default: 0)
+    rec_type : str, optional
+        Reader type identifier (default: 'PIT_Multiple')
+    ant_to_rec_dict : dict, optional
+        Mapping of antenna IDs to receiver IDs (REQUIRED for multi-antenna arrays)
+    
+    Returns
+    -------
+    None
+        Data appended directly to HDF5 `/raw_data` table
+    
+    Notes
+    -----
+    - Designed for PIT arrays with multiple antennas at single location
+    - Uses ant_to_rec_dict to assign detections to virtual "receivers" per antenna
+    - Processes fish metadata (species, weight, length, capture method)
+    - Handles both decimal and hexadecimal tag formats
+    
+    Examples
+    --------
+    >>> ant_map = {
+    ...     'Antenna1': 'PIT_WEIR_DOWNSTREAM',
+    ...     'Antenna2': 'PIT_WEIR_UPSTREAM',
+    ...     'Antenna3': 'PIT_WEIR_LADDER'
+    ... }
+    >>> parsers.PIT_Multiple(
+    ...     file_name='C:/data/pit_array_detections.csv',
+    ...     db_dir='C:/project/pit_study.h5',
+    ...     study_tags=['3D9.1BF3C5A8B2'],
+    ...     rec_type='PIT_Multiple',
+    ...     ant_to_rec_dict=ant_map
+    ... )
+    
+    See Also
+    --------
+    PIT : Parser for single PIT readers
+    """
     # Define column names based on the expected structure of the CSV
     col_names = [
         "FishId", "Tag1Dec", "Tag1Hex", "Tag2Dec", "Tag2Hex", "FloyTag", "RadioTag",

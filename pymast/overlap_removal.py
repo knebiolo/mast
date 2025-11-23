@@ -1,8 +1,81 @@
 ﻿# -*- coding: utf-8 -*-
-'''
-Module contains all of the methods and classes required to identify and remove
-overlapping detections from radio telemetry data.
-'''
+"""
+Bout detection and overlapping detection resolution for radio telemetry data.
+
+This module provides two main classes for identifying and resolving overlapping
+detections in radio telemetry studies. Overlapping detections occur when:
+1. Multiple receivers detect the same fish simultaneously (spatial ambiguity)
+2. Fish movements violate spatial/temporal constraints (impossible transitions)
+3. Receiver antenna bleed causes detections from "wrong" direction
+
+Core Classes
+------------
+- **bout**: Detects spatially/temporally clustered detections using DBSCAN
+- **overlap_reduction**: Resolves overlapping detections using signal quality
+
+Bout Detection Workflow
+-----------------------
+1. **DBSCAN Clustering**: Group detections by time and space
+2. **Bout Assignment**: Label each detection with bout number
+3. **Presence Matrix**: Create presence/absence by receiver and bout
+4. **Visualization**: Diagnostic plots for bout length distributions
+
+Overlap Resolution Workflow
+---------------------------
+1. **Unsupervised Learning**: Compare signal power and posterior probabilities
+2. **Decision Logic**: Mark weaker overlapping detections
+3. **Bout Spatial Filter**: Identify bouts with temporal overlap across receivers
+4. **Write Results**: Store decisions in HDF5 `/overlapping` table
+
+Resolution Criteria
+-------------------
+- **Power Comparison**: If both detections have power, keep stronger signal
+- **Posterior Comparison**: If both have classification scores, keep higher posterior
+- **Ambiguous**: Mark ambiguous if signals equal or criteria unavailable
+- **Bout Conflicts**: Identify temporally overlapping bouts at different receivers
+
+Output Tables
+-------------
+Creates these HDF5 tables:
+
+- `/bouts`: Bout summaries (bout_no, start_time, end_time, detection_count)
+- `/presence`: Presence/absence matrix (fish x bout x receiver)
+- `/overlapping`: Detection-level decisions (overlapping=0/1, ambiguous=0/1)
+
+Typical Usage
+-------------
+>>> from pymast.overlap_removal import bout, overlap_reduction
+>>> 
+>>> # Detect bouts using DBSCAN
+>>> bout_obj = bout(
+...     db_dir='project.h5',
+...     receiver_dat='receivers.csv',
+...     eps=3600,  # 1 hour temporal window
+...     min_samp=1
+... )
+>>> bout_obj.cluster()
+>>> 
+>>> # Resolve overlapping detections
+>>> overlap_obj = overlap_reduction(db_dir='project.h5')
+>>> overlap_obj.unsupervised()
+>>> 
+>>> # Visualize results
+>>> overlap_obj.visualize_overlaps()
+>>> bout_obj.visualize_bout_lengths()
+
+Notes
+-----
+- DBSCAN parameters (eps, min_samp) control bout sensitivity
+- eps should match expected fish residence time at receiver
+- min_samp=1 treats every detection as potential bout start
+- Bout spatial filter runs automatically after unsupervised()
+- Power and posterior columns are optional (conditionally written)
+
+See Also
+--------
+formatter.time_to_event : Uses presence/absence for TTE analysis
+radio_project : Project database management
+"""
 
 # import modules required for function dependencies
 import os
@@ -64,12 +137,62 @@ def _prompt(prompt_text, default=None):
         return default
 
 class bout():
-    '''
-    DBSCAN-based bout detection for a single receiver.
+    """
+    DBSCAN-based bout detection for identifying continuous fish presence periods.
     
-    Uses temporal clustering to identify continuous presence periods.
-    Physics-based epsilon: pulse_rate * eps_multiplier (typically 5-10x pulse rate)
-    '''
+    Uses density-based spatial clustering (DBSCAN) to group detections into bouts
+    based on temporal proximity. Each bout represents a period of continuous or
+    near-continuous presence at a receiver.
+    
+    Attributes
+    ----------
+    db : str
+        Path to project HDF5 database
+    rec_id : str
+        Receiver identifier to process
+    eps_multiplier : int
+        Multiplier for pulse rate to set DBSCAN epsilon (temporal threshold)
+    lag_window : int
+        Time window in seconds for lag calculations (legacy parameter)
+    tags : pandas.DataFrame
+        Tag metadata (freq_code, pulse_rate, tag_type, etc.)
+    recaptures_df : pandas.DataFrame
+        Detections for this receiver
+    presence_df : pandas.DataFrame
+        Bout presence/absence matrix (fish x bout x receiver)
+    
+    Methods
+    -------
+    cluster()
+        Run DBSCAN clustering to assign bout numbers
+    visualize_bout_lengths()
+        Create diagnostic plots showing bout duration distributions
+    
+    Notes
+    -----
+    - Physics-based epsilon: pulse_rate * eps_multiplier
+    - Default eps_multiplier=5 gives ~40-50 seconds for typical tags
+    - min_samples=1 treats every detection as potential bout start
+    - Bout numbers are unique per fish, not globally
+    - Presence matrix tracks which bouts occurred at which receivers
+    
+    Examples
+    --------
+    >>> from pymast.overlap_removal import bout
+    >>> bout_obj = bout(
+    ...     radio_project=proj,
+    ...     rec_id='R03',
+    ...     eps_multiplier=5,
+    ...     lag_window=9
+    ... )
+    >>> bout_obj.cluster()
+    >>> bout_obj.visualize_bout_lengths()
+    
+    See Also
+    --------
+    overlap_reduction : Resolves overlapping detections between bouts
+    formatter.time_to_event : Uses bout presence for TTE analysis
+    """
     def __init__(self, radio_project, rec_id, eps_multiplier=5, lag_window=9):
         """
         Initialize bout detection for a specific receiver.
@@ -345,19 +468,65 @@ class bout():
 
 class overlap_reduction:
     """
-    A class to manage and reduce redundant detections at overlapping radio receivers.
+    Resolve overlapping detections using signal quality comparison.
     
-    The class processes data from multiple receivers, identifies overlapping 
-    detections, and applies statistical tests to determine which receiver has 
-    the higher signal strength for a given animal.
+    Identifies and resolves spatially/temporally overlapping detections by comparing
+    signal power and posterior probabilities. Marks weaker detections as overlapping
+    to prevent spatial ambiguity in downstream statistical models.
     
-    Attributes:
-        db (str): Path to the project database.
-        project (object): An object representing the radio project, providing access to the database.
-        nodes (list): A list of nodes (receivers) in the network.
-        edges (list of tuples): Directed edges representing the relationships between nodes.
-        node_pres_dict (dict): Dictionary storing processed presence data for each node (receiver).
-        node_recap_dict (dict): Dictionary storing processed recapture data for each node (receiver).
+    Resolution Logic:
+    1. **Power Comparison**: If both detections have power, keep stronger signal
+    2. **Posterior Comparison**: If both have classification scores, keep higher posterior
+    3. **Ambiguous**: Mark if signals equal or criteria unavailable
+    4. **Bout Conflicts**: Identify temporally overlapping bouts at different receivers
+    
+    Attributes
+    ----------
+    db : str
+        Path to project HDF5 database
+    project : object
+        Radio project instance with database and metadata
+    nodes : list
+        List of receiver IDs (nodes in network)
+    edges : list of tuples
+        Directed edges representing receiver relationships
+    G : networkx.DiGraph
+        Network graph of receiver connections
+    node_pres_dict : dict
+        Presence data for each receiver (fish x bout)
+    node_recap_dict : dict
+        Recapture data for each receiver (detections)
+    
+    Methods
+    -------
+    unsupervised()
+        Resolve overlaps using power/posterior comparison, apply bout spatial filter
+    visualize_overlaps()
+        Create 8-panel diagnostic plots for overlap analysis
+    
+    Notes
+    -----
+    - Operates on bout-level and detection-level simultaneously
+    - Bout spatial filter identifies temporally overlapping bouts (≥50% overlap)
+    - Power and posterior columns are optional (conditionally checked)
+    - Results written to `/overlapping` table in HDF5 database
+    - Visualization includes network structure, temporal patterns, power distributions
+    
+    Examples
+    --------
+    >>> from pymast.overlap_removal import overlap_reduction
+    >>> overlap_obj = overlap_reduction(
+    ...     nodes=['R01', 'R02', 'R03'],
+    ...     edges=[('R01', 'R02'), ('R02', 'R03')],
+    ...     radio_project=proj
+    ... )
+    >>> overlap_obj.unsupervised()
+    >>> overlap_obj.visualize_overlaps()
+    
+    See Also
+    --------
+    bout : DBSCAN-based bout detection
+    formatter.time_to_event : Uses overlap decisions for filtering
     """
 
     def __init__(self, nodes, edges, radio_project):
