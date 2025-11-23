@@ -247,9 +247,9 @@ def bin_predictors(hit_ratio, power, lag_diff, cons_length, noise_ratio):
     min_power = power.min()//5 * 5
     max_power = power.max()//5 * 5
     try:
-        power_bins =np.arange(min_power,max_power+20,10)
-    except:
-        print ('fuck')
+        power_bins = np.arange(min_power, max_power+20, 10)
+    except Exception as e:
+        raise ValueError(f"Error creating power bins: {e}. Check that power values are valid.")
 
     # Lag Back Differences - how steady are detection lags?
     lag_bins =np.arange(-100,110,20)

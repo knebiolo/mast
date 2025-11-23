@@ -1391,7 +1391,7 @@ class overlap_reduction:
             for j in fishes:
                 children = list(self.G.successors(i))
                 fish_dat = self.node_recap_dict[i][self.node_recap_dict[i].freq_code == j]
-                fish_dat['overlapping'] = np.float32(0)
+                fish_dat['overlapping'] = 0.0
 
                 if len(children) > 0:
                     for k in children:
@@ -1408,7 +1408,7 @@ class overlap_reduction:
                             if overlap_indices.size > 0:
                                 overlaps_found = True
                                 overlap_count += overlap_indices.size
-                                fish_dat.loc[overlaps, 'overlapping'] = np.float32(1)
+                                fish_dat.loc[overlaps, 'overlapping'] = 1.0
                                 #fish_dat.loc[overlaps, 'parent'] = i
 
                 # fish_dat = fish_dat.astype({
