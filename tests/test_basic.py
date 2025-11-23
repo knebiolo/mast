@@ -8,9 +8,12 @@ import numpy as np
 from pymast import predictors, naive_bayes
 
 
+@pytest.mark.unit
+@pytest.mark.smoke
 class TestPredictors:
     """Test predictor calculation functions"""
     
+    @pytest.mark.smoke
     def test_noise_ratio(self):
         """Test noise ratio calculation"""
         # Create sample data
@@ -24,7 +27,8 @@ class TestPredictors:
         # Should return array of same length
         assert len(result) == len(freq_codes)
         assert isinstance(result, np.ndarray)
-        
+    
+    @pytest.mark.smoke    
     def test_factors(self):
         """Test factor calculation"""
         # Test with simple number
@@ -39,9 +43,12 @@ class TestPredictors:
         assert result == 3  # Three consecutive 1's
 
 
+@pytest.mark.unit
+@pytest.mark.classifier
 class TestNaiveBayes:
     """Test Naive Bayes classifier functions"""
     
+    @pytest.mark.smoke
     def test_calculate_priors(self):
         """Test prior probability calculation"""
         labeled = np.array([True, True, False, True, False])
@@ -90,9 +97,11 @@ class TestNaiveBayes:
         )
 
 
+@pytest.mark.unit
 class TestDataStructures:
     """Test data loading and validation"""
     
+    @pytest.mark.smoke
     def test_tag_data_structure(self):
         """Test that tag data has required columns"""
         required_cols = ['freq_code', 'pulse_rate', 'cap_loc', 'rel_loc', 

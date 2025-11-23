@@ -1,36 +1,122 @@
-name: Python Tests
+name: PyMAST Tests
 
 on:
   push:
     branches: [ main, develop, v1.0_refactor ]
   pull_request:
     branches: [ main, develop ]
+  schedule:
+    # Run tests daily at 2 AM UTC
+    - cron: '0 2 * * *'
 
 jobs:
   test:
+    name: Test Python ${{ matrix.python-version }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ['3.9', '3.10', '3.11']
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
 
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout code
+      uses: actions/checkout@v4
     
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
-        python-version: ${{ matrix.python-version }}
+        python -version: ${{ matrix.python-version }}
+        cache: 'pip'
     
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -e .
-        pip install pytest pytest-cov
+        pip install pytest pytest-cov pytest-benchmark
     
-    - name: Run tests
+    - name: Run smoke tests
       run: |
-        pytest tests/ -v --cov=pymast --cov-report=xml
+        pytest -m smoke -v
+    
+    - name: Run unit tests
+      run: |
+        pytest -m unit -v --cov=pymast --cov-report=xml --cov-report=term
+    
+    - name: Run integration tests
+      run: |
+        pytest -m integration -v
+    
+    - name: Upload coverage to Codecov
+      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+    
+    - name: Generate coverage report
+      if: always()
+      run: |
+        pytest --cov=pymast --cov-report=html
+    
+    - name: Upload coverage HTML
+      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-html
+        path: htmlcov/
+
+  lint:
+    name: Lint and Format Check
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Install linting tools
+      run: |
+        pip install flake8 black isort
+    
+    - name: Run flake8
+      run: |
+        flake8 pymast --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 pymast --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+    
+    - name: Check black formatting
+      run: |
+        black --check pymast tests
+    
+    - name: Check import sorting
+      run: |
+        isort --check-only pymast tests
+
+  docs:
+    name: Documentation Build
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        pip install -e .
+        pip install sphinx sphinx-rtd-theme
+    
+    - name: Check docstrings
+      run: |
+        python -c "import pymast; help(pymast)" > /dev/null
     
     - name: Upload coverage
       uses: codecov/codecov-action@v3
