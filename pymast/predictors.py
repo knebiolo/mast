@@ -108,14 +108,6 @@ def noise_ratio (duration, freq_codes,epochs,study_tags):
     --------
     naive_bayes.train : Uses noise_ratio as classification feature
     """
-
-    # function calculates the ratio of miscoded, pure noise detections, to matching frequency/code
-    # detections within the duration specified.
-
-    duration = moving window length in minutes
-    data = current data file
-    study_tags = list or list like object of study tags
-    '''
     # identify miscodes
     miscode = np.isin(freq_codes, study_tags, invert = True)
 
@@ -219,11 +211,6 @@ def series_hit (lags, pulse_rate, mort_rate, status,):
     --------
     detection_history : More comprehensive in-series detection check
     """
-    '''seriesHit is a function for returning whether or not a detection on a specific
-    frequency/code is in series with the previous or next detection on that same
-    frequency/code
-    '''
-    
     # determine if the lag is potentially in series with the correct pulse rate based on status
     series_hit = np.where(status == 'A', 
                           np.where(lags % pulse_rate == 0,
