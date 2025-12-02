@@ -210,7 +210,7 @@ downstream_states = {'R15':1,'R14':1,# occum
                                    
 
 # Step 1, create time to event data class 
-tte = formatter.time_to_event(downstream_states,
+tte = formatter.time_to_event(upstream_states,
                               project,
                               initial_state_release = True,
                               last_presence_time0 = False,
@@ -220,18 +220,18 @@ tte = formatter.time_to_event(downstream_states,
                               rel_date = None,
                               recap_date = None)
 
-# upstream_adjacency_filter = [(9, 1),(9, 2),(9, 3),(9, 5),(9, 8),(9, 9),(9, 6),
-#                               (8, 1),(8, 2),(8, 3),(8, 5),(8, 9),(8, 8),(8, 6),
-#                                (6, 1),(6, 6),(6, 5),
-#                                 (1, 8),(1, 9),(2, 9),(2, 8),(3, 8),(3, 9),(0, 8),(0, 9),(5, 9)]
+upstream_adjacency_filter = [(9, 1),(9, 2),(9, 3),(9, 5),(9, 8),(9, 9),(9, 6),
+                              (8, 1),(8, 2),(8, 3),(8, 5),(8, 9),(8, 8),(8, 6),
+                               (6, 1),(6, 6),(6, 5),
+                                (1, 8),(1, 9),(2, 9),(2, 8),(3, 8),(3, 9),(0, 8),(0, 9),(5, 9)]
 
-# downstream_adjacency_filter = [(1, 6),(1, 7),(1, 8),(1, 9),
-#                                (9, 1),(8, 1),(9, 2),(9, 3),
-#                                (2, 9),(2, 7),(2, 6),(2, 10),(2, 3),
-#                                (3, 2),(3, 9)]
+downstream_adjacency_filter = [(1, 6),(1, 7),(1, 8),(1, 9),
+                               (9, 1),(8, 1),(9, 2),(9, 3),
+                               (2, 9),(2, 7),(2, 6),(2, 10),(2, 3),
+                               (3, 2),(3, 9)]
 
 # Step 2, format data - without covariates
-tte.data_prep(project)#, adjacency_filter = downstream_adjacency_filter)
+tte.data_prep(project, adjacency_filter = upstream_adjacency_filter)
 # Step 3, generate a summary
 stats = tte.summary()
 #tte.master_state_table.to_csv(os.path.join(project_dir,'Output','thompson_falls.csv'))
