@@ -886,6 +886,81 @@ class time_to_event():
         # Write state table to master state table
         self.master_state_table = pd.concat([self.master_state_table, state_table[columns]], axis=0, ignore_index=True)
 
+        # --- Fixes and rules for initial_state_release = True ---
+        # Rules:
+        # 1) If initial_state_release == True we only include fish that were
+        #    recaptured at least once after release (i.e., have a state > 0).
+        # 2) Fish must never transition into the release state (0). If a row
+        #    would transition TO state 0, drop that transition.
+        # 3) If a fish's last observed state is some S>0, ensure there is an
+        #    explicit diagonal row (S->S) representing last-seen at that
+        #    receiver with zero duration (instantaneous) so counts appear on
+        #    the diagonal of the transition matrix.
+        if self.initial_state_release:
+            # Keep only fish that have at least one non-release observation
+            fish_with_nonrelease = self.master_state_table[self.master_state_table['end_state'] > 0]['freq_code'].unique()
+            self.master_state_table = self.master_state_table[self.master_state_table['freq_code'].isin(fish_with_nonrelease)].copy()
+
+            # Convert any transitions that end at the release state (end_state == 0)
+            # into a stay-in-place diagonal entry: set end_state = start_state,
+            # zero the duration, and set time_1 == time_0. This preserves the
+            # fish's presence at the prior state rather than sending it to 0.
+            if 'end_state' in self.master_state_table.columns:
+                mask_end0 = self.master_state_table['end_state'] == 0
+                count_end0 = int(mask_end0.sum())
+                if count_end0 > 0:
+                    print(f"[TTE] Converting {count_end0} transitions ending at release state (0) into stay-in-place rows")
+                    idxs = self.master_state_table.index[mask_end0].tolist()
+                    for ii in idxs:
+                        try:
+                            start_state = int(self.master_state_table.at[ii, 'start_state'])
+                        except Exception:
+                            # fallback if missing
+                            start_state = int(self.master_state_table.loc[ii, 'start_state'])
+                        # set end_state to start_state
+                        self.master_state_table.at[ii, 'end_state'] = start_state
+                        # zero the time_delta and make time_1 equal time_0 (instantaneous)
+                        self.master_state_table.at[ii, 'time_delta'] = 0
+                        self.master_state_table.at[ii, 'time_1'] = self.master_state_table.at[ii, 'time_0']
+                        # update transition tuple
+                        self.master_state_table.at[ii, 'transition'] = (start_state, start_state)
+
+            # For each fish, ensure last-seen state has a diagonal row
+            diag_rows = []
+            for fish in self.master_state_table['freq_code'].unique():
+                fish_rows = self.master_state_table[self.master_state_table['freq_code'] == fish]
+                if fish_rows.empty:
+                    continue
+                # find row with max time_1 (last observation)
+                last_row = fish_rows.loc[fish_rows['time_1'].idxmax()]
+                last_state = int(last_row['end_state'])
+                last_time = int(last_row['time_1'])
+
+                # if last_state > 0, check if there already is a diagonal at that time
+                diag_exists = ((fish_rows['start_state'] == last_state) & (fish_rows['end_state'] == last_state) & (fish_rows['time_1'] == last_time)).any()
+                if not diag_exists:
+                    # create an instantaneous diagonal transition (duration 0)
+                    diag = {
+                        'freq_code': fish,
+                        'species': last_row.get('species', np.nan),
+                        'start_state': last_state,
+                        'end_state': last_state,
+                        'presence': last_row.get('presence', 0),
+                        'time_stamp': last_row.get('time_stamp', pd.to_datetime(last_time, unit='s')),
+                        'time_delta': 0,
+                        'first_obs': 0,
+                        'time_0': last_time,
+                        'time_1': last_time,
+                        'transition': (last_state, last_state)
+                    }
+                    diag_rows.append(diag)
+
+            if diag_rows:
+                diag_df = pd.DataFrame(diag_rows)
+                # Ensure dtype consistency
+                diag_df = diag_df.astype({k: v for k, v in self.master_state_table.dtypes.items() if k in diag_df.columns})
+                self.master_state_table = pd.concat([self.master_state_table, diag_df], axis=0, ignore_index=True)
+
         if adjacency_filter is not None:
             '''When the truth value of a detection is assessed, a detection
             may be valid for a fish that is not present.
