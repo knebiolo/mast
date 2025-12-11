@@ -40,25 +40,25 @@ project = radio_project(project_dir,
 #%% Create Time to Event Model
     
 # What is the Node to State relationship - use Python dictionary
-states = {'R1696':1,
-          'R1699-1':2,
-          'R1699-2':3,
-          'R1698':4,
-          'R1699-3':5,
-          'R1695':5,
-          'R0004':6,
-          'R0005':6,
-          'R0001':7,
-          'R0002':7,
-          'R0003':8} 
-
-# states = {'R1699-3':5,
+# states = {'R1696':1,
+#           'R1699-1':2,
+#           'R1699-2':3,
+#           'R1698':4,
+#           'R1699-3':5,
 #           'R1695':5,
 #           'R0004':6,
 #           'R0005':6,
 #           'R0001':7,
 #           'R0002':7,
-#           'R0003':8}
+#           'R0003':8} 
+
+states = {'R1699-3':5,
+          'R1695':5,
+          'R0004':6,
+          'R0005':6,
+          'R0001':7,
+          'R0002':7,
+          'R0003':8}
                                    
 # Step 1: Create time to event data class 
 tte = formatter.time_to_event(states,
@@ -68,7 +68,7 @@ tte = formatter.time_to_event(states,
                               hit_ratio_filter = False,
                               cap_loc = None,
                               rel_loc = None,
-                              species = "LL",
+                              species = "WCT",
                               rel_date = None,
                               recap_date = None)
 
@@ -88,8 +88,8 @@ tte.data_prep(project)#, adjacency_filter = downstream_adjacency_filter)
 
 # Step 3: Generate a summary
 stats = tte.summary()
-dat2 = tte.master_state_table[tte.master_state_table.species == 'LL']
-print (f"Length of dataset after filter for LL speices: {len(dat2)} records ")
+# dat2 = tte.master_state_table[tte.master_state_table.species == 'LL']
+# print (f"Length of dataset after filter for LL speices: {len(dat2)} records ")
 
 # Print dataframes of the Movement Summary, State Table, Recaptures
 # Ensure Spyder prints every column
