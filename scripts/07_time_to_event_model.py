@@ -19,8 +19,8 @@ from pymast import formatter
 import pandas as pd
 
 # Set up project
-project_dir = r"C:\Users\Kevin.Nebiolo\Desktop\Scotland KPN"
-db_name = 'Scotland_repacked'
+project_dir = r"K:\Jobs\3671\014\Analysis\kpn_2025_12_04"
+db_name = 'thompson_2025_v3'
 
 detection_count = 5
 duration = 1
@@ -40,36 +40,35 @@ project = radio_project(project_dir,
 #%% Create Time to Event Model
     
 # What is the Node to State relationship - use Python dictionary
-upstream_states = {'R15':1,'R14':1,    # occum
-                 'R13':2,'R12':2,    # downstream gate
-                 'R10':3,            # tailrace
-                 'R11':4,            # fish lift entrance
-                 'R08':5,'R09':5,    # spillway
-                 'R06':6,'R07':6,    # surface bypass
-                 'R05':7,            # submerged bypass
-                 'R04':8,            # fish lift exit
-                 'R03':9,            # forebay
-                 'R01':10,'R02':10}  # windham
+states = {'R1696':1,
+          'R1699-1':2,
+          'R1699-2':3,
+          'R1698':4,
+          'R1699-3':5,
+          'R1695':5,
+          'R0004':6,
+          'R0005':6,
+          'R0001':7,
+          'R0002':7,
+          'R0003':8} 
 
-downstream_states = {'R15':1,'R14':1,# occum
-                 'R13':2,'R12':2,    # downstream gate
-                 'R10':2,            # tailrace
-                 'R11':2,            # fish lift entrance
-                 'R08':3,'R09':3,    # spillway
-                 'R06':6,'R07':6,    # surface bypass
-                 'R05':7,            # submerged bypass
-                 'R04':9,            # fish lift exit
-                 'R03':9,            # forebay
-                 'R01':10,'R02':10}  # windham
+# states = {'R1699-3':5,
+#           'R1695':5,
+#           'R0004':6,
+#           'R0005':6,
+#           'R0001':7,
+#           'R0002':7,
+#           'R0003':8}
                                    
 # Step 1: Create time to event data class 
-tte = formatter.time_to_event(upstream_states,
+tte = formatter.time_to_event(states,
                               project,
                               initial_state_release = True,
                               last_presence_time0 = False,
+                              hit_ratio_filter = False,
                               cap_loc = None,
-                              rel_loc = 'windham',
-                              species = None,
+                              rel_loc = None,
+                              species = "LL",
                               rel_date = None,
                               recap_date = None)
 
@@ -89,23 +88,25 @@ tte.data_prep(project)#, adjacency_filter = downstream_adjacency_filter)
 
 # Step 3: Generate a summary
 stats = tte.summary()
+dat2 = tte.master_state_table[tte.master_state_table.species == 'LL']
+print (f"Length of dataset after filter for LL speices: {len(dat2)} records ")
 
 # Print dataframes of the Movement Summary, State Table, Recaptures
 # Ensure Spyder prints every column
-pd.set_option('display.max_columns', None)
-pd.set_option('display.width', None)
+# pd.set_option('display.max_columns', None)
+# pd.set_option('display.width', None)
 
-out = os.path.join(project_dir, "Output")
-df_movement_summary = pd.read_csv(os.path.join(out, "movement_summary.csv"))
-df_state_table      = pd.read_csv(os.path.join(out, "state_table.csv"))
-df_recaptures       = pd.read_csv(os.path.join(out, "recaptures.csv"))
+# out = os.path.join(project_dir, "Output")
+# df_movement_summary = pd.read_csv(os.path.join(out, "movement_summary.csv"))
+# df_state_table      = pd.read_csv(os.path.join(out, "state_table.csv"))
+# df_recaptures       = pd.read_csv(os.path.join(out, "recaptures.csv"))
 
-# Print to console
-print("=== Movement Summary ===")
-print(df_movement_summary, "\n")  
+# # Print to console
+# print("=== Movement Summary ===")
+# print(df_movement_summary, "\n")  
 
-print("=== State Table ===")
-print(df_state_table, "\n")
+# print("=== State Table ===")
+# print(df_state_table, "\n")
 
-print("=== Recaptures (first 5 rows) ===")
-print(df_recaptures.head(5), "\n")
+# print("=== Recaptures (first 5 rows) ===")
+# print(df_recaptures.head(5), "\n")

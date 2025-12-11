@@ -111,8 +111,9 @@ def noise_ratio (duration, freq_codes,epochs,study_tags):
     # identify miscodes
     miscode = np.isin(freq_codes, study_tags, invert = True)
 
-    # bin everything into nearest 5 min time bin and count miscodes and total number of detections
-    binned_epoch = epochs//duration
+    # bin everything into nearest duration-sized time bin and count miscodes and total number of detections
+    # Ensure epochs are integer seconds (or convertible)
+    binned_epoch = (epochs // duration).astype('int64')
         
     # Now identify the number of unique freq-codes within each bin
     # Create a DataFrame from the arrays

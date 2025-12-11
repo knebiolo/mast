@@ -221,7 +221,7 @@ class bout():
         rec_dat = rec_dat[['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id']]
         rec_dat = rec_dat.astype({
             'freq_code': 'object',
-            'epoch': 'float32',
+            'epoch': 'int64',
             'time_stamp': 'datetime64[ns]',
             'power': 'float32',
             'rec_id': 'object'
@@ -312,7 +312,7 @@ class bout():
         presence_df = self.presence_df.astype({
             'freq_code': 'object',
             'rec_id': 'object',
-            'epoch': 'float32',
+            'epoch': 'int64',
             'time_stamp': 'datetime64[ns]',
             'power': 'float32',
             'bout_no': 'int32',

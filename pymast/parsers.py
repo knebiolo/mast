@@ -199,7 +199,8 @@ def ares(file_name,
                        inplace = True)
         
     # now do this stuff to files regardless of type
-    telem_dat['epoch'] = np.round((telem_dat.time_stamp - pd.Timestamp("1970-01-01")) / pd.Timedelta('1s'),6)
+    # compute epoch as integer seconds (int64) to avoid floating precision loss
+    telem_dat['epoch'] = (telem_dat.time_stamp.astype('int64') // 10**9).astype('int64')
     telem_dat['rec_type'] = np.repeat(rec_type,len(telem_dat))
     telem_dat['rec_id'] = np.repeat(rec_id,len(telem_dat))
     telem_dat['channels'] = np.repeat(channels,len(telem_dat))
@@ -215,7 +216,7 @@ def ares(file_name,
                                   'scan_time':'float32',
                                   'channels':'int32',
                                   'rec_type':'object',
-                                  'epoch':'float32',
+                                  'epoch':'int64',
                                   'noise_ratio':'float32',
                                   'rec_id':'object'})
     
@@ -340,8 +341,8 @@ def orion_import(file_name,
         if len(telem_dat) == 0:
             print ("Invalid timestamps in raw data, cannot import")
         else:
-            # create epoch
-            telem_dat['epoch'] = np.round((telem_dat.time_stamp - pd.Timestamp("1970-01-01")) / pd.Timedelta('1s'),6)
+            # create epoch as int64 seconds
+            telem_dat['epoch'] = (telem_dat.time_stamp.astype('int64') // 10**9).astype('int64')
             
             # drop unnecessary columns 
             telem_dat.drop (['Date','Time','Freq','Code','Site'],axis = 1, inplace = True)
@@ -366,7 +367,7 @@ def orion_import(file_name,
                                               'scan_time':'float32',
                                               'channels':'int32',
                                               'rec_type':'object',
-                                              'epoch':'float32',
+                                              'epoch':'int64',
                                               'noise_ratio':'float32',
                                               'rec_id':'object'})
                 
@@ -509,7 +510,7 @@ def vr2_import(file_name,db_dir,study_tags, rec_id):
         telem_dat['transmitter'] = telem_dat['transmitter'].str.split("-", n = 2, expand = True)[2]
         telem_dat['transmitter'] = telem_dat.transmitter.astype(str)
         telem_dat.rename(columns = {'Receiver':'rec_id','transmitter':'freq_code'}, inplace = True)
-        telem_dat['epoch'] = np.round((telem_dat.time_stamp - pd.Timestamp("1970-01-01")) / pd.Timedelta('1s'),6)
+        telem_dat['epoch'] = (telem_dat.time_stamp.astype('int64') // 10**9).astype('int64')
         try:
             telem_dat.drop (['Date and Time (UTC)', 'Transmitter Name','Transmitter Serial','Sensor Value','Sensor Unit','Station Name','Latitude','Longitude','Transmitter Type','Sensor Precision'],axis = 1, inplace = True)
         except KeyError:
@@ -520,14 +521,14 @@ def vr2_import(file_name,db_dir,study_tags, rec_id):
         # telem_dat.set_index(index,inplace = True,drop = False)
         
         telem_dat = telem_dat.astype({'power':'float32',
-                                      'freq_code':'object',
-                                      'time_stamp':'datetime64[ns]',
-                                      'scan_time':'float32',
-                                      'channels':'int32',
-                                      'rec_type':'object',
-                                      'epoch':'float32',
-                                      'noise_ratio':'float32',
-                                      'rec_id':'object'})
+                          'freq_code':'object',
+                          'time_stamp':'datetime64[ns]',
+                          'scan_time':'float32',
+                          'channels':'int32',
+                          'rec_type':'object',
+                          'epoch':'int64',
+                          'noise_ratio':'float32',
+                          'rec_id':'object'})
         
         with pd.HDFStore(db_dir, mode='a') as store:
             store.append(key = 'raw_data',
@@ -782,8 +783,8 @@ def srx1200(file_name,
 
         telem_dat['time_stamp'] = pd.to_datetime(telem_dat.time_stamp)
         
-        # calculate Epoch
-        telem_dat['epoch'] = (telem_dat.time_stamp - pd.Timestamp("1970-01-01")) / pd.Timedelta('1s')
+        # calculate Epoch as int64 seconds
+        telem_dat['epoch'] = (telem_dat.time_stamp.astype('int64') // 10**9).astype('int64')
         
         # format frequency code
         telem_dat['FreqNo'] = telem_dat['Freq [MHz]'].apply(lambda x: f"{x:.3f}" )
@@ -812,14 +813,14 @@ def srx1200(file_name,
         telem_dat.reset_index(inplace = True)
         
         telem_dat = telem_dat.astype({'power':'float32',
-                                      'freq_code':'object',
-                                      'time_stamp':'datetime64[ns]',
-                                      'scan_time':'float32',
-                                      'channels':'int32',
-                                      'rec_type':'object',
-                                      'epoch':'float32',
-                                      'noise_ratio':'float32',
-                                      'rec_id':'object'})
+                          'freq_code':'object',
+                          'time_stamp':'datetime64[ns]',
+                          'scan_time':'float32',
+                          'channels':'int32',
+                          'rec_type':'object',
+                          'epoch':'int64',
+                          'noise_ratio':'float32',
+                          'rec_id':'object'})
         
         telem_dat = telem_dat[['power', 
                                 'time_stamp',
@@ -866,7 +867,7 @@ def srx1200(file_name,
         telem_dat['time_stamp'] = pd.to_datetime(telem_dat.time_stamp)
         
         # calculate Epoch
-        telem_dat['epoch'] = np.round((telem_dat.time_stamp - pd.Timestamp("1970-01-01")) / pd.Timedelta('1s'),6)
+        telem_dat['epoch'] = (telem_dat.time_stamp.astype('int64') // 10**9).astype('int64')
                 
         # format frequency code
         telem_dat['FreqNo'] = telem_dat['Freq [MHz]'].apply(lambda x: f"{x:.3f}" )
@@ -895,14 +896,14 @@ def srx1200(file_name,
         telem_dat.reset_index(inplace = True, drop = True)
         
         telem_dat = telem_dat.astype({'power':'float32',
-                                      'freq_code':'object',
-                                      'time_stamp':'datetime64[ns]',
-                                      'scan_time':'float32',
-                                      'channels':'int32',
-                                      'rec_type':'object',
-                                      'epoch':'float32',
-                                      'noise_ratio':'float32',
-                                      'rec_id':'object'})
+                          'freq_code':'object',
+                          'time_stamp':'datetime64[ns]',
+                          'scan_time':'float32',
+                          'channels':'int32',
+                          'rec_type':'object',
+                          'epoch':'int64',
+                          'noise_ratio':'float32',
+                          'rec_id':'object'})
         
         telem_dat = telem_dat[['power', 
                                 'time_stamp',
@@ -1509,8 +1510,8 @@ def srx600(file_name,
                 telem_dat_sub['time_stamp'] = pd.to_datetime(telem_dat_sub['Date'] + ' ' + telem_dat_sub['Time'])
                 telem_dat_sub.drop(['day0','DayNumber'],axis = 1, inplace = True)
                 
-                # calculate unix epoch
-                telem_dat['epoch'] = np.round((telem_dat.time_stamp - pd.Timestamp("1970-01-01")) / pd.Timedelta('1s'),6)
+                # calculate unix epoch as int64 seconds
+                telem_dat_sub['epoch'] = (telem_dat_sub.time_stamp.astype('int64') // 10**9).astype('int64')
                 
                 # clean up some more
                 telem_dat_sub.drop (['Date','Time','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
@@ -1830,17 +1831,19 @@ def PIT(file_name,
             raise ValueError("Could not find timestamp column")
 
         # Find tag ID columns dynamically
-        hex_tag_col = find_column_by_patterns(telem_dat, ['hex', 'tag1hex', 'tag id', 'tagid', 'tag'])
-        dec_tag_col = find_column_by_patterns(telem_dat, ['dec', 'tag1dec', 'decimal'])
+        telem_dat["freq_code"] = telem_dat['Tag1Hex'].astype(str).str.strip()
+
+        # hex_tag_col = find_column_by_patterns(telem_dat, ['hex', 'tag1hex', 'tag id', 'tagid', 'tag'])
+        # dec_tag_col = find_column_by_patterns(telem_dat, ['dec', 'tag1dec', 'decimal'])
         
-        if hex_tag_col:
-            print(f"Found HEX tag column: {hex_tag_col}")
-            telem_dat["freq_code"] = telem_dat[hex_tag_col].astype(str).str.strip()
-        elif dec_tag_col:
-            print(f"Found DEC tag column: {dec_tag_col}")
-            telem_dat["freq_code"] = telem_dat[dec_tag_col].astype(str).str.strip()
-        else:
-            raise ValueError("Could not find tag ID column")
+        # if hex_tag_col:
+        #     print(f"Found HEX tag column: {hex_tag_col}")
+        #     telem_dat["freq_code"] = telem_dat[hex_tag_col].astype(str).str.strip()
+        # elif dec_tag_col:
+        #     print(f"Found DEC tag column: {dec_tag_col}")
+        #     telem_dat["freq_code"] = telem_dat[dec_tag_col].astype(str).str.strip()
+        # else:
+        #     raise ValueError("Could not find tag ID column")
 
         # Handle antenna mapping for multi-antenna files
         if is_multi_antenna:
@@ -1927,8 +1930,51 @@ def PIT(file_name,
         # Use HEX Tag ID as freq_code
         telem_dat["freq_code"] = telem_dat["HEX Tag ID"].str.strip()
         
-        # For fixed-width, always use single antenna mode
-        telem_dat["rec_id"] = rec_id
+        # For fixed-width, assign rec_id or map antennas if multi-antenna mapping provided
+        if ant_to_rec_dict is None:
+            telem_dat["rec_id"] = rec_id
+        else:
+            # try to find an antenna column in the fixed-width frame
+            antenna_col = None
+            for col in telem_dat.columns:
+                col_lower = str(col).lower().strip()
+                if col_lower in ('antenna id', 'antenna', 'ant', 'antennae', 'antennae id'):
+                    antenna_col = col
+                    break
+
+            if antenna_col is not None:
+                # extract numeric antenna identifier and map using provided dictionary
+                telem_dat['antenna_raw'] = telem_dat[antenna_col].astype(str).str.strip()
+                # Try numeric extraction first, then fall back to raw string mapping
+                telem_dat['antenna_num'] = telem_dat['antenna_raw'].str.extract(r'(\d+)')[0]
+                telem_dat['antenna_num'] = pd.to_numeric(telem_dat['antenna_num'], errors='coerce')
+
+                # Prepare mapping dict keys as strings and ints for robust lookup
+                ant_map = {}
+                for k, v in ant_to_rec_dict.items():
+                    try:
+                        ant_map[int(k)] = v
+                    except Exception:
+                        pass
+                    ant_map[str(k).strip()] = v
+
+                # Map by numeric antenna if possible, else by raw string
+                telem_dat['rec_id'] = telem_dat['antenna_num'].map(ant_map)
+                missing_mask = telem_dat['rec_id'].isna()
+                if missing_mask.any():
+                    # try mapping by raw string for missing ones
+                    telem_dat.loc[missing_mask, 'rec_id'] = telem_dat.loc[missing_mask, 'antenna_raw'].map(ant_map)
+
+                # report mapping summary for debugging
+                unique_antennas = telem_dat['antenna_raw'].unique()[:20]
+                print('Detected antenna values (sample):', unique_antennas)
+                mapped_counts = telem_dat['rec_id'].notna().sum()
+                print(f'Mapped {mapped_counts} / {len(telem_dat)} rows to receivers via ant_to_rec_dict')
+
+                # drop detections that do not map to a known receiver
+                telem_dat = telem_dat.dropna(subset=['rec_id'])
+            else:
+                raise ValueError('Multi-antenna fixed-width PIT file requires an antenna column but none was found')
 
     # Data cleaning - remove invalid entries
     print(f"\nCleaning data - original records: {len(telem_dat)}")
@@ -1950,8 +1996,51 @@ def PIT(file_name,
     telem_dat = telem_dat[telem_dat['freq_code'].str.len() > 3]
     telem_dat = telem_dat[~telem_dat['freq_code'].isna()]
     
-    with pd.HDFStore(db_dir, 'r') as store:
-        print("Store keys after append:", store.keys())
+    # Finalize fields and append to HDF5 /raw_data
+    if len(telem_dat) == 0:
+        print('No valid PIT rows after cleaning; nothing to append')
+        return
+
+    # compute epoch as int64 seconds and other derived fields
+    telem_dat['epoch'] = (pd.to_datetime(telem_dat['time_stamp']).astype('int64') // 10**9).astype('int64')
+    telem_dat['channels'] = np.repeat(channels, len(telem_dat))
+    telem_dat['scan_time'] = np.repeat(scan_time, len(telem_dat))
+    telem_dat['rec_type'] = np.repeat(rec_type, len(telem_dat))
+
+    # compute noise ratio if study_tags provided
+    try:
+        telem_dat['noise_ratio'] = predictors.noise_ratio(5.0,
+                                                         telem_dat.freq_code.values,
+                                                         telem_dat.epoch.values,
+                                                         study_tags)
+    except Exception:
+        telem_dat['noise_ratio'] = np.repeat(np.nan, len(telem_dat))
+
+    # ensure dtypes
+    telem_dat = telem_dat.astype({'time_stamp': 'datetime64[ns]',
+                                  'epoch': 'int64',
+                                  'freq_code': 'object',
+                                  'rec_id': 'object',
+                                  'rec_type': 'object',
+                                  'scan_time': 'float32',
+                                  'channels': 'int32',
+                                  'noise_ratio': 'float32'})
+
+    # reorder columns to match expected schema
+    cols = ['time_stamp', 'epoch', 'freq_code', 'power', 'noise_ratio', 'scan_time', 'channels', 'rec_id', 'rec_type']
+    cols_existing = [c for c in cols if c in telem_dat.columns]
+
+    with pd.HDFStore(db_dir, mode='a') as store:
+        store.append(key='raw_data',
+                     value=telem_dat[cols_existing],
+                     format='table',
+                     index=False,
+                     min_itemsize={'freq_code': 20, 'rec_type': 20, 'rec_id': 20},
+                     append=True,
+                     chunksize=1000000,
+                     data_columns=True)
+
+        print('Store keys after append:', store.keys())
 
 
 def PIT_Multiple(
@@ -2039,8 +2128,8 @@ def PIT_Multiple(
     telem_dat["Tag1Dec"] = telem_dat["Tag1Dec"].astype(str)
     telem_dat["Tag1Hex"] = telem_dat["Tag1Hex"].astype(str)
 
-    if after_cleanup == 0:
-        raise ValueError(f"No valid records found in {file_name}")
+    # if after_cleanup == 0:
+    #     raise ValueError(f"No valid records found in {file_name}")
 
     # Standardize columns
     telem_dat["power"] = 0.0
@@ -2049,10 +2138,11 @@ def PIT_Multiple(
     telem_dat["channels"] = channels
     telem_dat["rec_type"] = rec_type
 
-    # Calculate epoch time
-    telem_dat["epoch"] = (
-        telem_dat["time_stamp"] - pd.Timestamp("1970-01-01")
-    ) / pd.Timedelta("1s")
+    # Calculate epoch time (seconds since 1970-01-01) as int64
+    # Use integer seconds to avoid float32 precision loss for large epoch values
+    # Ensure time_stamp has no NaT rows before converting
+    telem_dat = telem_dat[~telem_dat["time_stamp"].isna()].copy()
+    telem_dat["epoch"] = telem_dat["time_stamp"].astype('int64') // 10**9
 
     # Convert to standard data types
     telem_dat = telem_dat.astype({
@@ -2062,7 +2152,7 @@ def PIT_Multiple(
         "scan_time": "float32",
         "channels": "int32",
         "rec_type": "object",
-        "epoch": "float32",
+        "epoch": "int64",
         "noise_ratio": "float32",
         "rec_id": "object"
     })

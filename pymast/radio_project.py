@@ -463,7 +463,7 @@ class radio_project():
             If file_dir doesn't exist or contains no data files
         """
         # Validate receiver type
-        VALID_REC_TYPES = ['srx600', 'srx800', 'srx1200', 'orion', 'ares', 'VR2']
+        VALID_REC_TYPES = ['srx600', 'srx800', 'srx1200', 'orion', 'ares', 'VR2','PIT']
         if rec_type not in VALID_REC_TYPES:
             raise ValueError(
                 f"Unsupported receiver type: '{rec_type}'. "
@@ -525,7 +525,11 @@ class radio_project():
                 parsers.PIT(f_dir,db_dir,rec_id, self.study_tags, scan_time = scan_time, channels = channels, ant_to_rec_dict = ant_to_rec_dict)
                 
             elif rec_type == 'PIT_Multiple':
-                parsers.PIT_Multiple(f_dir,db_dir, ant_to_rec_dict, self.study_tags, scan_time = scan_time, channels = channels)
+                parsers.PIT_Multiple(f_dir, db_dir,
+                                     study_tags=self.study_tags,
+                                     ant_to_rec_dict=ant_to_rec_dict,
+                                     scan_time=scan_time,
+                                     channels=channels)
 
             else:
                 logger.error(f"No import routine for receiver type: {rec_type}")
@@ -565,6 +569,31 @@ class radio_project():
         fish_list = dat.freq_code.unique()
         logger.info(f"  Found {len(fish_list)} unique fish")
         return fish_list
+
+    def orphan_tags(self, return_rows=False):
+        """Return orphan tags or their recapture rows.
+
+        By default returns a sorted list of orphan `freq_code` strings (tags
+        present in `/recaptures` but missing from `/project_setup/tags`). If
+        `return_rows=True` returns the recaptures DataFrame rows for those tags.
+        """
+        recaps = pd.read_hdf(self.db, 'recaptures')
+        recaps['freq_code'] = recaps['freq_code'].astype(str)
+
+        master = self.tags.copy()
+        if master.index.name == 'freq_code':
+            master_codes = set(master.index.astype(str))
+        else:
+            master_codes = set(master['freq_code'].astype(str))
+
+        recap_codes = set(recaps['freq_code'].unique())
+        orphans = sorted(list(recap_codes - master_codes))
+
+        if return_rows:
+            if not orphans:
+                return pd.DataFrame(columns=recaps.columns)
+            return recaps[recaps['freq_code'].isin(orphans)].copy()
+        return orphans
     
     def train(self, freq_code, rec_id):
         """
@@ -629,7 +658,7 @@ class radio_project():
         
         # Data management
         train_dat['time_stamp'] = pd.to_datetime(train_dat.time_stamp)
-        train_dat['epoch'] = np.round((train_dat.time_stamp - pd.Timestamp("1970-01-01")) / pd.Timedelta('1s'), 6)
+        train_dat['epoch'] = (train_dat.time_stamp.astype('int64') // 10**9).astype('int64')
         train_dat.sort_values(by='epoch', inplace=True)
         
         train_dat.drop_duplicates(subset='time_stamp', keep='first', inplace=True)
@@ -683,7 +712,7 @@ class radio_project():
         try:
             train_dat = train_dat.astype({'power': 'float32', 
                                           'time_stamp': 'datetime64[ns]',
-                                          'epoch': 'float32',
+                                          'epoch': 'int64',
                                           'freq_code': 'object',
                                           'noise_ratio': 'float32',
                                           'scan_time': 'int32',
@@ -1115,7 +1144,7 @@ class radio_project():
         if len(class_dat) > 0:
             # do some data management when importing training dataframe
             class_dat['time_stamp'] = pd.to_datetime(class_dat['time_stamp'])
-            class_dat['epoch'] = np.round((class_dat.time_stamp - pd.Timestamp("1970-01-01")) / pd.Timedelta('1s'), 6)
+            class_dat['epoch'] = (class_dat.time_stamp.astype('int64') // 10**9).astype('int64')
 
             class_dat.sort_values(by = 'time_stamp', inplace = True)
             class_dat['epoch'] = class_dat.epoch.values.astype(np.int64)
@@ -1234,7 +1263,7 @@ class radio_project():
     
             # keep it tidy cuz hdf is fragile
             class_dat = class_dat.astype({'freq_code': 'object',
-                                          'epoch': 'float32',
+                                          'epoch': 'int64',
                                           'rec_id': 'object',
                                           'time_stamp': 'datetime64[ns]',
                                           'power': 'float32', 
@@ -1481,7 +1510,7 @@ class radio_project():
                     df = pd.DataFrame(columns=df.columns)
                 
                 df = df.astype({'freq_code': 'object',
-                                'epoch': 'float32',
+                                'epoch': 'int64',
                                 'rec_id': 'object',
                                 'class': 'object',
                                 'bout_no':'int32',
@@ -1726,7 +1755,7 @@ class radio_project():
                 # Ensure correct data types
                 rec_dat = rec_dat.astype({
                     'freq_code': 'object',
-                    'epoch': 'float32',
+                    'epoch': 'int64',
                     'rec_id': 'object',
                     'time_stamp': 'datetime64[ns]',
                     'power': 'float32', 
@@ -1846,7 +1875,7 @@ class radio_project():
         
                 # Convert each column to the correct dtype
                 dtypes_map = {
-                    'freq_code': 'object', 'rec_id': 'object', 'epoch': 'float32',
+                    'freq_code': 'object', 'rec_id': 'object', 'epoch': 'int64',
                     'time_stamp': 'datetime64[ns]', 'power': 'float32', 'noise_ratio': 'float32',
                     'lag': 'float32', 'det_hist': 'object', 'hit_ratio': 'float32',
                     'cons_det': 'int32', 'cons_length': 'float32', 'likelihood_T': 'float32',

@@ -18,8 +18,8 @@ from pymast.radio_project import radio_project
 import pandas as pd
 
 # Set up project
-project_dir = r"C:\Users\Kevin.Nebiolo\Desktop\Scotland KPN"
-db_name = 'Scotland_repacked'
+project_dir = r"K:\Jobs\3671\014\Analysis\kpn_2025_12_04"
+db_name = 'thompson_2025_v3'
 
 detection_count = 5
 duration = 1
@@ -38,6 +38,15 @@ project = radio_project(project_dir,
 
 #%% Create recaptures table
 # Undo recaptures if needed (clears old table)
-# project.undo_recaptures()
+project.undo_recaptures()
 
-project.make_recaptures_table(export = True)
+project.make_recaptures_table(export = True,  pit_study = True)
+
+# Check for orphan tags (tags present in recaptures but missing from master tag list)
+orphans = project.orphan_tags(return_rows=False)
+if not orphans:
+    print('No orphan tags found.')
+else:
+    out_csv = os.path.join(project_dir, 'orphans.csv')
+    pd.Series(orphans, name='freq_code').to_csv(out_csv, index=False)
+    print(f"Orphans found: {len(orphans)} — saved to {out_csv}")
