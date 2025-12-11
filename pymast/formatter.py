@@ -663,7 +663,7 @@ class time_to_event():
             # Drop the bout_size column (no longer needed)
             self.recap_data = self.recap_data.drop(columns=['bout_size'])
         
-        self.recap_data['rel_date'] = pd.to_datetime(self.recap_data.rel_date)
+        self.recap_data['rel_date'] = pd.to_datetime(self.recap_data.rel_date,format = 'mixed')
         if 'pulse_rate' not in self.recap_data.columns:
             self.recap_data['pulse_rate'] = np.nan
             

@@ -68,7 +68,7 @@ tte = formatter.time_to_event(states,
                               hit_ratio_filter = False,
                               cap_loc = None,
                               rel_loc = None,
-                              species = "WCT",
+                              species = "BULL",
                               rel_date = None,
                               recap_date = None)
 
