@@ -4,7 +4,7 @@ save_data_on_exit = True
 save_history = True
 save_non_project_files = False
 project_type = empty-project-type
-recent_files = ['scripts\\01_import_data.py', 'scripts\\06_create_recaptures.py', 'scripts\\07_time_to_event_model.py', 'pymast\\formatter.py', '\\\\EgnyteDrive\\Kleinschmidt\\Jobs\\3202\\006\\Calcs\\Poole Ramping Data\\ramp_stats.py']
+recent_files = ['README.md', 'pymast\\radio_project.py', 'pymast\\formatter.py', 'scripts\\mast_complete_project.py', 'pymast\\overlap_removal.py', 'pymast\\predictors.py', 'pymast\\parsers.py']
 
 [main]
 version = 0.2.0
