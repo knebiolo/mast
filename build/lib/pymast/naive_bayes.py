@@ -1,9 +1,65 @@
 # -*- coding: utf-8 -*-
 """
-Created on Wed Nov 15 21:50:12 2023
+Naive Bayes classifier for distinguishing true fish detections from noise.
 
-@author: KNebiolo
+This module implements a custom Naive Bayes classifier tailored for radio telemetry
+data. It uses multiple predictor variables (signal power, lag differences, noise ratio,
+etc.) to classify detections as true fish signals versus environmental noise or
+spurious transmissions.
+
+Classification Workflow
+-----------------------
+1. **Training**: Calculate priors and likelihoods from hand-labeled data
+2. **Testing**: Apply trained classifier to unlabeled detections
+3. **Binning**: Discretize continuous predictors for probability calculations
+4. **Posterior**: Combine priors and likelihoods via Bayes' theorem
+5. **Threshold**: Classify based on posterior ratio (adjustable threshold)
+
+Predictor Variables
+-------------------
+- **hit_ratio**: Proportion of detections matching expected pulse intervals
+- **power**: Signal strength (dB or raw power)
+- **lag_diff**: Variability in time between consecutive detections
+- **cons_length**: Maximum contiguous sequence of expected detections
+- **noise_ratio**: Ratio of miscoded to total detections in time window
+
+Typical Usage
+-------------
+>>> import pymast.naive_bayes as nb
+>>> 
+>>> # Calculate priors from labeled training data
+>>> priors = nb.calculate_priors(labeled_truth_array)
+>>> 
+>>> # Calculate likelihoods for each predictor
+>>> likelihood_true = nb.calculate_likelihood(
+...     training_obs=training_power,
+...     labeled_array=labeled_truth,
+...     assumption=True,
+...     classification_obs=test_power,
+...     laplace=1
+... )
+>>> 
+>>> # Calculate posterior and classify
+>>> posterior_true = nb.calculate_posterior(
+...     priors, evidence, likelihoods_dict, assumption=True
+... )
+>>> classifications = nb.classify_with_threshold(
+...     posterior_true, posterior_false, threshold_ratio=1.0
+... )
+
+Notes
+-----
+- Uses Laplace smoothing (add-one) to handle unseen predictor values
+- Predictors are binned into discrete categories before classification
+- Threshold ratio allows precision/recall tradeoff (default: 1.0 = MAP)
+- Assumes conditional independence between predictors (Naive Bayes assumption)
+
+See Also
+--------
+predictors : Calculation of predictor variables
+radio_project : Project management and data storage
 """
+
 import numpy as np
 
 def calculate_priors(labeled_array):
@@ -132,7 +188,56 @@ def classify_with_threshold(posterior_true, posterior_false, threshold_ratio=1.0
     return classification
 
 def bin_predictors(hit_ratio, power, lag_diff, cons_length, noise_ratio):
-    'bin numerical predictors for classification'
+    """
+    Bin continuous predictor variables into discrete categories for Naive Bayes.
+    
+    Converts continuous predictor values into discrete bins for probability
+    calculations. Binning allows Naive Bayes to estimate likelihoods from
+    limited training data.
+    
+    Parameters
+    ----------
+    hit_ratio : array_like
+        Proportion of detections matching expected pulse intervals (0.0 to 1.0)
+    power : array_like
+        Signal power values (dB or raw)
+    lag_diff : array_like
+        Differences in lag times between consecutive detections (seconds)
+    cons_length : array_like
+        Maximum contiguous sequence of expected detections (1 to 11)
+    noise_ratio : array_like
+        Ratio of miscoded to total detections (0.0 to 1.0)
+    
+    Returns
+    -------
+    tuple of numpy.ndarray
+        (hit_ratio_count, power_count, lag_count, con_len_count, noise_count)
+        Each array contains bin indices for corresponding input values
+    
+    Notes
+    -----
+    Binning strategies:
+    - hit_ratio: 11 bins from 0.0 to 1.0 (0.1 increments)
+    - power: 10 dB bins from min to max (rounded to nearest 5 dB)
+    - lag_diff: 20-second bins from -100 to 110 seconds
+    - cons_length: 1-unit bins from 1 to 12
+    - noise_ratio: 0.1 increment bins from 0.0 to 1.0
+    
+    Examples
+    --------
+    >>> hit_ratio = np.array([0.25, 0.75, 0.95])
+    >>> power = np.array([100, 120, 140])
+    >>> lag_diff = np.array([-10, 0, 10])
+    >>> cons_length = np.array([3, 5, 8])
+    >>> noise_ratio = np.array([0.05, 0.15, 0.25])
+    >>> nb.bin_predictors(hit_ratio, power, lag_diff, cons_length, noise_ratio)
+    (array([3, 8, 10]), array([1, 3, 5]), array([5, 6, 6]), array([3, 5, 8]), array([1, 2, 3]))
+    
+    See Also
+    --------
+    calculate_likelihood : Uses binned data for probability calculations
+    """
+    # bin numerical predictors for classification
     # define bins for analysis
     
     # hit ratio bins
@@ -142,9 +247,9 @@ def bin_predictors(hit_ratio, power, lag_diff, cons_length, noise_ratio):
     min_power = power.min()//5 * 5
     max_power = power.max()//5 * 5
     try:
-        power_bins =np.arange(min_power,max_power+20,10)
-    except:
-        print ('fuck')
+        power_bins = np.arange(min_power, max_power+20, 10)
+    except Exception as e:
+        raise ValueError(f"Error creating power bins: {e}. Check that power values are valid.")
 
     # Lag Back Differences - how steady are detection lags?
     lag_bins =np.arange(-100,110,20)

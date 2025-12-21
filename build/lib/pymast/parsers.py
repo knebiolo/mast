@@ -1,10 +1,88 @@
 # -*- coding: utf-8 -*-
+"""
+Data parsers for radio telemetry receiver file formats.
+
+This module provides parser functions to import raw detection data from various
+radio telemetry receiver manufacturers into the MAST HDF5 database. Each parser
+handles manufacturer-specific file formats and standardizes the data into a common
+schema for downstream processing.
+
+Supported Receiver Types
+------------------------
+- **ARES**: Lotek Advanced Radio Telemetry Systems
+- **Orion**: Sigma Eight Orion receivers
+- **SRX-1200**: Lotek SRX 1200 receivers (fixed-width format)
+- **SRX-800**: Lotek SRX 800 receivers (fixed-width format)
+- **SRX-600**: Lotek SRX 600 receivers (fixed-width format)
+- **VR2**: Vemco VR2 acoustic receivers (CSV format)
+- **PIT**: Passive Integrated Transponder readers
+
+Common Data Pipeline
+--------------------
+All parsers follow this workflow:
+1. Read raw receiver file (CSV, fixed-width, or vendor format)
+2. Parse timestamps, frequencies, codes, power, antenna information
+3. Calculate derived fields: epoch, noise_ratio
+4. Standardize column names and data types
+5. Append to HDF5 `/raw_data` table
+
+Standardized Output Schema
+--------------------------
+All parsers produce these columns:
+- `time_stamp` : datetime64 - Detection timestamp
+- `epoch` : float32 - Seconds since 1970-01-01
+- `freq_code` : object - Frequency + code (e.g., "166.380 7")
+- `power` : float32 - Signal power (dB or raw)
+- `rec_id` : object - Receiver identifier
+- `rec_type` : object - Receiver type (ares, orion, srx1200, etc.)
+- `channels` : int32 - Number of receiver channels
+- `scan_time` : float32 - Scan duration per channel (seconds)
+- `noise_ratio` : float32 - Ratio of miscoded to total detections
+
+Typical Usage
+-------------
+>>> import pymast.parsers as parsers
+>>> 
+>>> # Import ARES data
+>>> parsers.ares(
+...     file_name='receiver_001.csv',
+...     db_dir='project.h5',
+...     rec_id='REC001',
+...     study_tags=['166.380 7', '166.380 12'],
+...     scan_time=1.0,
+...     channels=1
+... )
+>>> 
+>>> # Import SRX-1200 data
+>>> parsers.srx1200(
+...     file_name='srx_detections.txt',
+...     db_dir='project.h5',
+...     rec_id='SRX123',
+...     study_tags=['166.380 7'],
+...     scan_time=2.5,
+...     channels=1
+... )
+
+Notes
+-----
+- Frequency values are rounded to nearest 5 kHz then converted to MHz with 3 decimal precision
+- Noise ratio calculated using 5-minute moving window (see `predictors.noise_ratio`)
+- All parsers append to existing HDF5 `/raw_data` table (mode='a')
+- Timestamps assumed to be in UTC or project-specific timezone
+- PIT readers have different schemas due to antenna-based detection logic
+
+See Also
+--------
+radio_project.import_data : High-level batch import interface
+predictors.noise_ratio : Miscoded detection ratio calculation
+"""
 
 import pandas as pd
 import numpy as np
 import datetime
 import os
 import pymast.predictors as predictors
+import sys
 
 def ares(file_name, 
                  db_dir, 
@@ -13,6 +91,60 @@ def ares(file_name,
                  scan_time = 1, 
                  channels = 1, 
                  ant_to_rec_dict = None):
+    """
+    Import Lotek ARES receiver data into MAST HDF5 database.
+    
+    Parses CSV format detection files from Lotek Advanced Radio Telemetry Systems
+    (ARES) receivers. Automatically detects file format variant based on header row
+    and standardizes data into common schema.
+    
+    Parameters
+    ----------
+    file_name : str
+        Absolute path to ARES CSV file
+    db_dir : str
+        Absolute path to project HDF5 database
+    rec_id : str
+        Unique receiver identifier (e.g., 'REC001', 'SITE_A')
+    study_tags : list of str
+        List of valid freq_code tags deployed in study (e.g., ['166.380 7', '166.380 12'])
+        Used to calculate noise_ratio
+    scan_time : float, optional
+        Scan duration per channel in seconds (default: 1.0)
+    channels : int, optional
+        Number of receiver channels (default: 1)
+    ant_to_rec_dict : dict, optional
+        Mapping of antenna IDs to receiver IDs (not currently used)
+    
+    Returns
+    -------
+    None
+        Data appended directly to HDF5 `/raw_data` table
+    
+    Notes
+    -----
+    - Handles two ARES file format variants (detected via header row)
+    - Frequencies rounded to nearest 5 kHz, formatted as 3-decimal MHz
+    - Calculates noise_ratio using 5-minute moving window
+    - All timestamps converted to epoch (seconds since 1970-01-01)
+    
+    Examples
+    --------
+    >>> import pymast.parsers as parsers
+    >>> parsers.ares(
+    ...     file_name='C:/data/ares_001.csv',
+    ...     db_dir='C:/project/study.h5',
+    ...     rec_id='ARES001',
+    ...     study_tags=['166.380 7', '166.380 12', '166.380 19'],
+    ...     scan_time=1.0,
+    ...     channels=1
+    ... )
+    
+    See Also
+    --------
+    radio_project.import_data : High-level batch import
+    predictors.noise_ratio : Noise ratio calculation
+    """
     # identify the receiver type 
     rec_type = 'ares'
     
@@ -67,7 +199,8 @@ def ares(file_name,
                        inplace = True)
         
     # now do this stuff to files regardless of type
-    telem_dat['epoch'] = np.round((telem_dat.time_stamp - pd.Timestamp("1970-01-01")) / pd.Timedelta('1s'),6)
+    # compute epoch as integer seconds (int64) to avoid floating precision loss
+    telem_dat['epoch'] = (telem_dat.time_stamp.astype('int64') // 10**9).astype('int64')
     telem_dat['rec_type'] = np.repeat(rec_type,len(telem_dat))
     telem_dat['rec_id'] = np.repeat(rec_id,len(telem_dat))
     telem_dat['channels'] = np.repeat(channels,len(telem_dat))
@@ -83,7 +216,7 @@ def ares(file_name,
                                   'scan_time':'float32',
                                   'channels':'int32',
                                   'rec_type':'object',
-                                  'epoch':'float32',
+                                  'epoch':'int64',
                                   'noise_ratio':'float32',
                                   'rec_id':'object'})
     
@@ -103,14 +236,61 @@ def orion_import(file_name,
                  db_dir, 
                  rec_id, 
                  study_tags, 
-                 scan_time = 1, 
+                 scan_time = 1., 
                  channels = 1, 
                  ant_to_rec_dict = None):
-    '''Function imports raw Sigma Eight orion data.
-
-    Text parser uses simple column fixed column widths.
-
-    '''
+    """
+    Import Sigma Eight Orion receiver data into MAST HDF5 database.
+    
+    Parses fixed-width format detection files from Sigma Eight Orion receivers.
+    Automatically detects firmware version based on header row and adjusts
+    column parsing accordingly.
+    
+    Parameters
+    ----------
+    file_name : str
+        Absolute path to Orion fixed-width text file
+    db_dir : str
+        Absolute path to project HDF5 database
+    rec_id : str
+        Unique receiver identifier (e.g., 'ORION_01')
+    study_tags : list of str
+        List of valid freq_code tags deployed in study
+    scan_time : float, optional
+        Scan duration per channel in seconds (default: 1.0)
+    channels : int, optional
+        Number of receiver channels (default: 1)
+    ant_to_rec_dict : dict, optional
+        Mapping of antenna IDs to receiver IDs (not currently used)
+    
+    Returns
+    -------
+    None
+        Data appended directly to HDF5 `/raw_data` table
+    
+    Notes
+    -----
+    - Handles two Orion firmware variants: with/without 'Type' column
+    - Fixed-width column parsing using pandas read_fwf
+    - Filters out 'STATUS' messages (firmware-specific)
+    - Frequencies formatted as 3-decimal MHz
+    
+    Examples
+    --------
+    >>> parsers.orion_import(
+    ...     file_name='C:/data/orion_site1.txt',
+    ...     db_dir='C:/project/study.h5',
+    ...     rec_id='ORION_SITE1',
+    ...     study_tags=['166.380 7'],
+    ...     scan_time=1.0,
+    ...     channels=1
+    ... )
+    
+    See Also
+    --------
+    ares : Similar parser for Lotek ARES receivers
+    srx1200 : Parser for Lotek SRX 1200 receivers
+    """
     # identify the receiver type
     rec_type = 'orion'
 
@@ -124,17 +304,25 @@ def orion_import(file_name,
         # with our data row, extract information using pandas fwf import procedure
         telem_dat = pd.read_fwf(file_name,colspecs = [(0,12),(13,23),(24,30),(31,35),(36,45),(46,54),(55,60),(61,65)],
                                 names = ['Date','Time','Site','Ant','Freq','Type','Code','power'],
-                                skiprows = 1,
-                                dtype = {'Date':str,'Time':str,'Site':np.int32,'Ant':str,'Freq':str,'Type':str,'Code':str,'power':np.float64})
+                                skiprows = 1)#,
+                                #dtype = {'Date':str,'Time':str,'Site':np.int32,'Ant':str,'Freq':str,'Type':str,'Code':str,'power':np.float64})
         telem_dat = telem_dat[telem_dat.Type != 'STATUS']
+        telem_dat['Freq'] = telem_dat.Freq.astype('float32')
+
+        telem_dat['Freq'] = telem_dat['Freq'].apply(lambda x: f"{x:.3f}")
+        telem_dat['Ant'] = telem_dat.Ant.astype('object')
         telem_dat.drop(['Type'], axis = 1, inplace = True)
 
     else:
         # with our data row, extract information using pandas fwf import procedure
         telem_dat = pd.read_fwf(file_name,colspecs = [(0,11),(11,20),(20,26),(26,30),(30,37),(37,42),(42,48)],
                                 names = ['Date','Time','Site','Ant','Freq','Code','power'],
-                                skiprows = 1,
-                                dtype = {'Date':str,'Time':str,'Site':str,'Ant':str,'Freq':str,'Code':str,'power':str})
+                                skiprows = 1)#,
+                                #dtype = {'Date':str,'Time':str,'Site':str,'Ant':str,'Freq':str,'Code':str,'power':str})
+        telem_dat['Ant'] = telem_dat.Ant.astype('object')
+        telem_dat['Freq'] = telem_dat.Freq.astype('float32')
+        telem_dat['Freq'] = telem_dat['Freq'].apply(lambda x: f"{x:.3f}")
+
 
     if len(telem_dat) > 0:
         # add file name to data
@@ -153,8 +341,8 @@ def orion_import(file_name,
         if len(telem_dat) == 0:
             print ("Invalid timestamps in raw data, cannot import")
         else:
-            # create epoch
-            telem_dat['epoch'] = np.round((telem_dat.time_stamp - pd.Timestamp("1970-01-01")) / pd.Timedelta('1s'),6)
+            # create epoch as int64 seconds
+            telem_dat['epoch'] = (telem_dat.time_stamp.astype('int64') // 10**9).astype('int64')
             
             # drop unnecessary columns 
             telem_dat.drop (['Date','Time','Freq','Code','Site'],axis = 1, inplace = True)
@@ -179,7 +367,7 @@ def orion_import(file_name,
                                               'scan_time':'float32',
                                               'channels':'int32',
                                               'rec_type':'object',
-                                              'epoch':'float32',
+                                              'epoch':'int64',
                                               'noise_ratio':'float32',
                                               'rec_id':'object'})
                 
@@ -207,12 +395,12 @@ def orion_import(file_name,
                 
             # if there is an antenna to receiver dictionary
             else:
-                for i in ant_to_rec_dict:
+                for i in ant_to_rec_dict.keys():
                     # get site from dictionary
                     site = ant_to_rec_dict[i]
                     
                     # get telemetryt data associated with this site
-                    telem_dat_sub = telem_dat[telem_dat.Ant == str(i)]
+                    telem_dat_sub = telem_dat[telem_dat.Ant == 1]
                     
                     # add receiver ID
                     telem_dat_sub['rec_id'] = np.repeat(site,len(telem_dat_sub))
@@ -251,13 +439,54 @@ def orion_import(file_name,
                                      append = True, 
                                      chunksize = 1000000,
                                      data_columns = True)  
-
-                    
+    else:
+        raise ValueError("Invalid import parameters, no data returned")
+        sys.exit()
+        
                     
 def vr2_import(file_name,db_dir,study_tags, rec_id):
-    '''Function imports raw VEMCO VR2 acoustic data.
-
-    '''
+    """
+    Import Vemco VR2 acoustic receiver data into MAST HDF5 database.
+    
+    Parses CSV format detection files from Vemco VR2 acoustic receivers.
+    VR2 data uses acoustic tags instead of radio frequencies, with different
+    field names and data structure.
+    
+    Parameters
+    ----------
+    file_name : str
+        Absolute path to VR2 CSV file
+    db_dir : str
+        Absolute path to project HDF5 database
+    study_tags : list of str
+        List of valid acoustic tag codes deployed in study
+    rec_id : str
+        Unique receiver identifier
+    
+    Returns
+    -------
+    None
+        Data appended directly to HDF5 `/raw_data` table
+    
+    Notes
+    -----
+    - Acoustic receivers use different schema than radio receivers
+    - VR2 files typically have standardized CSV format from Vemco software
+    - Converts acoustic tag IDs to freq_code format for consistency
+    
+    Examples
+    --------
+    >>> parsers.vr2_import(
+    ...     file_name='C:/data/vr2_001.csv',
+    ...     db_dir='C:/project/acoustic_study.h5',
+    ...     study_tags=['A69-1601-12345', 'A69-1601-12346'],
+    ...     rec_id='VR2_001'
+    ... )
+    
+    See Also
+    --------
+    ares : Parser for radio telemetry receivers
+    """
 
     recType = 'vr2'
 
@@ -281,7 +510,7 @@ def vr2_import(file_name,db_dir,study_tags, rec_id):
         telem_dat['transmitter'] = telem_dat['transmitter'].str.split("-", n = 2, expand = True)[2]
         telem_dat['transmitter'] = telem_dat.transmitter.astype(str)
         telem_dat.rename(columns = {'Receiver':'rec_id','transmitter':'freq_code'}, inplace = True)
-        telem_dat['epoch'] = np.round((telem_dat.time_stamp - pd.Timestamp("1970-01-01")) / pd.Timedelta('1s'),6)
+        telem_dat['epoch'] = (telem_dat.time_stamp.astype('int64') // 10**9).astype('int64')
         try:
             telem_dat.drop (['Date and Time (UTC)', 'Transmitter Name','Transmitter Serial','Sensor Value','Sensor Unit','Station Name','Latitude','Longitude','Transmitter Type','Sensor Precision'],axis = 1, inplace = True)
         except KeyError:
@@ -292,14 +521,14 @@ def vr2_import(file_name,db_dir,study_tags, rec_id):
         # telem_dat.set_index(index,inplace = True,drop = False)
         
         telem_dat = telem_dat.astype({'power':'float32',
-                                      'freq_code':'object',
-                                      'time_stamp':'datetime64[ns]',
-                                      'scan_time':'float32',
-                                      'channels':'int32',
-                                      'rec_type':'object',
-                                      'epoch':'float32',
-                                      'noise_ratio':'float32',
-                                      'rec_id':'object'})
+                          'freq_code':'object',
+                          'time_stamp':'datetime64[ns]',
+                          'scan_time':'float32',
+                          'channels':'int32',
+                          'rec_type':'object',
+                          'epoch':'int64',
+                          'noise_ratio':'float32',
+                          'rec_id':'object'})
         
         with pd.HDFStore(db_dir, mode='a') as store:
             store.append(key = 'raw_data',
@@ -311,13 +540,70 @@ def vr2_import(file_name,db_dir,study_tags, rec_id):
                                          'rec_id':20},
                          append = True, 
                          chunksize = 1000000)        
+
 def srx1200(file_name,
              db_dir,
              rec_id, 
              study_tags, 
              scan_time = 1, 
              channels = 1, 
-             ant_to_rec_dict = None):
+             ant_to_rec_dict = None,
+             ka_format = False):
+    """
+    Import Lotek SRX-1200 receiver data into MAST HDF5 database.
+    
+    Parses fixed-width format detection files from Lotek SRX-1200 receivers.
+    Supports both standard Lotek format and custom Kleinschmidt Associates (KA) format.
+    
+    Parameters
+    ----------
+    file_name : str
+        Absolute path to SRX-1200 fixed-width text file
+    db_dir : str
+        Absolute path to project HDF5 database
+    rec_id : str
+        Unique receiver identifier (e.g., 'SRX1200_001')
+    study_tags : list of str
+        List of valid freq_code tags deployed in study
+    scan_time : float, optional
+        Scan duration per channel in seconds (default: 1.0)
+    channels : int, optional
+        Number of receiver channels (default: 1)
+    ant_to_rec_dict : dict, optional
+        Mapping of antenna IDs to receiver IDs for multi-antenna setups
+    ka_format : bool, optional
+        If True, parse Kleinschmidt Associates custom format (default: False)
+    
+    Returns
+    -------
+    None
+        Data appended directly to HDF5 `/raw_data` table
+    
+    Notes
+    -----
+    - Fixed-width column parsing optimized for SRX-1200 output
+    - Handles multi-antenna configurations via ant_to_rec_dict
+    - KA format includes additional metadata fields
+    - Power values typically in dB
+    
+    Examples
+    --------
+    >>> parsers.srx1200(
+    ...     file_name='C:/data/srx1200_site1.txt',
+    ...     db_dir='C:/project/study.h5',
+    ...     rec_id='SRX1200_SITE1',
+    ...     study_tags=['166.380 7', '166.380 12'],
+    ...     scan_time=2.5,
+    ...     channels=1,
+    ...     ka_format=False
+    ... )
+    
+    See Also
+    --------
+    srx800 : Parser for SRX-800 receivers
+    srx600 : Parser for SRX-600 receivers
+    ares : Parser for ARES receivers
+    """
     rec_type = 'srx1200'
     
     # create empty dictionary to hold Lotek header data indexed by line number - to be imported to Pandas dataframe
@@ -467,12 +753,20 @@ def srx1200(file_name,
 
         # read in telemetry data
         if new_split == None:
-            telem_dat = pd.read_fwf(file_name,
-                                   colspecs = [(0,7),(7,25),(25,35),(35,46),(46,57),(57,68),(68,80),(80,90),(90,102),(102,110),(110,130),(130,143),(143,153)],
-                                   names = ['Index','Rx Serial Number','Date','Time','[uSec]','Tag/BPM','Freq [MHz]','Codeset','Antenna','Gain','RSSI','Latitude','Longitude'],
-                                   skiprows = dataRow, 
-                                   skipfooter = eof - dataEnd)
-            telem_dat.drop(columns = ['Index'], inplace = True)
+            if ka_format == False:
+                telem_dat = pd.read_fwf(file_name,
+                                       colspecs = [(0,7),(7,25),(25,35),(35,46),(46,57),(57,68),(68,80),(80,90),(90,102),(102,110),(110,130),(130,143),(143,153)],
+                                       names = ['Index','Rx Serial Number','Date','Time','[uSec]','Tag/BPM','Freq [MHz]','Codeset','Antenna','Gain','RSSI','Latitude','Longitude'],
+                                       skiprows = dataRow, 
+                                       skipfooter = eof - dataEnd)
+                telem_dat.drop(columns = ['Index'], inplace = True)
+            else:
+                telem_dat = pd.read_fwf(file_name,
+                                       colspecs = [(0,5),(6,20),(20,32),(32,43),(43,53),(53,65),(65,72),(72,85),(85,93),(93,101)],
+                                       names = ['Index','Date','Time','[uSec]','Tag/BPM','Freq [MHz]','Codeset','Antenna','Gain','RSSI'],
+                                       skiprows = dataRow, 
+                                       skipfooter = eof - dataEnd)
+                telem_dat.drop(columns = ['Index'], inplace = True)
 
         else:
             telem_dat = pd.read_csv(file_name,
@@ -489,8 +783,8 @@ def srx1200(file_name,
 
         telem_dat['time_stamp'] = pd.to_datetime(telem_dat.time_stamp)
         
-        # calculate Epoch
-        telem_dat['epoch'] = (telem_dat.time_stamp - pd.Timestamp("1970-01-01")) / pd.Timedelta('1s')
+        # calculate Epoch as int64 seconds
+        telem_dat['epoch'] = (telem_dat.time_stamp.astype('int64') // 10**9).astype('int64')
         
         # format frequency code
         telem_dat['FreqNo'] = telem_dat['Freq [MHz]'].apply(lambda x: f"{x:.3f}" )
@@ -519,30 +813,37 @@ def srx1200(file_name,
         telem_dat.reset_index(inplace = True)
         
         telem_dat = telem_dat.astype({'power':'float32',
-                                      'freq_code':'object',
-                                      'time_stamp':'datetime64[ns]',
-                                      'scan_time':'int32',
-                                      'channels':'int32',
-                                      'rec_type':'object',
-                                      'epoch':'float32',
-                                      'noise_ratio':'float32',
-                                      'rec_id':'object'})
+                          'freq_code':'object',
+                          'time_stamp':'datetime64[ns]',
+                          'scan_time':'float32',
+                          'channels':'int32',
+                          'rec_type':'object',
+                          'epoch':'int64',
+                          'noise_ratio':'float32',
+                          'rec_id':'object'})
         
-        if new_split != None:
-            telem_dat.drop(columns = ['index'], inplace = True)
-            print ('fuck')
-                
+        telem_dat = telem_dat[['power', 
+                                'time_stamp',
+                                'epoch',
+                                'freq_code',
+                                'noise_ratio',
+                                'scan_time',
+                                'channels', 
+                                'rec_id',
+                                'rec_type']]
+        
+        # Write the DataFrame to the HDF5 file without the index
         with pd.HDFStore(db_dir, mode='a') as store:
-            store.append(key = 'raw_data',
-                         value = telem_dat, 
-                         format = 'table', 
-                         index = False, 
-                         append = True, 
-                         min_itemsize = {'freq_code':20,
-                                         'rec_type':20,
-                                         'rec_id':20},
-                         chunksize = 1000000, 
-                         data_columns = True,)
+            store.append(key='raw_data',
+                         value=telem_dat,
+                         format='table',
+                         index=False,  # Ensure index is not written
+                         min_itemsize={'freq_code': 20,
+                                       'rec_type': 20,
+                                       'rec_id': 20},
+                         append=True,
+                         chunksize=1000000,
+                         data_columns=True)
         
     # if the data doesn't have a header
     else:
@@ -566,7 +867,7 @@ def srx1200(file_name,
         telem_dat['time_stamp'] = pd.to_datetime(telem_dat.time_stamp)
         
         # calculate Epoch
-        telem_dat['epoch'] = np.round((telem_dat.time_stamp - pd.Timestamp("1970-01-01")) / pd.Timedelta('1s'),6)
+        telem_dat['epoch'] = (telem_dat.time_stamp.astype('int64') // 10**9).astype('int64')
                 
         # format frequency code
         telem_dat['FreqNo'] = telem_dat['Freq [MHz]'].apply(lambda x: f"{x:.3f}" )
@@ -595,26 +896,37 @@ def srx1200(file_name,
         telem_dat.reset_index(inplace = True, drop = True)
         
         telem_dat = telem_dat.astype({'power':'float32',
-                                      'freq_code':'object',
-                                      'time_stamp':'datetime64[ns]',
-                                      'scan_time':'float32',
-                                      'channels':'int32',
-                                      'rec_type':'object',
-                                      'epoch':'float32',
-                                      'noise_ratio':'float32',
-                                      'rec_id':'object'})
-                
+                          'freq_code':'object',
+                          'time_stamp':'datetime64[ns]',
+                          'scan_time':'float32',
+                          'channels':'int32',
+                          'rec_type':'object',
+                          'epoch':'int64',
+                          'noise_ratio':'float32',
+                          'rec_id':'object'})
+        
+        telem_dat = telem_dat[['power', 
+                                'time_stamp',
+                                'epoch',
+                                'freq_code',
+                                'noise_ratio',
+                                'scan_time',
+                                'channels', 
+                                'rec_id',
+                                'rec_type']]
+        
+        # Write the DataFrame to the HDF5 file without the index
         with pd.HDFStore(db_dir, mode='a') as store:
-            store.append(key = 'raw_data',
-                         value = telem_dat, 
-                         format = 'table', 
-                         index = False, 
-                         min_itemsize = {'freq_code':20,
-                                         'rec_type':20,
-                                         'rec_id':20},
-                         append = True, 
-                         chunksize = 1000000,
-                         data_columns = True)   
+            store.append(key='raw_data',
+                         value=telem_dat,
+                         format='table',
+                         index=False,  # Ensure index is not written
+                         min_itemsize={'freq_code': 20,
+                                       'rec_type': 20,
+                                       'rec_id': 20},
+                         append=True,
+                         chunksize=1000000,
+                         data_columns=True)
             
 def srx800(file_name,
              db_dir,
@@ -623,6 +935,57 @@ def srx800(file_name,
              scan_time = 1, 
              channels = 1, 
              ant_to_rec_dict = None):
+    """
+    Import Lotek SRX-800 receiver data into MAST HDF5 database.
+    
+    Parses fixed-width format detection files from Lotek SRX-800 receivers.
+    Similar to SRX-1200 but with different column widths and firmware-specific
+    header parsing.
+    
+    Parameters
+    ----------
+    file_name : str
+        Absolute path to SRX-800 fixed-width text file
+    db_dir : str
+        Absolute path to project HDF5 database
+    rec_id : str
+        Unique receiver identifier
+    study_tags : list of str
+        List of valid freq_code tags deployed in study
+    scan_time : float, optional
+        Scan duration per channel in seconds (default: 1.0)
+    channels : int, optional
+        Number of receiver channels (default: 1)
+    ant_to_rec_dict : dict, optional
+        Mapping of antenna IDs to receiver IDs
+    
+    Returns
+    -------
+    None
+        Data appended directly to HDF5 `/raw_data` table
+    
+    Notes
+    -----
+    - Parses SRX-800 specific header format for scan configuration
+    - Fixed-width column parsing adjusted for SRX-800 output
+    - Handles multi-antenna configurations
+    
+    Examples
+    --------
+    >>> parsers.srx800(
+    ...     file_name='C:/data/srx800_detections.txt',
+    ...     db_dir='C:/project/study.h5',
+    ...     rec_id='SRX800_001',
+    ...     study_tags=['166.380 7'],
+    ...     scan_time=2.0,
+    ...     channels=1
+    ... )
+    
+    See Also
+    --------
+    srx1200 : Parser for SRX-1200 receivers
+    srx600 : Parser for SRX-600 receivers
+    """
     
     rec_type = 'srx800'
     
@@ -786,6 +1149,7 @@ def srx800(file_name,
                                names = ['DayNumber','Time','ChannelID','TagID','Antenna','power'],
                                skiprows = dataRow,
                                dtype = {'ChannelID':str,'TagID':str,'Antenna':str})
+        telem_dat = telem_dat.iloc[:-1]
         telem_dat['day0'] = np.repeat(pd.to_datetime("1900-01-01"),len(telem_dat))
         telem_dat['Date'] = telem_dat['day0'] + pd.to_timedelta(telem_dat['DayNumber'].astype(int), unit='d')
         telem_dat['Date'] = telem_dat.Date.astype('str')
@@ -934,6 +1298,57 @@ def srx600(file_name,
              scan_time = 1, 
              channels = 1, 
              ant_to_rec_dict = None):
+    """
+    Import Lotek SRX-600 receiver data into MAST HDF5 database.
+    
+    Parses fixed-width format detection files from Lotek SRX-600 receivers.
+    Similar to SRX-800/1200 but with SRX-600 specific column widths and
+    header structure.
+    
+    Parameters
+    ----------
+    file_name : str
+        Absolute path to SRX-600 fixed-width text file
+    db_dir : str
+        Absolute path to project HDF5 database
+    rec_id : str
+        Unique receiver identifier
+    study_tags : list of str
+        List of valid freq_code tags deployed in study
+    scan_time : float, optional
+        Scan duration per channel in seconds (default: 1.0)
+    channels : int, optional
+        Number of receiver channels (default: 1)
+    ant_to_rec_dict : dict, optional
+        Mapping of antenna IDs to receiver IDs
+    
+    Returns
+    -------
+    None
+        Data appended directly to HDF5 `/raw_data` table
+    
+    Notes
+    -----
+    - Parses SRX-600 specific header format
+    - Fixed-width column parsing adjusted for SRX-600 output
+    - Older receiver model with slightly different data structure
+    
+    Examples
+    --------
+    >>> parsers.srx600(
+    ...     file_name='C:/data/srx600_detections.txt',
+    ...     db_dir='C:/project/study.h5',
+    ...     rec_id='SRX600_001',
+    ...     study_tags=['166.380 7'],
+    ...     scan_time=1.5,
+    ...     channels=1
+    ... )
+    
+    See Also
+    --------
+    srx1200 : Parser for SRX-1200 receivers
+    srx800 : Parser for SRX-800 receivers
+    """
     
     rec_type = 'srx600'
     
@@ -1095,8 +1510,8 @@ def srx600(file_name,
                 telem_dat_sub['time_stamp'] = pd.to_datetime(telem_dat_sub['Date'] + ' ' + telem_dat_sub['Time'])
                 telem_dat_sub.drop(['day0','DayNumber'],axis = 1, inplace = True)
                 
-                # calculate unix epoch
-                telem_dat['epoch'] = np.round((telem_dat.time_stamp - pd.Timestamp("1970-01-01")) / pd.Timedelta('1s'),6)
+                # calculate unix epoch as int64 seconds
+                telem_dat_sub['epoch'] = (telem_dat_sub.time_stamp.astype('int64') // 10**9).astype('int64')
                 
                 # clean up some more
                 telem_dat_sub.drop (['Date','Time','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
@@ -1228,5 +1643,548 @@ def srx600(file_name,
     
     
     
+def PIT(file_name,
+        db_dir,
+        rec_id=None,
+        study_tags=None,
+        skiprows=6,
+        scan_time=0,
+        channels=0,
+        rec_type="PIT",
+        ant_to_rec_dict=None):
+    """
+    Import PIT (Passive Integrated Transponder) reader data into MAST HDF5 database.
     
+    Parses detection files from PIT tag readers. PIT systems use different
+    technology (RFID) than radio telemetry but data can be analyzed with
+    similar methods.
+    
+    Parameters
+    ----------
+    file_name : str
+        Absolute path to PIT reader CSV/text file
+    db_dir : str
+        Absolute path to project HDF5 database
+    rec_id : str
+        Unique reader identifier
+    study_tags : list of str
+        List of valid PIT tag IDs deployed in study
+    skiprows : int, optional
+        Number of header rows to skip (default: 6)
+    scan_time : float, optional
+        Not used for PIT readers (default: 0)
+    channels : int, optional
+        Not used for PIT readers (default: 0)
+    rec_type : str, optional
+        Reader type identifier (default: 'PIT_Array')
+    ant_to_rec_dict : dict, optional
+        Mapping of antenna IDs to reader IDs for multi-antenna arrays
+    
+    Returns
+    -------
+    None
+        Data appended directly to HDF5 `/raw_data` table
+    
+    Notes
+    -----
+    - PIT readers have antenna-based detection logic (different from radio receivers)
+    - Tag IDs converted to freq_code format for consistency with radio data
+    - Typically used at fixed locations (weirs, ladders, bypass systems)
+    - scan_time and channels not applicable to PIT technology
+    
+    Examples
+    --------
+    >>> parsers.PIT(
+    ...     file_name='C:/data/pit_reader_001.csv',
+    ...     db_dir='C:/project/pit_study.h5',
+    ...     rec_id='PIT_WEIR_01',
+    ...     study_tags=['3D9.1BF3C5A8B2', '3D9.1BF3C5A8C1'],
+    ...     skiprows=6,
+    ...     rec_type='PIT_Array'
+    ... )
+    
+    See Also
+    --------
+    PIT_Multiple : Parser for multi-antenna PIT arrays
+    """
+    
+    import pandas as pd
+    import re
+    
+    # Determine mode based on parameters
+    is_multi_antenna = ant_to_rec_dict is not None
+    mode_str = "multi-antenna" if is_multi_antenna else "single antenna"
+    print(f"Parsing PIT file ({mode_str}): {file_name}")
+    
+    # Function to find columns by pattern matching
+    def find_column_by_patterns(df, patterns):
+        for col in df.columns:
+            col_lower = str(col).lower().strip()
+            for pattern in patterns:
+                if pattern in col_lower:
+                    return col
+        return None
+
+    # First, analyze the file to determine format
+    def analyze_file_format(file_name):
+        """Dynamically determine PIT file format and header structure"""
+        with open(file_name, 'r') as file:
+            lines = []
+            for i in range(20):  # Read first 20 lines to analyze format
+                try:
+                    line = file.readline()
+                    if not line:
+                        break
+                    lines.append(line.rstrip('\n'))
+                except:
+                    break
+        
+        # Check if CSV format (look for commas in sample lines)
+        csv_indicators = 0
+        for line in lines[max(0, len(lines)-10):]:  # Check last 10 lines for data
+            if line.count(',') > 3:  # More than 3 commas suggests CSV
+                csv_indicators += 1
+        
+        is_csv = csv_indicators > 2  # If most lines have commas, it's CSV
+        
+        # For CSV, look for header row
+        actual_skiprows = 0
+        if is_csv:
+            for i, line in enumerate(lines):
+                line_lower = line.lower()
+                # Look for column headers (must contain text headers, not just data)
+                if any(header in line_lower for header in ['tag', 'time', 'date', 'antenna', 'detected', 'site', 'reader']):
+                    if ',' in line and not re.search(r'^\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}/\d{4}', line.strip()):
+                        # It's a header row (has keywords but no date pattern at start)
+                        actual_skiprows = 0  # Keep headers, don't skip them
+                        break
+            
+            # If no header found, assume no header (skiprows = 0)
+        else:
+            # For fixed-width, look for data start
+            for i, line in enumerate(lines):
+                line_lower = line.lower()
+                if 'version' in line_lower or 'ver' in line_lower:
+                    print(f"Found version info: {line}")
+                
+                # Look for data start indicators
+                if any(indicator in line_lower for indicator in ['scan date', 'date', 'timestamp', 'tag id']):
+                    if i > 0:  # If this looks like a header row
+                        actual_skiprows = i + 1
+                        break
+                
+                # Check if this looks like a data line
+                if re.search(r'\d{1,2}/\d{1,2}/\d{4}|\d{4}-\d{2}-\d{2}', line):
+                    actual_skiprows = i
+                    break
+        
+        return is_csv, actual_skiprows, lines
+
+    # Analyze file format
+    is_csv_format, detected_skiprows, sample_lines = analyze_file_format(file_name)
+    
+    # Use detected skiprows for CSV, keep provided for fixed-width
+    if is_csv_format:
+        skiprows = detected_skiprows
+        print(f"Detected CSV format, using skiprows: {skiprows}")
+    else:
+        print(f"Detected fixed-width format, using skiprows: {skiprows}")
+
+    # Parse the file based on detected format
+    if is_csv_format:
+        # CSV Format Parsing
+        try:
+            # Read CSV - if skiprows is 0, pandas will automatically use first row as headers
+            telem_dat = pd.read_csv(file_name, dtype=str)
+            print(f"Auto-detected columns: {list(telem_dat.columns)}")
+            
+        except Exception as e:
+            print(f"CSV auto-detection failed: {e}")
+            # Fallback to predefined column names
+            col_names = [
+                "FishId", "Tag1Dec", "Tag1Hex", "Tag2Dec", "Tag2Hex", "FloyTag", "RadioTag",
+                "Location", "Source", "FishSpecies", "TimeStamp", "Weight", "Length",
+                "Antennae", "Latitude", "Longitude", "SampleDate", "CaptureMethod",
+                "LocationDetail", "Type", "Recapture", "Sex", "GeneticSampleID", "Comments"
+            ]
+            telem_dat = pd.read_csv(file_name, names=col_names, header=0, skiprows=skiprows, dtype=str)
+
+        # Find timestamp column dynamically
+        timestamp_col = find_column_by_patterns(telem_dat, ['timestamp', 'time stamp', 'date', 'scan date', 'detected'])
+        if timestamp_col:
+            print(f"Found timestamp column: {timestamp_col}")
+            # Try multiple datetime formats
+            for fmt in ["%m/%d/%Y %H:%M", "%Y-%m-%d %H:%M:%S", "%m/%d/%Y", "%Y-%m-%d", None]:
+                try:
+                    if fmt:
+                        telem_dat["time_stamp"] = pd.to_datetime(telem_dat[timestamp_col], format=fmt, errors="coerce")
+                    else:
+                        telem_dat["time_stamp"] = pd.to_datetime(telem_dat[timestamp_col], errors="coerce")
+                    
+                    # Check if parsing was successful
+                    if not telem_dat["time_stamp"].isna().all():
+                        print(f"Successfully parsed timestamps using format: {fmt or 'auto-detect'}")
+                        break
+                except:
+                    continue
+        else:
+            raise ValueError("Could not find timestamp column")
+
+        # Find tag ID columns dynamically
+        telem_dat["freq_code"] = telem_dat['Tag1Hex'].astype(str).str.strip()
+
+        # hex_tag_col = find_column_by_patterns(telem_dat, ['hex', 'tag1hex', 'tag id', 'tagid', 'tag'])
+        # dec_tag_col = find_column_by_patterns(telem_dat, ['dec', 'tag1dec', 'decimal'])
+        
+        # if hex_tag_col:
+        #     print(f"Found HEX tag column: {hex_tag_col}")
+        #     telem_dat["freq_code"] = telem_dat[hex_tag_col].astype(str).str.strip()
+        # elif dec_tag_col:
+        #     print(f"Found DEC tag column: {dec_tag_col}")
+        #     telem_dat["freq_code"] = telem_dat[dec_tag_col].astype(str).str.strip()
+        # else:
+        #     raise ValueError("Could not find tag ID column")
+
+        # Handle antenna mapping for multi-antenna files
+        if is_multi_antenna:
+            antenna_col = find_column_by_patterns(telem_dat, ['antenna', 'antennae', 'ant'])
+            if antenna_col:
+                print(f"Found antenna column: {antenna_col}")
+                # Convert antenna column to integer and apply mapping
+                telem_dat["antenna_clean"] = telem_dat[antenna_col].astype(str).str.extract(r'(\d+)')[0]
+                telem_dat["antenna_clean"] = pd.to_numeric(telem_dat["antenna_clean"], errors='coerce').astype("Int64")
+                telem_dat["rec_id"] = telem_dat["antenna_clean"].map(ant_to_rec_dict)
+                # Drop rows where antenna values don't match known receivers
+                telem_dat = telem_dat.dropna(subset=["rec_id"])
+            else:
+                raise ValueError("Multi-antenna mode requires antenna column, but none found")
+        else:
+            # Single antenna mode - use provided rec_id
+            telem_dat["rec_id"] = rec_id
+
+    else:
+        # Fixed-Width Format Parsing (original logic)
+        
+        # Read header information for format detection
+        with open(file_name, 'r') as file:
+            header_lines = []
+            for _ in range(max(skiprows, 10)):
+                try:
+                    line = file.readline()
+                    if not line:
+                        break
+                    header_lines.append(line.rstrip('\n'))
+                except:
+                    break
+            header_text = " ".join(header_lines).lower()
+
+        # Define colspecs for different fixed-width formats
+        if 'latitude' in header_text or 'longitude' in header_text:
+            colspecs = [(0, 12), (12, 26), (26, 41), (41, 56), (56, 59), (66, 70), 
+                       (79, 95), (95, 112), (113, 120), (120, 131), (138, 145), 
+                       (145, 155), (155, 166), (166, 175)]
+            col_names = ["Scan Date", "Scan Time", "Download Date", "Download Time", 
+                        "Reader ID", "Antenna ID", "HEX Tag ID", "DEC Tag ID", 
+                        "Temperature_C", "Signal_mV", "Is Duplicate", "Latitude", 
+                        "Longitude", "File Name"]
+            print("Using format with latitude/longitude")
+        else:
+            colspecs = [(0, 12), (12, 26), (26, 41), (41, 56), (56, 62), (62, 73), 
+                       (73, 89), (89, 107), (107, 122), (122, 132), (136, 136)]
+            col_names = ["Scan Date", "Scan Time", "Download Date", "Download Time", 
+                        "S/N", "Reader ID", "HEX Tag ID", "DEC Tag ID", 
+                        "Temperature_C", "Signal_mV", "Is Duplicate"]
+            print("Using format without latitude/longitude")
+
+        # Try different encodings if UTF-8 fails
+        encodings_to_try = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
+        telem_dat = None
+        
+        for encoding in encodings_to_try:
+            try:
+                print(f"Attempting to read file with encoding: {encoding}")
+                telem_dat = pd.read_fwf(
+                    file_name,
+                    colspecs=colspecs,
+                    names=col_names,
+                    skiprows=skiprows,
+                    encoding=encoding
+                )
+                print(f"Successfully read with encoding: {encoding}")
+                break
+            except UnicodeDecodeError:
+                print(f"Failed with {encoding}, trying next...")
+                continue
+        
+        if telem_dat is None:
+            raise ValueError(f"Could not read file with any supported encoding: {encodings_to_try}")
+        
+        print(f"Fixed-width parsing complete. Shape: {telem_dat.shape}")
+        
+        # Build timestamp from Scan Date + Scan Time
+        telem_dat["time_stamp"] = pd.to_datetime(
+            telem_dat["Scan Date"] + " " + telem_dat["Scan Time"],
+            errors="coerce"
+        )
+        
+        # Use HEX Tag ID as freq_code
+        telem_dat["freq_code"] = telem_dat["HEX Tag ID"].str.strip()
+        
+        # For fixed-width, assign rec_id or map antennas if multi-antenna mapping provided
+        if ant_to_rec_dict is None:
+            telem_dat["rec_id"] = rec_id
+        else:
+            # try to find an antenna column in the fixed-width frame
+            antenna_col = None
+            for col in telem_dat.columns:
+                col_lower = str(col).lower().strip()
+                if col_lower in ('antenna id', 'antenna', 'ant', 'antennae', 'antennae id'):
+                    antenna_col = col
+                    break
+
+            if antenna_col is not None:
+                # extract numeric antenna identifier and map using provided dictionary
+                telem_dat['antenna_raw'] = telem_dat[antenna_col].astype(str).str.strip()
+                # Try numeric extraction first, then fall back to raw string mapping
+                telem_dat['antenna_num'] = telem_dat['antenna_raw'].str.extract(r'(\d+)')[0]
+                telem_dat['antenna_num'] = pd.to_numeric(telem_dat['antenna_num'], errors='coerce')
+
+                # Prepare mapping dict keys as strings and ints for robust lookup
+                ant_map = {}
+                for k, v in ant_to_rec_dict.items():
+                    try:
+                        ant_map[int(k)] = v
+                    except Exception:
+                        pass
+                    ant_map[str(k).strip()] = v
+
+                # Map by numeric antenna if possible, else by raw string
+                telem_dat['rec_id'] = telem_dat['antenna_num'].map(ant_map)
+                missing_mask = telem_dat['rec_id'].isna()
+                if missing_mask.any():
+                    # try mapping by raw string for missing ones
+                    telem_dat.loc[missing_mask, 'rec_id'] = telem_dat.loc[missing_mask, 'antenna_raw'].map(ant_map)
+
+                # report mapping summary for debugging
+                unique_antennas = telem_dat['antenna_raw'].unique()[:20]
+                print('Detected antenna values (sample):', unique_antennas)
+                mapped_counts = telem_dat['rec_id'].notna().sum()
+                print(f'Mapped {mapped_counts} / {len(telem_dat)} rows to receivers via ant_to_rec_dict')
+
+                # drop detections that do not map to a known receiver
+                telem_dat = telem_dat.dropna(subset=['rec_id'])
+            else:
+                raise ValueError('Multi-antenna fixed-width PIT file requires an antenna column but none was found')
+
+    # Data cleaning - remove invalid entries
+    print(f"\nCleaning data - original records: {len(telem_dat)}")
+    
+    before_cleanup = len(telem_dat)
+    
+    # Remove header artifacts
+    header_patterns = ['HEX Tag ID', 'DEC Tag ID', '----', '====', 'Tag ID', 'Scan Date']
+    for pattern in header_patterns:
+        telem_dat = telem_dat[telem_dat['freq_code'] != pattern]
+    
+    # Remove separator lines
+    telem_dat = telem_dat[~telem_dat['freq_code'].str.match(r'^-+$', na=False)]
+    
+    # Remove rows with invalid timestamps
+    telem_dat = telem_dat[~telem_dat['time_stamp'].isna()]
+    
+    # Remove rows with invalid freq_codes
+    telem_dat = telem_dat[telem_dat['freq_code'].str.len() > 3]
+    telem_dat = telem_dat[~telem_dat['freq_code'].isna()]
+    
+    # Finalize fields and append to HDF5 /raw_data
+    if len(telem_dat) == 0:
+        print('No valid PIT rows after cleaning; nothing to append')
+        return
+
+    # compute epoch as int64 seconds and other derived fields
+    telem_dat['epoch'] = (pd.to_datetime(telem_dat['time_stamp']).astype('int64') // 10**9).astype('int64')
+    telem_dat['channels'] = np.repeat(channels, len(telem_dat))
+    telem_dat['scan_time'] = np.repeat(scan_time, len(telem_dat))
+    telem_dat['rec_type'] = np.repeat(rec_type, len(telem_dat))
+
+    # compute noise ratio if study_tags provided
+    try:
+        telem_dat['noise_ratio'] = predictors.noise_ratio(5.0,
+                                                         telem_dat.freq_code.values,
+                                                         telem_dat.epoch.values,
+                                                         study_tags)
+    except Exception:
+        telem_dat['noise_ratio'] = np.repeat(np.nan, len(telem_dat))
+
+    # ensure dtypes
+    telem_dat = telem_dat.astype({'time_stamp': 'datetime64[ns]',
+                                  'epoch': 'int64',
+                                  'freq_code': 'object',
+                                  'rec_id': 'object',
+                                  'rec_type': 'object',
+                                  'scan_time': 'float32',
+                                  'channels': 'int32',
+                                  'noise_ratio': 'float32'})
+
+    # reorder columns to match expected schema
+    cols = ['time_stamp', 'epoch', 'freq_code', 'power', 'noise_ratio', 'scan_time', 'channels', 'rec_id', 'rec_type']
+    cols_existing = [c for c in cols if c in telem_dat.columns]
+
+    with pd.HDFStore(db_dir, mode='a') as store:
+        store.append(key='raw_data',
+                     value=telem_dat[cols_existing],
+                     format='table',
+                     index=False,
+                     min_itemsize={'freq_code': 20, 'rec_type': 20, 'rec_id': 20},
+                     append=True,
+                     chunksize=1000000,
+                     data_columns=True)
+
+        print('Store keys after append:', store.keys())
+
+
+def PIT_Multiple(
+    file_name,
+    db_dir,
+    study_tags=None,
+    skiprows=0,
+    scan_time=0,
+    channels=0,
+    rec_type="PIT_Multiple",
+    ant_to_rec_dict=None
+):
+    """
+    Import multi-antenna PIT array data into MAST HDF5 database.
+    
+    Parses detection files from PIT reader arrays with multiple antennas at
+    a single location. Handles antenna-to-receiver mapping and converts
+    multi-antenna detections to individual receiver records.
+    
+    Parameters
+    ----------
+    file_name : str
+        Absolute path to PIT array CSV file
+    db_dir : str
+        Absolute path to project HDF5 database
+    study_tags : list of str, optional
+        List of valid PIT tag IDs deployed in study
+    skiprows : int, optional
+        Number of header rows to skip (default: 0)
+    scan_time : float, optional
+        Not used for PIT readers (default: 0)
+    channels : int, optional
+        Not used for PIT readers (default: 0)
+    rec_type : str, optional
+        Reader type identifier (default: 'PIT_Multiple')
+    ant_to_rec_dict : dict, optional
+        Mapping of antenna IDs to receiver IDs (REQUIRED for multi-antenna arrays)
+    
+    Returns
+    -------
+    None
+        Data appended directly to HDF5 `/raw_data` table
+    
+    Notes
+    -----
+    - Designed for PIT arrays with multiple antennas at single location
+    - Uses ant_to_rec_dict to assign detections to virtual "receivers" per antenna
+    - Processes fish metadata (species, weight, length, capture method)
+    - Handles both decimal and hexadecimal tag formats
+    
+    Examples
+    --------
+    >>> ant_map = {
+    ...     'Antenna1': 'PIT_WEIR_DOWNSTREAM',
+    ...     'Antenna2': 'PIT_WEIR_UPSTREAM',
+    ...     'Antenna3': 'PIT_WEIR_LADDER'
+    ... }
+    >>> parsers.PIT_Multiple(
+    ...     file_name='C:/data/pit_array_detections.csv',
+    ...     db_dir='C:/project/pit_study.h5',
+    ...     study_tags=['3D9.1BF3C5A8B2'],
+    ...     rec_type='PIT_Multiple',
+    ...     ant_to_rec_dict=ant_map
+    ... )
+    
+    See Also
+    --------
+    PIT : Parser for single PIT readers
+    """
+    # Define column names based on the expected structure of the CSV
+    col_names = [
+        "FishId", "Tag1Dec", "Tag1Hex", "Tag2Dec", "Tag2Hex", "FloyTag", "RadioTag",
+        "Location", "Source", "FishSpecies", "TimeStamp", "Weight", "Length",
+        "Antennae", "Latitude", "Longitude", "SampleDate", "CaptureMethod",
+        "LocationDetail", "Type", "Recapture", "Sex", "GeneticSampleID", "Comments"
+    ]
+
+    # Read the CSV into a DataFrame, skipping rows if needed
+    telem_dat = pd.read_csv(file_name, names=col_names, header=0, skiprows=skiprows, dtype=str)
+
+    # Convert "TimeStamp" to datetime with explicit format
+    telem_dat["time_stamp"] = pd.to_datetime(telem_dat["TimeStamp"], format="%m/%d/%Y %H:%M", errors="coerce")
+
+    # Ensure "Tag1Dec" and "Tag1Hex" are treated as strings (avoid scientific notation issues)
+    telem_dat["Tag1Dec"] = telem_dat["Tag1Dec"].astype(str)
+    telem_dat["Tag1Hex"] = telem_dat["Tag1Hex"].astype(str)
+
+    # if after_cleanup == 0:
+    #     raise ValueError(f"No valid records found in {file_name}")
+
+    # Standardize columns
+    telem_dat["power"] = 0.0
+    telem_dat["noise_ratio"] = 0.0
+    telem_dat["scan_time"] = scan_time
+    telem_dat["channels"] = channels
+    telem_dat["rec_type"] = rec_type
+
+    # Calculate epoch time (seconds since 1970-01-01) as int64
+    # Use integer seconds to avoid float32 precision loss for large epoch values
+    # Ensure time_stamp has no NaT rows before converting
+    telem_dat = telem_dat[~telem_dat["time_stamp"].isna()].copy()
+    telem_dat["epoch"] = telem_dat["time_stamp"].astype('int64') // 10**9
+
+    # Convert to standard data types
+    telem_dat = telem_dat.astype({
+        "power": "float32",
+        "freq_code": "object",
+        "time_stamp": "datetime64[ns]",
+        "scan_time": "float32",
+        "channels": "int32",
+        "rec_type": "object",
+        "epoch": "int64",
+        "noise_ratio": "float32",
+        "rec_id": "object"
+    })
+
+    # Keep only standard columns
+    telem_dat = telem_dat[
+        ["power", "time_stamp", "epoch", "freq_code", "noise_ratio",
+         "scan_time", "channels", "rec_id", "rec_type"]
+    ]
+
+    # Append to HDF5 store
+    with pd.HDFStore(db_dir, mode='a') as store:
+        store.append(
+            key="raw_data",
+            value=telem_dat,
+            format="table",
+            index=False,
+            min_itemsize={"freq_code": 20, "rec_type": 20, "rec_id": 20},
+            append=True,
+            chunksize=1000000,
+            data_columns=True
+        )
+
+    print(f"\nSuccessfully parsed {file_name} and appended to {db_dir}!")
+    print(f"Imported {len(telem_dat)} records in {mode_str} mode")
+
+    with pd.HDFStore(db_dir, 'r') as store:
+        print("Store keys after append:", store.keys())
+
+
+
+
+
+ 
     
