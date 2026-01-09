@@ -46,6 +46,7 @@ Output/
 Figures/
 Data/Training_Files/
 Scratch/
+.ai_journal/
 
 # Keep example data structure but not actual data files
 !Data/.gitkeep

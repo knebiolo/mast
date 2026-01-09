@@ -529,6 +529,183 @@ class overlap_reduction:
     formatter.time_to_event : Uses overlap decisions for filtering
     """
 
+    def _rec_id_variants(self, node):
+        node_str = str(node)
+        variants = [node_str]
+        if node_str.startswith(('R', 'r')):
+            variants.append(node_str[1:])
+        variants.append(node_str.lstrip('0'))
+        variants.append(node_str.lstrip('R').lstrip('0'))
+        try:
+            variants.append(str(int(''.join(filter(str.isdigit, node_str)))))
+        except Exception:
+            pass
+        seen = set()
+        variants_clean = []
+        for v in variants:
+            if not v:
+                continue
+            if v not in seen:
+                seen.add(v)
+                variants_clean.append(v)
+        return variants_clean
+
+    def _read_presence(self, node, logger):
+        pres_where = f"rec_id == '{node}'"
+        used_full_presence_read = False
+        try:
+            pres_data = pd.read_hdf(
+                self.db,
+                'presence',
+                columns=['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id', 'bout_no'],
+                where=pres_where
+            )
+        except (TypeError, ValueError):
+            # Some stores are fixed-format and don't support column selection - read entire table
+            used_full_presence_read = True
+            pres_data = pd.read_hdf(self.db, 'presence')
+
+        if len(pres_data) == 0 and not used_full_presence_read:
+            for cand in self._rec_id_variants(node):
+                alt_where = f"rec_id == '{cand}'"
+                try:
+                    alt_pres = pd.read_hdf(
+                        self.db,
+                        'presence',
+                        columns=['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id', 'bout_no'],
+                        where=alt_where
+                    )
+                    if len(alt_pres) > 0:
+                        pres_data = alt_pres
+                        logger.info("Node %s: found %d presence rows using alternate WHERE rec_id == '%s'", node, len(pres_data), cand)
+                        break
+                except (TypeError, ValueError):
+                    logger.debug("Node %s: alternate WHERE '%s' not supported by store", node, alt_where)
+                    break
+                except Exception:
+                    logger.debug("Node %s: alternate WHERE '%s' did not match", node, alt_where)
+                    continue
+
+        return pres_data, pres_where, used_full_presence_read
+
+    def _read_recap(self, node):
+        classified_where = f"(rec_id == '{node}') & (test == 1)"
+        try:
+            recap_data = pd.read_hdf(
+                self.db,
+                'classified',
+                columns=['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id', 'iter', 'test', 'posterior_T', 'posterior_F'],
+                where=classified_where
+            )
+        except (KeyError, TypeError, ValueError):
+            # Fallback: read the whole classified table for the node
+            try:
+                recap_data = pd.read_hdf(self.db, 'classified')
+                recap_data = recap_data.query(classified_where)
+            except Exception:
+                # If classified isn't available, try recaptures
+                try:
+                    recap_data = pd.read_hdf(self.db, 'recaptures')
+                    recap_data = recap_data.query(f"rec_id == '{node}'")
+                except Exception:
+                    recap_data = pd.DataFrame()
+        recap_data = recap_data[recap_data['iter'] == recap_data['iter'].max()]
+        return recap_data
+
+    def _summarize_presence(self, node, pres_data, recap_data, pres_where, used_full_presence_read, logger):
+        # Ensure presence has a 'power' column by merging power from the
+        # classified/recaptures table when available. We don't change how
+        # presence is originally created (bouts), we only attach power here
+        # for downstream aggregation.
+        if 'power' not in pres_data.columns and not recap_data.empty and 'power' in recap_data.columns:
+            try:
+                pres_data = pres_data.merge(
+                    recap_data[['freq_code', 'epoch', 'rec_id', 'power']],
+                    on=['freq_code', 'epoch', 'rec_id'],
+                    how='left'
+                )
+            except Exception:
+                # If merge fails for any reason, continue without power -
+                # grouping will produce NaNs for median_power which is OK.
+                logger.debug('Could not merge power from recap_data into pres_data; continuing without power')
+
+        # Group presence data by frequency code and bout, then calculate min, max, and median power
+        # Check if power column exists first
+        if 'power' in pres_data.columns:
+            summarized_data = pres_data.groupby(['freq_code', 'bout_no', 'rec_id']).agg(
+                min_epoch=('epoch', 'min'),
+                max_epoch=('epoch', 'max'),
+                median_power=('power', 'median')
+            ).reset_index()
+        else:
+            logger.warning(f'Node {node}: Power column not found in presence data. Run bout detection first to populate power.')
+            summarized_data = pres_data.groupby(['freq_code', 'bout_no', 'rec_id']).agg(
+                min_epoch=('epoch', 'min'),
+                max_epoch=('epoch', 'max')
+            ).reset_index()
+            summarized_data['median_power'] = None
+
+        # Log detailed counts so users can see raw vs summarized presence lengths
+        raw_count = len(pres_data)
+        summarized_count = len(summarized_data)
+        logger.info(f"Node {node}: raw presence rows={raw_count}, summarized bouts={summarized_count}")
+
+        # If we had to read the full presence table, warn (this can be slow and surprising)
+        if used_full_presence_read:
+            logger.warning(
+                "Node %s: had to read entire 'presence' table (fixed-format store); this may be slow and cause large raw counts. WHERE used: %s",
+                node,
+                pres_where,
+            )
+
+        # If counts are zero or unexpectedly large, include a small sample and the WHERE clause to help debug
+        if raw_count == 0 or raw_count > 100000:
+            try:
+                sample_head = pres_data.head(10).to_dict(orient='list')
+            except Exception:
+                sample_head = '<unavailable>'
+            logger.debug(
+                "Node %s: pres_data sample (up to 10 rows)=%s; WHERE=%s",
+                node,
+                sample_head,
+                pres_where,
+            )
+
+        # If we got zero rows from the column/where read, try a safe in-memory
+        # fallback: read the full presence table and match rec_id after
+        # normalizing (strip/upper). This can detect formatting mismatches
+        # (e.g. numeric vs string rec_id, padding, whitespace).
+        if raw_count == 0 and not used_full_presence_read:
+            try:
+                logger.debug(
+                    "Node %s: attempting in-memory fallback full-table read to find rec_id matches",
+                    node,
+                )
+                full_pres = pd.read_hdf(self.db, 'presence')
+                if 'rec_id' in full_pres.columns:
+                    node_norm = str(node).strip().upper()
+                    full_pres['_rec_norm'] = full_pres['rec_id'].astype(str).str.strip().str.upper()
+                    candidate = full_pres[full_pres['_rec_norm'] == node_norm]
+                    if len(candidate) > 0:
+                        # select expected columns if present
+                        cols = [c for c in ['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id', 'bout_no'] if c in candidate.columns]
+                        pres_data = candidate[cols].copy()
+                        raw_count = len(pres_data)
+                        used_full_presence_read = True
+                        logger.info(
+                            "Node %s: found %d presence rows after in-memory normalization of rec_id",
+                            node,
+                            raw_count,
+                        )
+                    else:
+                        logger.debug("Node %s: in-memory full-table read did not find rec_id matches", node)
+                else:
+                    logger.debug("Node %s: 'rec_id' column not present in full presence table", node)
+            except Exception as e:
+                logger.debug("Node %s: in-memory fallback failed: %s", node, str(e))
+
+        return summarized_data, raw_count
+
     def __init__(self, nodes, edges, radio_project):
         """
         Initializes the OverlapReduction class.
@@ -558,195 +735,22 @@ class overlap_reduction:
         
         # Read and preprocess data for each node
         for node in tqdm(nodes, desc="Loading nodes", unit="node"):
-            # Read data from the HDF5 database for the given node, applying filters using the 'where' parameter
-            pres_where = f"rec_id == '{node}'"
-            used_full_presence_read = False
-            try:
-                pres_data = pd.read_hdf(
-                    self.db,
-                    'presence',
-                    columns=['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id', 'bout_no'],
-                    where=pres_where
-                )
-            except (TypeError, ValueError):
-                # Some stores are fixed-format and don't support column selection — read entire table
-                used_full_presence_read = True
-                pres_data = pd.read_hdf(self.db, 'presence')
-
-            # If we read zero rows, attempt a few fast alternate WHERE clauses that
-            # handle common formatting differences (e.g. 'R02' vs '2' vs '02') before
-            # performing a full-table in-memory fallback which is expensive.
-            if len(pres_data) == 0 and not used_full_presence_read:
-                tried_variants = []
-                node_str = str(node)
-                # generate candidate rec_id variants
-                variants = []
-                variants.append(node_str)
-                if node_str.startswith(('R', 'r')):
-                    variants.append(node_str[1:])
-                # strip leading zeros
-                variants.append(node_str.lstrip('0'))
-                variants.append(node_str.lstrip('R').lstrip('0'))
-                # numeric candidate
-                try:
-                    variants.append(str(int(''.join(filter(str.isdigit, node_str)))))
-                except Exception:
-                    pass
-                # dedupe while preserving order
-                seen = set()
-                variants_clean = []
-                for v in variants:
-                    if not v:
-                        continue
-                    if v not in seen:
-                        seen.add(v)
-                        variants_clean.append(v)
-
-                for cand in variants_clean:
-                    tried_variants.append(cand)
-                    alt_where = f"rec_id == '{cand}'"
-                    try:
-                        alt_pres = pd.read_hdf(
-                            self.db,
-                            'presence',
-                            columns=['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id', 'bout_no'],
-                            where=alt_where
-                        )
-                        if len(alt_pres) > 0:
-                            pres_data = alt_pres
-                            logger.info("Node %s: found %d presence rows using alternate WHERE rec_id == '%s'", node, len(pres_data), cand)
-                            break
-                    except (TypeError, ValueError):
-                        # column/where not supported on this store — give up trying alternates
-                        logger.debug("Node %s: alternate WHERE '%s' not supported by store", node, alt_where)
-                        break
-                    except Exception:
-                        # If this specific candidate failed, try the next
-                        logger.debug("Node %s: alternate WHERE '%s' did not match", node, alt_where)
-                        continue
-
-            classified_where = f"(rec_id == '{node}') & (test == 1)"
-            # Try to read classified with posterior columns if present
-            try:
-                recap_data = pd.read_hdf(
-                    self.db,
-                    'classified',
-                    columns=['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id', 'iter', 'test', 'posterior_T', 'posterior_F'],
-                    where=classified_where
-                )
-            except (KeyError, TypeError, ValueError):
-                # Fallback: read the whole classified table for the node
-                try:
-                    recap_data = pd.read_hdf(self.db, 'classified')
-                    recap_data = recap_data.query(classified_where)
-                except Exception:
-                    # If classified isn't available, try recaptures
-                    try:
-                        recap_data = pd.read_hdf(self.db, 'recaptures')
-                        recap_data = recap_data.query(f"rec_id == '{node}'")
-                    except Exception:
-                        recap_data = pd.DataFrame()
-        
-            # Further filter recap_data for the max iteration
-            recap_data = recap_data[recap_data['iter'] == recap_data['iter'].max()]
-
-            # Group presence data by frequency code and bout, then calculate min, max, and median
-            # Ensure presence has a 'power' column by merging power from the
-            # classified/recaptures table when available. We don't change how
-            # presence is originally created (bouts), we only attach power here
-            # for downstream aggregation.
-            if 'power' not in pres_data.columns and not recap_data.empty and 'power' in recap_data.columns:
-                try:
-                    pres_data = pres_data.merge(
-                        recap_data[['freq_code', 'epoch', 'rec_id', 'power']],
-                        on=['freq_code', 'epoch', 'rec_id'],
-                        how='left'
-                    )
-                except Exception:
-                    # If merge fails for any reason, continue without power —
-                    # grouping will produce NaNs for median_power which is OK.
-                    logger.debug('Could not merge power from recap_data into pres_data; continuing without power')
-
-            # Group presence data by frequency code and bout, then calculate min, max, and median power
-            # Check if power column exists first
-            if 'power' in pres_data.columns:
-                summarized_data = pres_data.groupby(['freq_code', 'bout_no', 'rec_id']).agg(
-                    min_epoch=('epoch', 'min'),
-                    max_epoch=('epoch', 'max'),
-                    median_power=('power', 'median')
-                ).reset_index()
-            else:
-                logger.warning(f'Node {node}: Power column not found in presence data. Run bout detection first to populate power.')
-                summarized_data = pres_data.groupby(['freq_code', 'bout_no', 'rec_id']).agg(
-                    min_epoch=('epoch', 'min'),
-                    max_epoch=('epoch', 'max')
-                ).reset_index()
-                summarized_data['median_power'] = None
-            
-            # Log detailed counts so users can see raw vs summarized presence lengths
-            raw_count = len(pres_data)
-            summarized_count = len(summarized_data)
-            logger.info(f"Node {node}: raw presence rows={raw_count}, summarized bouts={summarized_count}")
-
-            # If we had to read the full presence table, warn (this can be slow and surprising)
-            if used_full_presence_read:
-                logger.warning(
-                    "Node %s: had to read entire 'presence' table (fixed-format store); this may be slow and cause large raw counts. WHERE used: %s",
-                    node,
-                    pres_where,
-                )
-
-            # If counts are zero or unexpectedly large, include a small sample and the WHERE clause to help debug
-            if raw_count == 0 or raw_count > 100000:
-                try:
-                    sample_head = pres_data.head(10).to_dict(orient='list')
-                except Exception:
-                    sample_head = '<unavailable>'
-                logger.debug(
-                    "Node %s: pres_data sample (up to 10 rows)=%s; WHERE=%s",
-                    node,
-                    sample_head,
-                    pres_where,
-                )
-
-            # If we got zero rows from the column/where read, try a safe in-memory
-            # fallback: read the full presence table and match rec_id after
-            # normalizing (strip/upper). This can detect formatting mismatches
-            # (e.g. numeric vs string rec_id, padding, whitespace).
-            if raw_count == 0 and not used_full_presence_read:
-                try:
-                    logger.debug(
-                        "Node %s: attempting in-memory fallback full-table read to find rec_id matches",
-                        node,
-                    )
-                    full_pres = pd.read_hdf(self.db, 'presence')
-                    if 'rec_id' in full_pres.columns:
-                        node_norm = str(node).strip().upper()
-                        full_pres['_rec_norm'] = full_pres['rec_id'].astype(str).str.strip().str.upper()
-                        candidate = full_pres[full_pres['_rec_norm'] == node_norm]
-                        if len(candidate) > 0:
-                            # select expected columns if present
-                            cols = [c for c in ['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id', 'bout_no'] if c in candidate.columns]
-                            pres_data = candidate[cols].copy()
-                            raw_count = len(pres_data)
-                            used_full_presence_read = True
-                            logger.info(
-                                "Node %s: found %d presence rows after in-memory normalization of rec_id",
-                                node,
-                                raw_count,
-                            )
-                        else:
-                            logger.debug("Node %s: in-memory full-table read did not find rec_id matches", node)
-                    else:
-                        logger.debug("Node %s: 'rec_id' column not present in full presence table", node)
-                except Exception as e:
-                    logger.debug("Node %s: in-memory fallback failed: %s", node, str(e))
+            pres_data, pres_where, used_full_presence_read = self._read_presence(node, logger)
+            recap_data = self._read_recap(node)
+            summarized_data, raw_count = self._summarize_presence(
+                node,
+                pres_data,
+                recap_data,
+                pres_where,
+                used_full_presence_read,
+                logger
+            )
 
             # Store the processed data in the dictionaries
             self.node_pres_dict[node] = summarized_data
             # Don't store recap_data - load on-demand per edge (memory efficient)
             self.node_recap_dict[node] = len(recap_data)  # Just track count
-            logger.debug(f"  {node}: {len(pres_data)} presence records, {len(recap_data)} detections")
+            logger.debug(f"  {node}: {raw_count} presence records, {len(recap_data)} detections")
         
         logger.info(f"✓ Data loaded for {len(nodes)} nodes")
 

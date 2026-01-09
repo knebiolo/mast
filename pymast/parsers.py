@@ -1218,8 +1218,11 @@ def srx800(file_name,
             try:
                 telem_dat_sub['setup'] = get_setup(telem_dat_sub.epoch.values,
                                                    setup_df.epoch.values)
-            except:
-                print ('why you fail?')
+            except Exception as e:
+                raise ValueError(
+                    f"Failed to compute setup mapping for antenna '{ant}' at site '{site}'. "
+                    "Check setup table epoch alignment and input data integrity."
+                ) from e
             
             # get frequency from channel
             telem_dat_sub['Frequency'] = get_frequency(telem_dat_sub.setup.values,

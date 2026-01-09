@@ -9,9 +9,9 @@
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.8+-blue.svg" alt="Python 3.8+"/></a>
 </p>
 
-**PyMAST** (Movement Analysis Software for Telemetry) is a comprehensive Python toolkit for processing, analyzing, and modeling radio telemetry data. From data import to statistical model export, PyMAST provides a complete solution for aquatic telemetry studies.
+**PyMAST** (Movement Analysis Software for Telemetry) is a Python toolkit for processing, analyzing, and modeling radio telemetry data. From data import to statistical model export, PyMAST provides a complete solution for aquatic telemetry studies.
 
-## 🎯 Key Features
+## Key Features
 
 - **Multi-Manufacturer Support** - Import from Lotek (SRX600/800/1200), Orion, ARES, and VR2 receivers
 - **Automated Classification** - Naive Bayes classifier removes false positives
@@ -25,11 +25,9 @@
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
-**👉 New users: Start with [GETTING_STARTED.md](GETTING_STARTED.md) for a complete walkthrough!**
-
-**👉 New users: Start with [GETTING_STARTED.md](GETTING_STARTED.md) for a complete walkthrough!**
+**New users: Start with [GETTING_STARTED.md](GETTING_STARTED.md) for a complete walkthrough.**
 
 ### Installation
 
@@ -75,11 +73,11 @@ See [GETTING_STARTED.md](GETTING_STARTED.md) for complete workflows.
 
 ---
 
-## 📚 Documentation
+## Documentation
 
 | Document | Description |
 |----------|-------------|
-| **[GETTING_STARTED.md](GETTING_STARTED.md)** | 👈 **Start here!** Complete setup guide |
+| **[GETTING_STARTED.md](GETTING_STARTED.md)** | **Start here!** Complete setup guide |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | System design, database structure, workflow |
 | [docs/TUTORIAL.md](docs/TUTORIAL.md) | Step-by-step analysis examples |
 | [docs/API_REFERENCE.md](docs/API_REFERENCE.md) | Detailed function documentation |
@@ -92,39 +90,31 @@ All modules support Python's `help()` system:
 ```python
 import pymast
 help(pymast.parsers)              # Module overview
-help(pymast.overlap_removal.bout) # Class documentation  
+help(pymast.overlap_removal.bout) # Class documentation
 help(pymast.naive_bayes.calculate_likelihood)  # Function details
 ```
 
 ---
 
-## 🏗️ System Architecture
+## System Architecture
 
 ```
-Raw Receiver Files
-       ↓
-   [Parsers] → Import to HDF5
-       ↓
-   [Classification] → Remove false positives
-       ↓
-   [Recaptures] → Link detections to locations
-       ↓
-   [Bout Detection] → Identify presence periods
-       ↓
-   [Overlap Resolution] → Resolve spatial ambiguity
-       ↓
-   [Adjacency Filter] → Remove impossible movements
-       ↓
-   [Formatter] → Export CJS/LRDR/TTE
-       ↓
-Program MARK / R Analysis
+Raw receiver files
+  -> Parsers (HDF5 import)
+  -> Classification (false positive removal)
+  -> Recaptures (link detections to locations)
+  -> Bout detection (presence periods)
+  -> Overlap resolution (multi-receiver conflicts)
+  -> Adjacency filter (movement constraints)
+  -> Formatter (CJS/LRDR/TTE)
+  -> Program MARK / R analysis
 ```
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for details.
 
 ---
 
-## 📋 System Requirements
+## System Requirements
 
 - **Python**: 3.8 or higher
 - **RAM**: 8+ GB recommended for large datasets
@@ -201,21 +191,21 @@ When you create a project, MAST automatically creates this structure:
 
 ```
 your_project/
-├── Data/
-│   ├── tblMasterTag.csv
-│   ├── tblMasterReceiver.csv
-│   ├── tblNodes.csv
-│   └── Training_Files/
-│       └── [raw receiver files]
-├── Output/
-│   ├── Figures/
-│   └── recaptures.csv
-└── your_database.h5
+  Data/
+    tblMasterTag.csv
+    tblMasterReceiver.csv
+    tblNodes.csv
+    Training_Files/
+      [raw receiver files]
+  Output/
+    Figures/
+    recaptures.csv
+  your_database.h5
 ```
 
 ---
 
-## 🔬 Workflow Steps
+## Workflow Steps
 
 ### 1. Project Initialization
 
@@ -374,7 +364,7 @@ project.make_recaptures_table(export=True)
 
 ---
 
-## 📊 Statistical Data Formatting
+## Statistical Data Formatting
 
 ### Cormack-Jolly-Seber (CJS) Format
 
@@ -426,7 +416,7 @@ tte.to_csv(os.path.join(project.output_dir, 'time_to_event.csv'))
 
 ---
 
-## 🎨 Visualization
+## Visualization
 
 ### Fish Movement History
 
@@ -446,7 +436,7 @@ fh.fish_plot('164.123 45')
 
 ---
 
-## 🛠️ Supported Receiver Types
+## Supported Receiver Types
 
 | Manufacturer | Model           | Code       | Notes                           |
 |--------------|-----------------|------------|---------------------------------|
@@ -459,7 +449,7 @@ fh.fish_plot('164.123 45')
 
 ---
 
-## 🔬 Scientific Background
+## Scientific Background
 
 PyMAST implements validated algorithms for radio telemetry data processing, peer-reviewed and published in *Animal Biotelemetry*:
 
@@ -470,8 +460,8 @@ PyMAST implements validated algorithms for radio telemetry data processing, peer
 MAST uses a **Naive Bayes classifier** with the conditional independence assumption:
 
 ```
-P(True|X) ∝ P(True) × ∏ P(Xi|True)
-P(False|X) ∝ P(False) × ∏ P(Xi|False)
+P(True|X) = P(True) * P(Xi|True)
+P(False|X) = P(False) * P(Xi|False)
 ```
 
 Where X represents the vector of predictor variables. The classifier computes the posterior probability for each detection and classifies using the Maximum A Posteriori (MAP) hypothesis.
@@ -492,11 +482,11 @@ The knot locations determine threshold values for classifying detection gaps.
 
 Uses a **directed acyclic graph** (DAG) representing parent:child relationships between receivers. If a fish is present at a child receiver (small detection zone) while also detected at a parent receiver (large detection zone), the algorithm removes the overlapping parent detections.
 
-**Analogy:** Like nested Russian dolls - if you can place an object in the innermost doll, you know it's not in the outer dolls.
+**Analogy:** Like nested Russian dolls - if you can place an object in the innermost doll, you know it is not in the outer dolls.
 
 ---
 
-## 📖 Examples
+## Examples
 
 See the following for complete examples:
 
@@ -506,9 +496,9 @@ See the following for complete examples:
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+We welcome contributions. Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 **Quick Development Setup:**
 
@@ -523,7 +513,7 @@ pip install -e .
 
 ---
 
-## 📄 Citation
+## Citation
 
 If you use PyMAST in your research, please cite:
 
@@ -560,13 +550,13 @@ If you use PyMAST in your research, please cite:
 
 ---
 
-## 📝 License
+## License
 
 This project is licensed under the MIT License - see [LICENSE.txt](LICENSE.txt) for details.
 
 ---
 
-## 👥 Authors & Acknowledgments
+## Authors and Acknowledgments
 
 **Development Team:**
 - **Kevin P. Nebiolo** - Lead Developer (Kleinschmidt Associates)
@@ -581,7 +571,7 @@ This project is licensed under the MIT License - see [LICENSE.txt](LICENSE.txt) 
 
 ---
 
-## 🐛 Support
+## Support
 
 - **Issues**: [GitHub Issues](https://github.com/knebiolo/mast/issues)
 - **Email**: kevin.nebiolo@kleinschmidtgroup.com
@@ -589,7 +579,7 @@ This project is licensed under the MIT License - see [LICENSE.txt](LICENSE.txt) 
 
 ---
 
-## 📚 Additional Resources
+## Additional Resources
 
 - [HDF5 Documentation](https://www.hdfgroup.org/)
 - [Program MARK](http://www.phidot.org/software/mark/)
@@ -597,4 +587,4 @@ This project is licensed under the MIT License - see [LICENSE.txt](LICENSE.txt) 
 
 ---
 
-**Happy Fish Tracking! 🐟📡**
+Happy fish tracking!

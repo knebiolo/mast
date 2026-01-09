@@ -151,3 +151,50 @@ def test_power_method():
         assert not child_rows.empty
         assert (child_rows.overlapping == 1).all()
     td.cleanup()
+
+
+def test_posterior_ttest_path():
+    import tempfile
+    import os
+    td = tempfile.TemporaryDirectory()
+    path = os.path.join(td.name, 'proj5.h5')
+
+    parent_epochs = [100, 110, 120, 130, 140]
+    child_epochs = [105, 115, 125, 135, 145]
+    presence_parent = pd.DataFrame([
+        {'freq_code':'F5','epoch':e,'time_stamp':pd.Timestamp('2020-01-05T00:00:00') + pd.Timedelta(seconds=e),
+         'power':60.0,'rec_id':'R9','bout_no':1}
+        for e in parent_epochs
+    ])
+    presence_child = pd.DataFrame([
+        {'freq_code':'F5','epoch':e,'time_stamp':pd.Timestamp('2020-01-05T00:00:00') + pd.Timedelta(seconds=e),
+         'power':20.0,'rec_id':'R10','bout_no':1}
+        for e in child_epochs
+    ])
+
+    parent_post = [0.95, 0.94, 0.93, 0.96, 0.92]
+    child_post = [0.12, 0.10, 0.09, 0.11, 0.13]
+    classified_parent = pd.DataFrame([
+        {'freq_code':'F5','epoch':e,'time_stamp':pd.Timestamp('2020-01-05T00:00:00') + pd.Timedelta(seconds=e),
+         'power':60.0,'rec_id':'R9','iter':1,'test':1,'posterior_T':p}
+        for e, p in zip(parent_epochs, parent_post)
+    ])
+    classified_child = pd.DataFrame([
+        {'freq_code':'F5','epoch':e,'time_stamp':pd.Timestamp('2020-01-05T00:00:00') + pd.Timedelta(seconds=e),
+         'power':20.0,'rec_id':'R10','iter':1,'test':1,'posterior_T':p}
+        for e, p in zip(child_epochs, child_post)
+    ])
+
+    write_store(path, pd.concat([presence_parent, presence_child], ignore_index=True),
+                pd.concat([classified_parent, classified_child], ignore_index=True))
+
+    project = DummyProject(path)
+    ov = overlap_reduction(['R9','R10'], [('R9','R10')], project)
+    ov.unsupervised_removal(method='posterior', p_value_threshold=0.05, effect_size_threshold=0.3)
+
+    with pd.HDFStore(path, 'r') as store:
+        df = store['/overlapping'] if '/overlapping' in store.keys() else store['overlapping']
+        child_rows = df[df.rec_id == 'R10']
+        assert not child_rows.empty
+        assert (child_rows.overlapping == 1).all()
+    td.cleanup()
