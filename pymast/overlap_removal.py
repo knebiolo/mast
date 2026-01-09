@@ -706,6 +706,190 @@ class overlap_reduction:
 
         return summarized_data, raw_count
 
+    def _apply_posterior_decision(
+        self,
+        parent_dat,
+        child_dat,
+        p_indices,
+        c_indices,
+        p_power,
+        c_power,
+        min_detections,
+        p_value_threshold,
+        effect_size_threshold,
+        mean_diff_threshold,
+        decisions,
+        skip_reasons,
+        parent_mark_idx,
+        child_mark_idx,
+    ):
+        p_posteriors = parent_dat.loc[p_indices, 'posterior_T'].values if 'posterior_T' in parent_dat.columns else []
+        c_posteriors = child_dat.loc[c_indices, 'posterior_T'].values if 'posterior_T' in child_dat.columns else []
+
+        if len(p_posteriors) == 0 or len(c_posteriors) == 0:
+            decisions['keep_both'] += 1
+            skip_reasons['no_posterior_data'] += 1
+            return 0
+
+        p_posteriors = p_posteriors[~np.isnan(p_posteriors)]
+        c_posteriors = c_posteriors[~np.isnan(c_posteriors)]
+
+        if len(p_posteriors) < min_detections or len(c_posteriors) < min_detections:
+            decisions['keep_both'] += 1
+            skip_reasons['insufficient_after_nan'] += 1
+            return 0
+
+        t_stat, p_value = ttest_ind(p_posteriors, c_posteriors, equal_var=False)
+
+        mean_diff = np.mean(p_posteriors) - np.mean(c_posteriors)
+        n1, n2 = len(p_posteriors), len(c_posteriors)
+        var1, var2 = np.var(p_posteriors, ddof=1), np.var(c_posteriors, ddof=1)
+        pooled_std = np.sqrt(((n1-1)*var1 + (n2-1)*var2) / (n1+n2-2)) if (n1+n2-2) > 0 else 1.0
+        cohens_d = mean_diff / pooled_std if pooled_std > 0 else 0.0
+
+        if p_value < p_value_threshold and abs(cohens_d) >= effect_size_threshold:
+            if cohens_d > 0:
+                child_mark_idx.extend(c_indices)
+                decisions['remove_child'] += 1
+                return len(c_indices)
+            parent_mark_idx.extend(p_indices)
+            decisions['remove_parent'] += 1
+            return len(p_indices)
+
+        p_mean_posterior = np.mean(p_posteriors)
+        c_mean_posterior = np.mean(c_posteriors)
+
+        if not pd.isna(p_power) and not pd.isna(c_power) and (p_power + c_power) > 0:
+            p_norm_power = p_power / (p_power + c_power)
+            c_norm_power = c_power / (p_power + c_power)
+        else:
+            p_norm_power = c_norm_power = 0.5
+
+        p_score = 0.7 * p_mean_posterior + 0.3 * p_norm_power
+        c_score = 0.7 * c_mean_posterior + 0.3 * c_norm_power
+        if mean_diff_threshold is not None and abs(p_mean_posterior - c_mean_posterior) < mean_diff_threshold:
+            decisions['keep_both'] += 1
+            return 0
+        if p_score > c_score:
+            child_mark_idx.extend(c_indices)
+            decisions['remove_child'] += 1
+            return len(c_indices)
+        parent_mark_idx.extend(p_indices)
+        decisions['remove_parent'] += 1
+        return len(p_indices)
+
+    def _apply_power_decision(
+        self,
+        parent,
+        child,
+        p_indices,
+        c_indices,
+        p_power,
+        c_power,
+        p_posterior,
+        c_posterior,
+        power_threshold,
+        decisions,
+        parent_mark_idx,
+        child_mark_idx,
+        parent_ambiguous_idx,
+        child_ambiguous_idx,
+    ):
+        p_ambiguous = 0
+        c_ambiguous = 0
+
+        parent_rec = None
+        child_rec = None
+        try:
+            receivers = getattr(self.project, 'receivers', None)
+            if receivers is not None:
+                try:
+                    parent_rec = receivers.loc[parent]
+                except Exception:
+                    parent_rec = None
+                try:
+                    child_rec = receivers.loc[child]
+                except Exception:
+                    child_rec = None
+        except Exception:
+            parent_rec = None
+            child_rec = None
+
+        p_max = getattr(parent_rec, 'max_power', -40) if parent_rec is not None else -40
+        p_min = getattr(parent_rec, 'min_power', -100) if parent_rec is not None else -100
+        c_max = getattr(child_rec, 'max_power', -40) if child_rec is not None else -40
+        c_min = getattr(child_rec, 'min_power', -100) if child_rec is not None else -100
+
+        detections_added = 0
+        if pd.isna(p_power) or pd.isna(c_power):
+            if not pd.isna(p_posterior) and not pd.isna(c_posterior):
+                posterior_diff = p_posterior - c_posterior
+                if abs(posterior_diff) > 0.1:
+                    if posterior_diff > 0:
+                        child_mark_idx.extend(c_indices)
+                        decisions['remove_child'] += 1
+                        detections_added += len(c_indices)
+                    else:
+                        parent_mark_idx.extend(p_indices)
+                        decisions['remove_parent'] += 1
+                        detections_added += len(p_indices)
+                else:
+                    p_ambiguous = 1
+                    c_ambiguous = 1
+                    decisions['keep_both'] += 1
+            else:
+                p_ambiguous = 1
+                c_ambiguous = 1
+                decisions['keep_both'] += 1
+        else:
+            if parent_rec is None or child_rec is None:
+                denom = (p_power + c_power) if (p_power + c_power) != 0 else 1.0
+                p_norm = float(p_power) / denom
+                c_norm = float(c_power) / denom
+            else:
+                p_norm = (p_power - p_min) / (p_max - p_min) if (p_max - p_min) != 0 else 0.5
+                c_norm = (c_power - c_min) / (c_max - c_min) if (c_max - c_min) != 0 else 0.5
+
+            p_norm = max(0.0, min(1.0, p_norm))
+            c_norm = max(0.0, min(1.0, c_norm))
+            power_diff = p_norm - c_norm
+
+            if power_diff > power_threshold:
+                child_mark_idx.extend(c_indices)
+                decisions['remove_child'] += 1
+                detections_added += len(c_indices)
+            elif power_diff < -power_threshold:
+                parent_mark_idx.extend(p_indices)
+                decisions['remove_parent'] += 1
+                detections_added += len(p_indices)
+            else:
+                if not pd.isna(p_posterior) and not pd.isna(c_posterior):
+                    posterior_diff = p_posterior - c_posterior
+                    if abs(posterior_diff) > 0.1:
+                        if posterior_diff > 0:
+                            child_mark_idx.extend(c_indices)
+                            decisions['remove_child'] += 1
+                            detections_added += len(c_indices)
+                        else:
+                            parent_mark_idx.extend(p_indices)
+                            decisions['remove_parent'] += 1
+                            detections_added += len(p_indices)
+                    else:
+                        p_ambiguous = 1
+                        c_ambiguous = 1
+                        decisions['keep_both'] += 1
+                else:
+                    p_ambiguous = 1
+                    c_ambiguous = 1
+                    decisions['keep_both'] += 1
+
+        if p_ambiguous == 1:
+            parent_ambiguous_idx.extend(p_indices)
+        if c_ambiguous == 1:
+            child_ambiguous_idx.extend(c_indices)
+
+        return detections_added
+
     def __init__(self, nodes, edges, radio_project):
         """
         Initializes the OverlapReduction class.
@@ -1017,214 +1201,41 @@ class overlap_reduction:
                             continue
 
                         if method == 'posterior':
-                            # Statistical test approach: use t-test and Cohen's d on posterior_T
-                            # Get actual posterior_T values for both receivers
-                            p_posteriors = parent_dat.loc[p_indices, 'posterior_T'].values if 'posterior_T' in parent_dat.columns else []
-                            c_posteriors = child_dat.loc[c_indices, 'posterior_T'].values if 'posterior_T' in child_dat.columns else []
-                            
-                            # Validate we have data
-                            if len(p_posteriors) == 0 or len(c_posteriors) == 0:
-                                decisions['keep_both'] += 1
-                                skip_reasons['no_posterior_data'] += 1
-                                continue
-                            
-                            # Remove NaN values
-                            p_posteriors = p_posteriors[~np.isnan(p_posteriors)]
-                            c_posteriors = c_posteriors[~np.isnan(c_posteriors)]
-                            
-                            if len(p_posteriors) < min_detections or len(c_posteriors) < min_detections:
-                                decisions['keep_both'] += 1
-                                skip_reasons['insufficient_after_nan'] += 1
-                                continue
-                            
-                            # Perform Welch's t-test (unequal variances)
-                            t_stat, p_value = ttest_ind(p_posteriors, c_posteriors, equal_var=False)
-                            
-                            # Calculate Cohen's d effect size
-                            mean_diff = np.mean(p_posteriors) - np.mean(c_posteriors)
-                            n1, n2 = len(p_posteriors), len(c_posteriors)
-                            var1, var2 = np.var(p_posteriors, ddof=1), np.var(c_posteriors, ddof=1)
-                            pooled_std = np.sqrt(((n1-1)*var1 + (n2-1)*var2) / (n1+n2-2)) if (n1+n2-2) > 0 else 1.0
-                            cohens_d = mean_diff / pooled_std if pooled_std > 0 else 0.0
-                            
-                            # Decision: require BOTH statistical significance AND meaningful effect size
-                            if p_value < p_value_threshold and abs(cohens_d) >= effect_size_threshold:
-                                if cohens_d > 0:  # parent has significantly higher posterior_T
-                                    child_mark_idx.extend(c_indices)
-                                    decisions['remove_child'] += 1
-                                    detections_marked += len(c_indices)
-                                else:  # child has significantly higher posterior_T
-                                    parent_mark_idx.extend(p_indices)
-                                    decisions['remove_parent'] += 1
-                                    detections_marked += len(p_indices)
-                            else:
-                                # No significant difference - use combined score as tiebreaker
-                                # Weighted combination: 70% posterior_T (classifier confidence) + 30% normalized power
-                                # This accounts for both detection quality AND signal strength
-                                p_mean_posterior = np.mean(p_posteriors)
-                                c_mean_posterior = np.mean(c_posteriors)
-                                
-                                # Normalize power relative to each other (handles different receiver types)
-                                if not pd.isna(p_power) and not pd.isna(c_power) and (p_power + c_power) > 0:
-                                    p_norm_power = p_power / (p_power + c_power)
-                                    c_norm_power = c_power / (p_power + c_power)
-                                else:
-                                    # Power not available, use equal weights
-                                    p_norm_power = c_norm_power = 0.5
-                                
-                                # Combined score: 70% posterior_T, 30% power
-                                p_score = 0.7 * p_mean_posterior + 0.3 * p_norm_power
-                                c_score = 0.7 * c_mean_posterior + 0.3 * c_norm_power
-                                # If a small absolute posterior difference threshold was provided
-                                # (tests use `confidence_threshold` for this), prefer to keep both
-                                # when the posterior means are closer than that threshold.
-                                if mean_diff_threshold is not None and abs(p_mean_posterior - c_mean_posterior) < mean_diff_threshold:
-                                    decisions['keep_both'] += 1
-                                    continue
-                                if p_score > c_score:
-                                    child_mark_idx.extend(c_indices)
-                                    decisions['remove_child'] += 1
-                                    detections_marked += len(c_indices)
-                                else:
-                                    parent_mark_idx.extend(p_indices)
-                                    decisions['remove_parent'] += 1
-                                    detections_marked += len(p_indices)
-
+                            detections_marked += self._apply_posterior_decision(
+                                parent_dat,
+                                child_dat,
+                                p_indices,
+                                c_indices,
+                                p_power,
+                                c_power,
+                                min_detections,
+                                p_value_threshold,
+                                effect_size_threshold,
+                                mean_diff_threshold,
+                                decisions,
+                                skip_reasons,
+                                parent_mark_idx,
+                                child_mark_idx,
+                            )
                         elif method == 'power':
-                            # Hierarchical decision tree with normalized power, posterior
-                            # Step 1: Power → Step 2: Posterior → Step 3: Keep_both (ambiguous)
-                            
-                            # Initialize ambiguous flag for both bouts
-                            p_ambiguous = 0
-                            c_ambiguous = 0
-                            
-                            # Extract posterior from bout info
                             p_posterior = p_info.get('posterior', np.nan)
                             c_posterior = c_info.get('posterior', np.nan)
-                            
-                            # Get receiver info for power normalization. Tests may not provide
-                            # a `project.receivers` table (DummyProject), so guard access and
-                            # fall back to sensible defaults when missing.
-                            parent_rec = None
-                            child_rec = None
-                            try:
-                                receivers = getattr(self.project, 'receivers', None)
-                                if receivers is not None:
-                                    try:
-                                        parent_rec = receivers.loc[parent]
-                                    except Exception:
-                                        parent_rec = None
-                                    try:
-                                        child_rec = receivers.loc[child]
-                                    except Exception:
-                                        child_rec = None
-                            except Exception:
-                                parent_rec = None
-                                child_rec = None
-                            
-                            # Step 1: Normalized power comparison
-                            # Normalize: (power - min) / (max - min) where higher = stronger
-                            # Use reasonable defaults if receiver stats not available
-                            p_max = getattr(parent_rec, 'max_power', -40) if parent_rec is not None else -40
-                            p_min = getattr(parent_rec, 'min_power', -100) if parent_rec is not None else -100
-                            c_max = getattr(child_rec, 'max_power', -40) if child_rec is not None else -40
-                            c_min = getattr(child_rec, 'min_power', -100) if child_rec is not None else -100
-                            
-                            if pd.isna(p_power) or pd.isna(c_power):
-                                # Missing power data - try posterior
-                                if not pd.isna(p_posterior) and not pd.isna(c_posterior):
-                                    posterior_diff = p_posterior - c_posterior
-                                    if abs(posterior_diff) > 0.1:  # 10% difference in classification confidence
-                                        if posterior_diff > 0:
-                                            # Parent has higher confidence - remove child
-                                            child_mark_idx.extend(c_indices)
-                                            decisions['remove_child'] += 1
-                                            detections_marked += len(c_indices)
-                                        else:
-                                            # Child has higher confidence - remove parent
-                                            parent_mark_idx.extend(p_indices)
-                                            decisions['remove_parent'] += 1
-                                            detections_marked += len(p_indices)
-                                    else:
-                                        # Both power and posterior missing/ambiguous - keep both
-                                        p_ambiguous = 1
-                                        c_ambiguous = 1
-                                        decisions['keep_both'] += 1
-                                else:
-                                    # No data - keep both and mark as ambiguous
-                                    p_ambiguous = 1
-                                    c_ambiguous = 1
-                                    decisions['keep_both'] += 1
-                            else:
-                                # Normalize power to 0-1 scale (1 = strongest).
-                                # If receiver metadata is unavailable (parent_rec/child_rec is None)
-                                # fall back to a direct relative normalization using both powers.
-                                if parent_rec is None or child_rec is None:
-                                    denom = (p_power + c_power) if (p_power + c_power) != 0 else 1.0
-                                    p_norm = float(p_power) / denom
-                                    c_norm = float(c_power) / denom
-                                else:
-                                    p_norm = (p_power - p_min) / (p_max - p_min) if (p_max - p_min) != 0 else 0.5
-                                    c_norm = (c_power - c_min) / (c_max - c_min) if (c_max - c_min) != 0 else 0.5
-                                
-                                # Clamp to 0-1 range
-                                p_norm = max(0.0, min(1.0, p_norm))
-                                c_norm = max(0.0, min(1.0, c_norm))
-                                
-                                power_diff = p_norm - c_norm
-                                
-                                if power_diff > power_threshold:
-                                    # Parent significantly stronger - remove child
-                                    child_mark_idx.extend(c_indices)
-                                    decisions['remove_child'] += 1
-                                    detections_marked += len(c_indices)
-                                    # Clear decision, not ambiguous
-                                    p_ambiguous = 0
-                                    c_ambiguous = 0
-                                elif power_diff < -power_threshold:
-                                    # Child significantly stronger - remove parent
-                                    parent_mark_idx.extend(p_indices)
-                                    decisions['remove_parent'] += 1
-                                    detections_marked += len(p_indices)
-                                    # Clear decision, not ambiguous
-                                    p_ambiguous = 0
-                                    c_ambiguous = 0
-                                else:
-                                    # Power is ambiguous - try Step 2: Posterior_T
-                                    if not pd.isna(p_posterior) and not pd.isna(c_posterior):
-                                        posterior_diff = p_posterior - c_posterior
-                                        if abs(posterior_diff) > 0.1:  # 10% difference in classification confidence
-                                            if posterior_diff > 0:
-                                                # Parent has higher confidence - remove child
-                                                child_mark_idx.extend(c_indices)
-                                                decisions['remove_child'] += 1
-                                                detections_marked += len(c_indices)
-                                                p_ambiguous = 0
-                                                c_ambiguous = 0
-                                            else:
-                                                # Child has higher confidence - remove parent
-                                                parent_mark_idx.extend(p_indices)
-                                                decisions['remove_parent'] += 1
-                                                detections_marked += len(p_indices)
-                                                p_ambiguous = 0
-                                                c_ambiguous = 0
-                                        else:
-                                            # Both power and posterior ambiguous - keep both
-                                            p_ambiguous = 1
-                                            c_ambiguous = 1
-                                            decisions['keep_both'] += 1
-                                    else:
-                                        # No posterior data - keep both and mark as ambiguous
-                                        p_ambiguous = 1
-                                        c_ambiguous = 1
-                                        decisions['keep_both'] += 1
-                            
-                            # Store ambiguous flags in the dataframe
-                            if p_ambiguous == 1:
-                                parent_ambiguous_idx.extend(p_indices)
-                            if c_ambiguous == 1:
-                                child_ambiguous_idx.extend(c_indices)
-
+                            detections_marked += self._apply_power_decision(
+                                parent,
+                                child,
+                                p_indices,
+                                c_indices,
+                                p_power,
+                                c_power,
+                                p_posterior,
+                                c_posterior,
+                                power_threshold,
+                                decisions,
+                                parent_mark_idx,
+                                child_mark_idx,
+                                parent_ambiguous_idx,
+                                child_ambiguous_idx,
+                            )
                         else:
                             raise ValueError(f"Unknown method: {method}")
 

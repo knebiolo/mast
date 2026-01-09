@@ -84,6 +84,25 @@ import os
 import pymast.predictors as predictors
 import sys
 
+def _append_raw_data(db_dir, telem_dat, data_columns=None):
+    with pd.HDFStore(db_dir, mode='a') as store:
+        append_kwargs = {
+            'key': 'raw_data',
+            'value': telem_dat,
+            'format': 'table',
+            'index': False,
+            'min_itemsize': {
+                'freq_code': 20,
+                'rec_type': 20,
+                'rec_id': 20,
+            },
+            'append': True,
+            'chunksize': 1000000,
+        }
+        if data_columns is not None:
+            append_kwargs['data_columns'] = data_columns
+        store.append(**append_kwargs)
+
 def ares(file_name, 
                  db_dir, 
                  rec_id, 
@@ -220,16 +239,7 @@ def ares(file_name,
                                   'noise_ratio':'float32',
                                   'rec_id':'object'})
     
-    with pd.HDFStore(db_dir, mode='a') as store:
-        store.append(key = 'raw_data',
-                     value = telem_dat, 
-                     format = 'table', 
-                     index = False,
-                     min_itemsize = {'freq_code':20,
-                                     'rec_type':20,
-                                     'rec_id':20},
-                     append = True, 
-                     chunksize = 1000000)
+    _append_raw_data(db_dir, telem_dat)
 
 
 def orion_import(file_name, 
@@ -324,6 +334,32 @@ def orion_import(file_name,
         telem_dat['Freq'] = telem_dat['Freq'].apply(lambda x: f"{x:.3f}")
 
 
+    def _write_orion_subset(df, receiver_id, epoch_dtype):
+        df = df.copy()
+        df['rec_id'] = np.repeat(receiver_id, len(df))
+        df.drop(['Ant'], axis = 1, inplace = True)
+        df = df.astype({'power':'float32',
+                        'freq_code':'object',
+                        'time_stamp':'datetime64[ns]',
+                        'scan_time':'float32',
+                        'channels':'int32',
+                        'rec_type':'object',
+                        'epoch': epoch_dtype,
+                        'noise_ratio':'float32',
+                        'rec_id':'object'})
+
+        df = df[['power', 
+                 'time_stamp',
+                 'epoch',
+                 'freq_code',
+                 'noise_ratio',
+                 'scan_time',
+                 'channels', 
+                 'rec_id',
+                 'rec_type']]
+
+        _append_raw_data(db_dir, df, data_columns=True)
+
     if len(telem_dat) > 0:
         # add file name to data
         #['fileName'] = np.repeat(file_name,len(telem_dat))    #Note I'm going back here to the actual file name without the path.  Is that OK?  I prefer it, but it's a potential source of confusion
@@ -355,44 +391,7 @@ def orion_import(file_name,
             
             # if there is no antenna to receiver dictionary 
             if ant_to_rec_dict == None:
-                # drop the antenna column - we don't need it anymore
-                telem_dat.drop(['Ant'], axis = 1, inplace = True)
-                
-                # add receiver id 
-                telem_dat['rec_id'] = np.repeat(rec_id,len(telem_dat))
-
-                telem_dat = telem_dat.astype({'power':'float32',
-                                              'freq_code':'object',
-                                              'time_stamp':'datetime64[ns]',
-                                              'scan_time':'float32',
-                                              'channels':'int32',
-                                              'rec_type':'object',
-                                              'epoch':'int64',
-                                              'noise_ratio':'float32',
-                                              'rec_id':'object'})
-                
-                telem_dat = telem_dat[['power', 
-                                        'time_stamp',
-                                        'epoch',
-                                        'freq_code',
-                                        'noise_ratio',
-                                        'scan_time',
-                                        'channels', 
-                                        'rec_id',
-                                        'rec_type']]
-                
-                with pd.HDFStore(db_dir, mode='a') as store:
-                    store.append(key = 'raw_data',
-                                 value = telem_dat, 
-                                 format = 'table', 
-                                 index = False, 
-                                 min_itemsize = {'freq_code':20,
-                                                 'rec_type':20,
-                                                 'rec_id':20},
-                                 append = True, 
-                                 chunksize = 1000000,
-                                 data_columns = True)  
-                
+                _write_orion_subset(telem_dat, rec_id, 'int64')
             # if there is an antenna to receiver dictionary
             else:
                 for i in ant_to_rec_dict.keys():
@@ -401,44 +400,7 @@ def orion_import(file_name,
                     
                     # get telemetryt data associated with this site
                     telem_dat_sub = telem_dat[telem_dat.Ant == 1]
-                    
-                    # add receiver ID
-                    telem_dat_sub['rec_id'] = np.repeat(site,len(telem_dat_sub))
-                    
-                    # remove exctranneous columns
-                    telem_dat_sub.drop(['Ant'], axis = 1, inplace = True)
-                    
-                    telem_dat_sub = telem_dat_sub.astype({'power':'float32',
-                                                          'freq_code':'object',
-                                                          'time_stamp':'datetime64[ns]',
-                                                          'scan_time':'float32',
-                                                          'channels':'int32',
-                                                          'rec_type':'object',
-                                                          'epoch':'float32',
-                                                          'noise_ratio':'float32',
-                                                          'rec_id':'object'})
-                    
-                    telem_dat_sub = telem_dat_sub[['power',
-                                                   'time_stamp',
-                                                   'epoch', 
-                                                   'freq_code', 
-                                                   'noise_ratio',
-                                                   'scan_time', 
-                                                   'channels',
-                                                   'rec_id',
-                                                   'rec_type']]
-                    
-                    with pd.HDFStore(db_dir, mode='a') as store:
-                        store.append(key = 'raw_data',
-                                     value = telem_dat_sub, 
-                                     format = 'table', 
-                                     index = False, 
-                                     min_itemsize = {'freq_code':20,
-                                                     'rec_type':20,
-                                                     'rec_id':20},
-                                     append = True, 
-                                     chunksize = 1000000,
-                                     data_columns = True)  
+                    _write_orion_subset(telem_dat_sub, site, 'float32')
     else:
         raise ValueError("Invalid import parameters, no data returned")
         sys.exit()
@@ -530,16 +492,7 @@ def vr2_import(file_name,db_dir,study_tags, rec_id):
                           'noise_ratio':'float32',
                           'rec_id':'object'})
         
-        with pd.HDFStore(db_dir, mode='a') as store:
-            store.append(key = 'raw_data',
-                         value = telem_dat, 
-                         format = 'table', 
-                         index = False,
-                         min_itemsize = {'freq_code':20,
-                                         'rec_type':20,
-                                         'rec_id':20},
-                         append = True, 
-                         chunksize = 1000000)        
+        _append_raw_data(db_dir, telem_dat)
 
 def srx1200(file_name,
              db_dir,
@@ -832,18 +785,7 @@ def srx1200(file_name,
                                 'rec_id',
                                 'rec_type']]
         
-        # Write the DataFrame to the HDF5 file without the index
-        with pd.HDFStore(db_dir, mode='a') as store:
-            store.append(key='raw_data',
-                         value=telem_dat,
-                         format='table',
-                         index=False,  # Ensure index is not written
-                         min_itemsize={'freq_code': 20,
-                                       'rec_type': 20,
-                                       'rec_id': 20},
-                         append=True,
-                         chunksize=1000000,
-                         data_columns=True)
+        _append_raw_data(db_dir, telem_dat, data_columns=True)
         
     # if the data doesn't have a header
     else:
@@ -915,18 +857,7 @@ def srx1200(file_name,
                                 'rec_id',
                                 'rec_type']]
         
-        # Write the DataFrame to the HDF5 file without the index
-        with pd.HDFStore(db_dir, mode='a') as store:
-            store.append(key='raw_data',
-                         value=telem_dat,
-                         format='table',
-                         index=False,  # Ensure index is not written
-                         min_itemsize={'freq_code': 20,
-                                       'rec_type': 20,
-                                       'rec_id': 20},
-                         append=True,
-                         chunksize=1000000,
-                         data_columns=True)
+        _append_raw_data(db_dir, telem_dat, data_columns=True)
             
 def srx800(file_name,
              db_dir,
@@ -1555,17 +1486,7 @@ def srx600(file_name,
                                                       'noise_ratio':'float32',
                                                       'rec_id':'object'})
                 
-                with pd.HDFStore(db_dir, mode='a') as store:
-                    store.append(key = 'raw_data',
-                                 value = telem_dat_sub, 
-                                 format = 'table', 
-                                 index = False,
-                                 min_itemsize = {'freq_code':20,
-                                                 'rec_type':20,
-                                                 'rec_id':20},
-                                 append = True, 
-                                 chunksize = 1000000,
-                                 data_columns = True)    
+                _append_raw_data(db_dir, telem_dat_sub, data_columns=True)
     else:
         telem_dat = pd.read_fwf(file_name,
                                colspecs = [(0,9),(9,19),(19,29),(29,36),(36,44),(44,52)],
@@ -1630,17 +1551,7 @@ def srx600(file_name,
                                                       'noise_ratio':'float32',
                                                       'rec_id':'object'})
 
-                # write to SQL
-                with pd.HDFStore(db_dir, mode='a') as store:
-                    store.append(key = 'raw_data',
-                                 value = telem_dat_sub, 
-                                 format = 'table', 
-                                 index = False,
-                                 min_itemsize = {'freq_code':20,
-                                                 'rec_type':20,
-                                                 'rec_id':20},
-                                 append = True, 
-                                 chunksize = 1000000)
+                _append_raw_data(db_dir, telem_dat_sub)
     
     
     
@@ -2033,16 +1944,8 @@ def PIT(file_name,
     cols = ['time_stamp', 'epoch', 'freq_code', 'power', 'noise_ratio', 'scan_time', 'channels', 'rec_id', 'rec_type']
     cols_existing = [c for c in cols if c in telem_dat.columns]
 
+    _append_raw_data(db_dir, telem_dat[cols_existing], data_columns=True)
     with pd.HDFStore(db_dir, mode='a') as store:
-        store.append(key='raw_data',
-                     value=telem_dat[cols_existing],
-                     format='table',
-                     index=False,
-                     min_itemsize={'freq_code': 20, 'rec_type': 20, 'rec_id': 20},
-                     append=True,
-                     chunksize=1000000,
-                     data_columns=True)
-
         print('Store keys after append:', store.keys())
 
 
