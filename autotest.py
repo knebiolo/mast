@@ -35,19 +35,21 @@ def run_tests():
     
     # Check if pytest is installed
     try:
-        import pytest
-    except ImportError:
-        print("❌ pytest not found. Installing...")
-        subprocess.run([sys.executable, "-m", "pip", "install", "pytest", "pytest-cov"])
-        print("✅ pytest installed!\n")
-    
-    # Check if PyMAST is installed
+        import pytest  # noqa: F401
+    except ImportError as exc:
+        print("❌ pytest not found. Install it first:")
+        print("   python -m pip install pytest pytest-cov")
+        return 1
+
+    # Check if PyMAST is importable
     print("Checking PyMAST installation...")
-    result = subprocess.run([sys.executable, "-c", "import pymast"], capture_output=True)
-    if result.returncode != 0:
-        print("⚠️  PyMAST not installed in editable mode. Installing...")
-        subprocess.run([sys.executable, "-m", "pip", "install", "-e", "."])
-        print("✅ PyMAST installed!\n")
+    try:
+        import pymast  # noqa: F401
+    except ImportError as exc:
+        print("⚠️  PyMAST is not importable. Install it first:")
+        print("   python -m pip install -e .")
+        print("   # or: python -m pip install pymast")
+        return 1
     else:
         print("✅ PyMAST is installed\n")
     

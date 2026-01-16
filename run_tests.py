@@ -48,7 +48,7 @@ def run_command(cmd, verbose=False):
     if verbose:
         print(f"\n🚀 Running: {' '.join(cmd)}\n")
     
-    result = subprocess.run(cmd, shell=True)
+    result = subprocess.run(cmd, check=False)
     return result.returncode
 
 

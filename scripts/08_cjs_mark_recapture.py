@@ -11,15 +11,12 @@ import sys
 repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if repo_root not in sys.path:
     sys.path.insert(0, repo_root)
-print('DEBUG: sys.executable=', sys.executable)
-print('DEBUG: repo_root=', repo_root)
-print('DEBUG: sys.path[0]=', sys.path[0])
 from pymast.radio_project import radio_project
 from pymast import formatter
 import pandas as pd
 
 # Set up project
-project_dir = r"C:\Users\Kevin.Nebiolo\Desktop\Scotland KPN"
+project_dir = r"C:\path\to\your\project"  # UPDATE THIS
 db_name = 'Scotland_repacked'
 
 detection_count = 5

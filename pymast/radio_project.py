@@ -97,7 +97,7 @@ from matplotlib import rcParams
 from scipy import interpolate
 try:
     from tqdm import tqdm
-except Exception:
+except ImportError:
     def tqdm(iterable, **kwargs):
         return iterable
 import shutil
@@ -107,10 +107,9 @@ import dask.array as da
 try:
     from dask_ml.cluster import KMeans
     _KMEANS_IMPL = 'dask'
-except Exception:
+except ImportError:
     from sklearn.cluster import KMeans
     _KMEANS_IMPL = 'sklearn'
-warnings.filterwarnings("ignore")
 
 # Initialize logger
 logger = logging.getLogger('pymast.radio_project')

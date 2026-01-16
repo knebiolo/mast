@@ -1,4 +1,3 @@
-import runpy
 import sys
 from pathlib import Path
 
@@ -6,31 +5,16 @@ from pathlib import Path
 proj_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(proj_root))
 
-tests_path = Path(__file__).resolve().parent / 'test_overlap_unit.py'
-src = tests_path.read_text()
-ns = {}
-exec(compile(src, str(tests_path), 'exec'), ns)
 
-fns = [ns[name] for name in ['test_posterior_wins','test_ambiguous_keep_both','test_missing_posterior_raises','test_power_method']]
-failed = []
-for fn in fns:
+def main() -> int:
     try:
-        fn()
-        print(f'PASS: {fn.__name__}')
-    except AssertionError as e:
-        import traceback
-        print(f'FAIL: {fn.__name__} - {e}')
-        traceback.print_exc()
-        failed.append((fn.__name__, str(e)))
-    except Exception as e:
-        import traceback
-        print(f'ERROR: {fn.__name__} - {e}')
-        traceback.print_exc()
-        failed.append((fn.__name__, str(e)))
+        import pytest
+    except ImportError as exc:
+        raise SystemExit("pytest is required: python -m pip install pytest") from exc
 
-if not failed:
-    print('\nAll tests passed')
-else:
-    print('\nFailures:')
-    for name, msg in failed:
-        print(name, msg)
+    tests_path = Path(__file__).resolve().parent / "test_overlap_unit.py"
+    return pytest.main([str(tests_path)])
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

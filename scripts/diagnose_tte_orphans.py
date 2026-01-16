@@ -12,7 +12,7 @@ from pymast.radio_project import radio_project
 from pymast import formatter
 import pandas as pd
 
-project_dir = r"K:\Jobs\3671\014\Analysis\kpn_2025_12_04"
+project_dir = r"C:\path\to\your\project"  # UPDATE THIS
 db_name = 'thompson_2025_v3'
 
 detection_count = 5
