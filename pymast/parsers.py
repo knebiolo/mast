@@ -1147,9 +1147,11 @@ def srx800(file_name,
             
             # get setup number for every row
             try:
-                telem_dat_sub['setup'] = get_setup(telem_dat_sub.epoch.values,
-                                                   setup_df.epoch.values)
-            except Exception as e:
+                telem_dat_sub['setup'] = get_setup(
+                    telem_dat_sub.epoch.values,
+                    setup_df.epoch.values
+                )
+            except (ValueError, TypeError, IndexError) as e:
                 raise ValueError(
                     f"Failed to compute setup mapping for antenna '{ant}' at site '{site}'. "
                     "Check setup table epoch alignment and input data integrity."
@@ -1644,14 +1646,11 @@ def PIT(file_name,
         """Dynamically determine PIT file format and header structure"""
         with open(file_name, 'r') as file:
             lines = []
-            for i in range(20):  # Read first 20 lines to analyze format
-                try:
-                    line = file.readline()
-                    if not line:
-                        break
-                    lines.append(line.rstrip('\n'))
-                except:
+            for _ in range(20):  # Read first 20 lines to analyze format
+                line = file.readline()
+                if not line:
                     break
+                lines.append(line.rstrip('\n'))
         
         # Check if CSV format (look for commas in sample lines)
         csv_indicators = 0
@@ -1712,16 +1711,10 @@ def PIT(file_name,
             telem_dat = pd.read_csv(file_name, dtype=str)
             print(f"Auto-detected columns: {list(telem_dat.columns)}")
             
-        except Exception as e:
-            print(f"CSV auto-detection failed: {e}")
-            # Fallback to predefined column names
-            col_names = [
-                "FishId", "Tag1Dec", "Tag1Hex", "Tag2Dec", "Tag2Hex", "FloyTag", "RadioTag",
-                "Location", "Source", "FishSpecies", "TimeStamp", "Weight", "Length",
-                "Antennae", "Latitude", "Longitude", "SampleDate", "CaptureMethod",
-                "LocationDetail", "Type", "Recapture", "Sex", "GeneticSampleID", "Comments"
-            ]
-            telem_dat = pd.read_csv(file_name, names=col_names, header=0, skiprows=skiprows, dtype=str)
+        except (pd.errors.ParserError, UnicodeDecodeError, ValueError) as e:
+            raise ValueError(
+                f"CSV auto-detection failed for PIT file '{file_name}': {e}"
+            ) from e
 
         # Find timestamp column dynamically
         timestamp_col = find_column_by_patterns(telem_dat, ['timestamp', 'time stamp', 'date', 'scan date', 'detected'])
@@ -1739,7 +1732,7 @@ def PIT(file_name,
                     if not telem_dat["time_stamp"].isna().all():
                         print(f"Successfully parsed timestamps using format: {fmt or 'auto-detect'}")
                         break
-                except:
+                except (ValueError, TypeError) as e:
                     continue
         else:
             raise ValueError("Could not find timestamp column")
@@ -1783,13 +1776,10 @@ def PIT(file_name,
         with open(file_name, 'r') as file:
             header_lines = []
             for _ in range(max(skiprows, 10)):
-                try:
-                    line = file.readline()
-                    if not line:
-                        break
-                    header_lines.append(line.rstrip('\n'))
-                except:
+                line = file.readline()
+                if not line:
                     break
+                header_lines.append(line.rstrip('\n'))
             header_text = " ".join(header_lines).lower()
 
         # Define colspecs for different fixed-width formats
@@ -1866,11 +1856,10 @@ def PIT(file_name,
                 # Prepare mapping dict keys as strings and ints for robust lookup
                 ant_map = {}
                 for k, v in ant_to_rec_dict.items():
-                    try:
-                        ant_map[int(k)] = v
-                    except Exception:
-                        pass
-                    ant_map[str(k).strip()] = v
+                    key_str = str(k).strip()
+                    if key_str.isdigit():
+                        ant_map[int(key_str)] = v
+                    ant_map[key_str] = v
 
                 # Map by numeric antenna if possible, else by raw string
                 telem_dat['rec_id'] = telem_dat['antenna_num'].map(ant_map)
@@ -1915,6 +1904,9 @@ def PIT(file_name,
         print('No valid PIT rows after cleaning; nothing to append')
         return
 
+    if 'power' not in telem_dat.columns:
+        telem_dat['power'] = np.nan
+
     # compute epoch as int64 seconds and other derived fields
     telem_dat['epoch'] = (pd.to_datetime(telem_dat['time_stamp']).astype('int64') // 10**9).astype('int64')
     telem_dat['channels'] = np.repeat(channels, len(telem_dat))
@@ -1923,17 +1915,20 @@ def PIT(file_name,
 
     # compute noise ratio if study_tags provided
     try:
-        telem_dat['noise_ratio'] = predictors.noise_ratio(5.0,
-                                                         telem_dat.freq_code.values,
-                                                         telem_dat.epoch.values,
-                                                         study_tags)
-    except Exception:
-        telem_dat['noise_ratio'] = np.repeat(np.nan, len(telem_dat))
+        telem_dat['noise_ratio'] = predictors.noise_ratio(
+            5.0,
+            telem_dat.freq_code.values,
+            telem_dat.epoch.values,
+            study_tags
+        )
+    except (ValueError, TypeError, KeyError, IndexError) as e:
+        raise ValueError(f"Failed to compute noise_ratio for PIT data: {e}") from e
 
     # ensure dtypes
     telem_dat = telem_dat.astype({'time_stamp': 'datetime64[ns]',
                                   'epoch': 'int64',
                                   'freq_code': 'object',
+                                  'power': 'float32',
                                   'rec_id': 'object',
                                   'rec_type': 'object',
                                   'scan_time': 'float32',
@@ -2027,12 +2022,25 @@ def PIT_Multiple(
     # Read the CSV into a DataFrame, skipping rows if needed
     telem_dat = pd.read_csv(file_name, names=col_names, header=0, skiprows=skiprows, dtype=str)
 
+    mode_str = "multi-antenna"
+    if ant_to_rec_dict is None:
+        raise ValueError("ant_to_rec_dict is required for PIT_Multiple")
+
     # Convert "TimeStamp" to datetime with explicit format
     telem_dat["time_stamp"] = pd.to_datetime(telem_dat["TimeStamp"], format="%m/%d/%Y %H:%M", errors="coerce")
 
     # Ensure "Tag1Dec" and "Tag1Hex" are treated as strings (avoid scientific notation issues)
     telem_dat["Tag1Dec"] = telem_dat["Tag1Dec"].astype(str)
     telem_dat["Tag1Hex"] = telem_dat["Tag1Hex"].astype(str)
+
+    telem_dat["freq_code"] = telem_dat["Tag1Hex"].astype(str).str.strip()
+    antenna_raw = telem_dat["Antennae"].astype(str).str.strip()
+    antenna_num = pd.to_numeric(antenna_raw.str.extract(r"(\d+)")[0], errors="coerce")
+    rec_id = antenna_num.map(ant_to_rec_dict)
+    if rec_id.isna().any():
+        rec_id = rec_id.fillna(antenna_raw.map(ant_to_rec_dict))
+    telem_dat["rec_id"] = rec_id
+    telem_dat = telem_dat.dropna(subset=["rec_id"])
 
     # if after_cleanup == 0:
     #     raise ValueError(f"No valid records found in {file_name}")

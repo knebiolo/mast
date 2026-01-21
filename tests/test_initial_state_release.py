@@ -1,87 +1,85 @@
 """
-Test script for initial_state_release = True mode
-This should model movement from release (state 0) through all states
+Integration test for initial_state_release=True workflows.
+Requires a local project directory supplied via environment variable.
 """
 
-# import modules
+from pathlib import Path
 import os
 import sys
-sys.path.append(r"K:\Jobs\3671\014\Analysis\kpn_2025_10_01\mast")
-from pymast.radio_project import radio_project
-from pymast import formatter as formatter
-import pymast
+
 import pandas as pd
-import matplotlib.pyplot as plt
+import pytest
 
-#%% set up project
-project_dir = r"K:\Jobs\3671\014\Analysis\kpn_2025_10_01"
-db_name = 'thompson_2025'
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-detection_count = 5
-duration = 1
-tag_data = pd.read_csv(os.path.join(project_dir,'tblMasterTag.csv'))
-receiver_data = pd.read_csv(os.path.join(project_dir,'tblMasterReceiver.csv'))
-nodes_data = pd.read_csv(os.path.join(project_dir,'tblNodes.csv'))
+from pymast.radio_project import radio_project
+from pymast import formatter
 
-# create a project
-project = radio_project(project_dir,
-                        db_name,
-                        detection_count,
-                        duration,
-                        tag_data,
-                        receiver_data,
-                        nodes_data)
+PROJECT_ENV = "PYMAST_TEST_PROJECT_DIR"
+PROJECT_DIR = os.environ.get(PROJECT_ENV)
 
-#%% create Time to Event Model with initial_state_release = True
-    
-# what is the Node to State relationship - use Python dictionary
-states = {'R1696':1,
-          'R1699-1':2,
-          'R1699-2':3,
-          'R1698':4,
-          'R1699-3':5,
-          'R1695':5,
-          'R0004':6,
-          'R0005':6,
-          'R0001':7,
-          'R0002':7,
-          'R0003':8}
+if not PROJECT_DIR:
+    pytest.skip(f"Set {PROJECT_ENV} to run initial_state_release tests.", allow_module_level=True)
 
-print("=== TESTING initial_state_release = True ===")
-print("This should model movement from release (state 0) through all states\n")
+PROJECT_PATH = Path(PROJECT_DIR)
+if not PROJECT_PATH.exists():
+    pytest.skip(f"{PROJECT_ENV} points to missing path: {PROJECT_PATH}", allow_module_level=True)
 
-# Step 1, create time to event data class with initial_state_release = True
-tte = formatter.time_to_event(states,
-                              project,
-                              initial_state_release = True,  # Changed to True
-                              last_presence_time0 = False,
-                              cap_loc = None,
-                              rel_loc = None,
-                              species = None,
-                              rel_date = None,
-                              recap_date = None)
 
-# Step 2, format data - without covariates
-tte.data_prep(project)
-# Step 3, generate a summary
-stats = tte.summary()
+def _require_file(path):
+    if not path.exists():
+        pytest.skip(f"Missing required project file: {path}", allow_module_level=True)
 
-#Print off dataframes of the Movement Summary, State Table, Tailrace Table
-# ensure Spyder prints every column
-pd.set_option('display.max_columns', None)
-pd.set_option('display.width', None)
 
-out = os.path.join(project_dir, "Output")
-df_movement_summary = pd.read_csv(os.path.join(out, "movement_summary.csv"))
-df_state_table      = pd.read_csv(os.path.join(out, "state_table.csv"))
+def test_initial_state_release_flow():
+    _require_file(PROJECT_PATH / "tblMasterTag.csv")
+    _require_file(PROJECT_PATH / "tblMasterReceiver.csv")
+    _require_file(PROJECT_PATH / "tblNodes.csv")
 
-# --- print to console ---
-print("=== Movement Summary (initial_state_release = True) ===")
-print(df_movement_summary, "\n")  
+    tag_data = pd.read_csv(PROJECT_PATH / "tblMasterTag.csv")
+    receiver_data = pd.read_csv(PROJECT_PATH / "tblMasterReceiver.csv")
+    nodes_data = pd.read_csv(PROJECT_PATH / "tblNodes.csv")
 
-print("=== State Table (initial_state_release = True) ===")
-print(df_state_table, "\n")
+    project = radio_project(
+        str(PROJECT_PATH),
+        os.environ.get("PYMAST_TEST_DB_NAME", "pymast_test"),
+        5,
+        1,
+        tag_data,
+        receiver_data,
+        nodes_data,
+    )
 
-print("=== Fish Count Comparison ===")
-print(f"Total unique fish in this model: {len(tte.recap_data.freq_code.unique())}")
-print(f"Fish that started from release (state 0): {len(tte.recap_data[tte.recap_data.state == 0].freq_code.unique())}")
+    states = {
+        "R1696": 1,
+        "R1699-1": 2,
+        "R1699-2": 3,
+        "R1698": 4,
+        "R1699-3": 5,
+        "R1695": 5,
+        "R0004": 6,
+        "R0005": 6,
+        "R0001": 7,
+        "R0002": 7,
+        "R0003": 8,
+    }
+
+    tte = formatter.time_to_event(
+        states,
+        project,
+        initial_state_release=True,
+        last_presence_time0=False,
+        cap_loc=None,
+        rel_loc=None,
+        species=None,
+        rel_date=None,
+        recap_date=None,
+    )
+
+    tte.data_prep(project)
+    summary = tte.summary()
+
+    assert not tte.master_state_table.empty
+    assert "unique_fish_count" in summary

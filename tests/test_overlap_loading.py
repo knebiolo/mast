@@ -1,18 +1,19 @@
 import pandas as pd
 import pytest
-
+import os
+from pathlib import Path
 from pymast.overlap_removal import overlap_reduction
-
 
 class DummyProject:
     def __init__(self, db):
         self.db = db
 
-
 @pytest.mark.unit
 @pytest.mark.overlap
-def test_overlap_loading_summarizes_presence(tmp_path):
-    db_path = tmp_path / "overlap_loading.h5"
+def test_overlap_loading_summarizes_presence():
+    temp_dir = Path(".pytest_cache")
+    temp_dir.mkdir(exist_ok=True)
+    db_path = temp_dir / "overlap_loading.h5"
 
     presence = pd.DataFrame([
         {

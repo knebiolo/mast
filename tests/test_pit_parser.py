@@ -1,53 +1,54 @@
 """
-Test script for improved PIT parsers
+Tests for PIT parsers that require local data files.
 """
 
+from pathlib import Path
 import os
 import sys
-sys.path.append(r"K:\Jobs\3671\014\Analysis\kpn_2025_10_01\mast")
-from pymast import parsers
+
 import pandas as pd
+import pytest
 
-# Test file path
-test_file = r"K:\Jobs\3671\014\Data\FieldData\QC1\2025_TFalls_SubmersibleData_NWE_Received 250917\Submersible Antenna 1695 QC.QA Data 2025.txt"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-# Set up test parameters
-project_dir = r"K:\Jobs\3671\014\Analysis\kpn_2025_10_01"
-db_name = 'thompson_2025'
-db_dir = os.path.join(project_dir, f'{db_name}.h5')
-rec_id = 'R1695'
-study_tags = []  # Empty for now
+from pymast import parsers
 
-print("=== Testing Improved PIT Parser ===")
-print(f"File: {test_file}")
-print(f"Database: {db_dir}")
-print(f"Receiver ID: {rec_id}")
+PIT_ENV = "PYMAST_TEST_PIT_FILE"
+PIT_FILE = os.environ.get(PIT_ENV)
+
+if not PIT_FILE:
+    pytest.skip(f"Set {PIT_ENV} to run PIT parser tests.", allow_module_level=True)
+
+PIT_PATH = Path(PIT_FILE)
+if not PIT_PATH.exists():
+    pytest.skip(f"{PIT_ENV} points to missing file: {PIT_PATH}", allow_module_level=True)
+
+REC_ID = os.environ.get("PYMAST_TEST_PIT_REC_ID", "R0001")
 
 try:
-    # Test the PIT parser
-    parsers.PIT(file_name=test_file,
-                db_dir=db_dir,
-                rec_id=rec_id,
-                study_tags=study_tags,
-                skiprows=6,  # Starting guess
-                scan_time=1,
-                channels=1,
-                rec_type="PIT")
-    
-    print("\n✅ PIT parser completed successfully!")
-    
-    # Read back the data to verify
-    with pd.HDFStore(db_dir, 'r') as store:
-        if 'raw_data' in store:
-            raw_data = store['raw_data']
-            pit_data = raw_data[raw_data.rec_id == rec_id]
-            print(f"\n📊 Imported {len(pit_data)} PIT records for {rec_id}")
-            print("Sample records:")
-            print(pit_data[['time_stamp', 'freq_code', 'rec_id']].head())
-        else:
-            print("⚠️ No raw_data table found in database")
+    SKIPROWS = int(os.environ.get("PYMAST_TEST_PIT_SKIPROWS", "6"))
+except ValueError as exc:
+    raise ValueError("PYMAST_TEST_PIT_SKIPROWS must be an integer") from exc
 
-except Exception as e:
-    print(f"❌ Error: {e}")
-    import traceback
-    traceback.print_exc()
+
+def test_pit_parser(tmp_path):
+    test_db = tmp_path / "pit_parser_test.h5"
+
+    parsers.PIT(
+        file_name=str(PIT_PATH),
+        db_dir=str(test_db),
+        rec_id=REC_ID,
+        study_tags=[],
+        skiprows=SKIPROWS,
+        scan_time=1,
+        channels=1,
+        rec_type="PIT",
+    )
+
+    with pd.HDFStore(test_db, "r") as store:
+        assert "/raw_data" in store.keys()
+        data = store["raw_data"]
+    assert not data.empty
+    assert (data["rec_id"] == REC_ID).any()

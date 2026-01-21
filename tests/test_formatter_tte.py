@@ -1,19 +1,19 @@
+import os
+from pathlib import Path
 import pandas as pd
 import pytest
-
 from pymast.formatter import time_to_event
-
 
 class DummyProject:
     def __init__(self, db, tags):
         self.db = db
         self.tags = tags
 
-
 @pytest.mark.unit
-def test_tte_adjacency_filter_removes_illegal_transition(tmp_path):
-    db_path = tmp_path / "tte_recap.h5"
-
+def test_tte_adjacency_filter_removes_illegal_transition():
+    temp_dir = Path(".pytest_cache")
+    temp_dir.mkdir(exist_ok=True)
+    db_path = temp_dir / "tte_recap.h5"
     recaptures = pd.DataFrame([
         {
             "freq_code": "F1",

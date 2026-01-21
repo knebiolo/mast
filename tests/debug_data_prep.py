@@ -4,13 +4,19 @@ Debug script to trace exactly what happens during data_prep for state 0 transiti
 
 import os
 import sys
-sys.path.append(r"K:\Jobs\3671\014\Analysis\kpn_2025_10_01\mast")
+from pathlib import Path
+
+repo_root = Path(__file__).resolve().parents[1]
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
 from pymast.radio_project import radio_project
 from pymast import formatter as formatter
 import pandas as pd
 
 # Set up project
-project_dir = r"K:\Jobs\3671\014\Analysis\kpn_2025_10_01"
+project_dir = os.environ.get("PYMAST_DEBUG_PROJECT_DIR", r"C:\path\to\your\project")
+if project_dir == r"C:\path\to\your\project":
+    raise RuntimeError("Set PYMAST_DEBUG_PROJECT_DIR to run this debug script.")
 db_name = 'thompson_2025'
 
 detection_count = 5

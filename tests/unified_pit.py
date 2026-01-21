@@ -43,16 +43,16 @@ def PIT(file_name,
     # First, analyze the file to determine format
     def analyze_file_format(file_name):
         """Dynamically determine PIT file format and header structure"""
-        with open(file_name, 'r') as file:
-            lines = []
-            for i in range(20):  # Read first 20 lines to analyze format
-                try:
+        lines = []
+        try:
+            with open(file_name, 'r') as file:
+                for _ in range(20):  # Read first 20 lines to analyze format
                     line = file.readline()
                     if not line:
                         break
                     lines.append(line.rstrip('\n'))
-                except:
-                    break
+        except (OSError, UnicodeDecodeError) as exc:
+            raise RuntimeError(f"Failed to read PIT header from {file_name}: {exc}") from exc
         
         # Check if CSV format (look for commas in sample lines)
         csv_indicators = 0
@@ -109,17 +109,8 @@ def PIT(file_name,
             # Read CSV with auto-detection
             telem_dat = pd.read_csv(file_name, skiprows=skiprows, dtype=str)
             print(f"Auto-detected columns: {list(telem_dat.columns)}")
-            
-        except Exception as e:
-            print(f"CSV auto-detection failed: {e}")
-            # Fallback to predefined column names
-            col_names = [
-                "FishId", "Tag1Dec", "Tag1Hex", "Tag2Dec", "Tag2Hex", "FloyTag", "RadioTag",
-                "Location", "Source", "FishSpecies", "TimeStamp", "Weight", "Length",
-                "Antennae", "Latitude", "Longitude", "SampleDate", "CaptureMethod",
-                "LocationDetail", "Type", "Recapture", "Sex", "GeneticSampleID", "Comments"
-            ]
-            telem_dat = pd.read_csv(file_name, names=col_names, header=0, skiprows=skiprows, dtype=str)
+        except (OSError, UnicodeDecodeError, pd.errors.ParserError, ValueError) as exc:
+            raise RuntimeError(f"CSV auto-detection failed for {file_name}: {exc}") from exc
 
         # Find timestamp column dynamically
         timestamp_col = find_column_by_patterns(telem_dat, ['timestamp', 'time stamp', 'date', 'scan date', 'detected'])
@@ -127,18 +118,19 @@ def PIT(file_name,
             print(f"Found timestamp column: {timestamp_col}")
             # Try multiple datetime formats
             for fmt in ["%m/%d/%Y %H:%M", "%Y-%m-%d %H:%M:%S", "%m/%d/%Y", "%Y-%m-%d", None]:
-                try:
-                    if fmt:
-                        telem_dat["time_stamp"] = pd.to_datetime(telem_dat[timestamp_col], format=fmt, errors="coerce")
-                    else:
-                        telem_dat["time_stamp"] = pd.to_datetime(telem_dat[timestamp_col], errors="coerce")
-                    
-                    # Check if parsing was successful
-                    if not telem_dat["time_stamp"].isna().all():
-                        print(f"Successfully parsed timestamps using format: {fmt or 'auto-detect'}")
-                        break
-                except:
-                    continue
+                if fmt:
+                    telem_dat["time_stamp"] = pd.to_datetime(telem_dat[timestamp_col], format=fmt, errors="coerce")
+                else:
+                    telem_dat["time_stamp"] = pd.to_datetime(telem_dat[timestamp_col], errors="coerce")
+
+                # Check if parsing was successful
+                if not telem_dat["time_stamp"].isna().all():
+                    print(f"Successfully parsed timestamps using format: {fmt or 'auto-detect'}")
+                    break
+            if telem_dat["time_stamp"].isna().all():
+                raise ValueError(
+                    f"Failed to parse timestamps from column '{timestamp_col}' in {file_name}."
+                )
         else:
             raise ValueError("Could not find timestamp column")
 
@@ -176,17 +168,17 @@ def PIT(file_name,
         # Fixed-Width Format Parsing (original logic)
         
         # Read header information for format detection
-        with open(file_name, 'r') as file:
-            header_lines = []
-            for _ in range(max(skiprows, 10)):
-                try:
+        header_lines = []
+        try:
+            with open(file_name, 'r') as file:
+                for _ in range(max(skiprows, 10)):
                     line = file.readline()
                     if not line:
                         break
                     header_lines.append(line.rstrip('\n'))
-                except:
-                    break
-            header_text = " ".join(header_lines).lower()
+        except (OSError, UnicodeDecodeError) as exc:
+            raise RuntimeError(f"Failed to read PIT fixed-width header from {file_name}: {exc}") from exc
+        header_text = " ".join(header_lines).lower()
 
         # Define colspecs for different fixed-width formats
         if 'latitude' in header_text or 'longitude' in header_text:

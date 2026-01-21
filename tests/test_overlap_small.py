@@ -1,5 +1,8 @@
 import sys
-sys.path.insert(0, r'c:\Users\Kevin.Nebiolo\OneDrive - Kleinschmidt Associates\Software\mast')
+from pathlib import Path
+
+repo_root = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(repo_root))
 import pandas as pd
 import numpy as np
 from pymast.overlap_removal import overlap_reduction
@@ -7,10 +10,15 @@ from pymast.overlap_removal import overlap_reduction
 # Build a fake overlap_reduction object without calling __init__
 obj = overlap_reduction.__new__(overlap_reduction)
 
+import tempfile
 # minimal attributes
 obj.edges = [('R1','R2')]
 obj.nodes = ['R1','R2']
 obj.G = None
+# Assign a temporary HDF5 file for db attribute
+tmp_h5 = tempfile.NamedTemporaryFile(suffix='.h5', delete=False)
+obj.db = tmp_h5.name
+del tmp_h5
 
 # Presence dict: parent R1 has one bout for fish 'F1' between epoch 100 and 200
 obj.node_pres_dict = {

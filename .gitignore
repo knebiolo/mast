@@ -47,6 +47,7 @@ Figures/
 Data/Training_Files/
 Scratch/
 .ai_journal/
+.archive/
 docs/client/
 
 # Keep example data structure but not actual data files

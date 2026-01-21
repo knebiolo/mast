@@ -1,12 +1,11 @@
+import os
+from pathlib import Path
 import pandas as pd
 import pytest
-
 from pymast import parsers
-
 
 def _write_file(path, lines):
     path.write_text("\n".join(lines), encoding="utf-8")
-
 
 def _fixed_width_line(colspecs, values):
     line_length = max(end for _, end in colspecs)
@@ -16,12 +15,6 @@ def _fixed_width_line(colspecs, values):
         text = text[: end - start].ljust(end - start)
         buf[start:end] = list(text)
     return "".join(buf).rstrip()
-
-
-@pytest.mark.unit
-def test_ares_parser_basic(tmp_path):
-    file_path = tmp_path / "ares.csv"
-    db_path = tmp_path / "ares.h5"
 
     header = (
         "Date,Time,RxID,Freq,Antenna,Protocol,Code,Power,Squelch,Noise Level,"
@@ -53,9 +46,15 @@ def test_ares_parser_basic(tmp_path):
 
 
 @pytest.mark.unit
-def test_orion_parser_with_type_header(tmp_path):
-    file_path = tmp_path / "orion.txt"
-    db_path = tmp_path / "orion.h5"
+def test_orion_parser_with_type_header():
+    temp_dir = Path(".pytest_cache")
+    temp_dir.mkdir(exist_ok=True)
+
+    file_path = temp_dir / "orion.txt"
+    db_path = temp_dir / "orion.h5"
+    # Ensure a clean HDF5 file for each test run
+    if db_path.exists():
+        db_path.unlink()
 
     header = "Date Time Site Ant Freq Type Code power"
     colspecs = [(0, 12), (13, 23), (24, 30), (31, 35), (36, 45), (46, 54), (55, 60), (61, 65)]

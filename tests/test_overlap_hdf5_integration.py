@@ -1,21 +1,21 @@
 import logging
-
 import pandas as pd
 import pytest
-
+import os
+from pathlib import Path
 from pymast.overlap_removal import overlap_reduction
 
 logging.basicConfig(level=logging.DEBUG)
-
 
 class DummyProject:
     def __init__(self, db):
         self.db = db
 
-
 @pytest.mark.integration
-def test_overlap_hdf5_integration(tmp_path):
-    path = tmp_path / "overlap_integration.h5"
+def test_overlap_hdf5_integration():
+    temp_dir = Path(".pytest_cache")
+    temp_dir.mkdir(exist_ok=True)
+    path = temp_dir / "overlap_integration.h5"
 
     # presence table: parent R1 has a bout for F1 from epoch 100-200
     presence = pd.DataFrame([
