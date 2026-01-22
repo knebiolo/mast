@@ -58,7 +58,16 @@ states = {'R1699-3':5,
           'R0003':8}
                                    
 # Step 1: Create time to event data class 
-g
+tte = formatter.time_to_event(upstream_states,
+                              project,
+                              initial_state_release = True,
+                              last_presence_time0 = False,
+                              hit_ratio_filter = False,
+                              cap_loc = None,
+                              rel_loc = 'sprague',
+                              species = None,
+                              rel_date = None,
+                              recap_date = None)
 
 # Optional: Filter state transitions using adjacency matrix
 # upstream_adjacency_filter = [(9, 1),(9, 2),(9, 3),(9, 5),(9, 8),(9, 9),(9, 6),
