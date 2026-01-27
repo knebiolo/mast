@@ -97,7 +97,7 @@ from matplotlib import rcParams
 from scipy import interpolate
 try:
     from tqdm import tqdm
-except Exception:
+except ImportError:
     def tqdm(iterable, **kwargs):
         return iterable
 import shutil
@@ -107,10 +107,9 @@ import dask.array as da
 try:
     from dask_ml.cluster import KMeans
     _KMEANS_IMPL = 'dask'
-except Exception:
+except ImportError:
     from sklearn.cluster import KMeans
     _KMEANS_IMPL = 'sklearn'
-warnings.filterwarnings("ignore")
 
 # Initialize logger
 logger = logging.getLogger('pymast.radio_project')
@@ -418,10 +417,10 @@ class radio_project():
             return default
         try:
             return input(prompt_text)
-        except Exception:
-            # In rare environments input() may fail; fall back to default
-            logger.debug("input() failed, returning default in _prompt()")
-            return default
+        except (EOFError, OSError) as exc:
+            raise RuntimeError(
+                "Input prompt failed. Set project.non_interactive = True to use defaults."
+            ) from exc
             
     def telem_data_import(self,
                           rec_id,
@@ -1585,9 +1584,8 @@ class radio_project():
                             recursive=True,
                             filters=filters
                         )
-                    except Exception as e:
-                        logger.warning(f"Could not copy {node_path}: {e}")
-                        continue
+                    except (tables.NodeError, tables.HDF5ExtError, OSError, ValueError) as e:
+                        raise RuntimeError(f"Failed to copy HDF5 node {node_path}: {e}") from e
         
         # Get new size
         new_size = os.path.getsize(output_path)
@@ -1610,15 +1608,19 @@ class radio_project():
         heartbeat_dir = os.path.join(self.project_dir, 'build')
         try:
             os.makedirs(heartbeat_dir, exist_ok=True)
-        except Exception:
-            pass
+        except OSError as e:
+            raise RuntimeError(
+                f"Failed to create heartbeat directory '{heartbeat_dir}': {e}"
+            ) from e
         heartbeat_path = os.path.join(heartbeat_dir, 'recaptures_heartbeat.log')
         print(f"Starting recaptures: {len(self.receivers)} receivers. Heartbeat -> {heartbeat_path}")
         try:
             with open(heartbeat_path, 'a') as _hb:
                 _hb.write(f"START {datetime.datetime.now().isoformat()} receivers={len(self.receivers)}\n")
-        except Exception:
-            pass
+        except OSError as e:
+            raise RuntimeError(
+                f"Failed to write heartbeat start to '{heartbeat_path}': {e}"
+            ) from e
         
         if pit_study==False:
             # Convert release dates to datetime if not already done
@@ -1788,8 +1790,10 @@ class radio_project():
                 try:
                     with open(heartbeat_path, 'a') as _hb:
                         _hb.write(f"{datetime.datetime.now().isoformat()} rec={rec} rows={len(rec_dat)}\n")
-                except Exception:
-                    pass
+                except OSError as e:
+                    raise RuntimeError(
+                        f"Failed to write heartbeat for receiver {rec} to '{heartbeat_path}': {e}"
+                    ) from e
                 
         else:
             # Loop over each receiver in self.receivers
@@ -1916,8 +1920,10 @@ class radio_project():
                 try:
                     with open(heartbeat_path, 'a') as _hb:
                         _hb.write(f"{datetime.datetime.now().isoformat()} pit_rec={rec} rows={len(pit_data)}\n")
-                except Exception:
-                    pass
+                except OSError as e:
+                    raise RuntimeError(
+                        f"Failed to write PIT heartbeat for receiver {rec} to '{heartbeat_path}': {e}"
+                    ) from e
 
 
         if export:
@@ -1929,9 +1935,14 @@ class radio_project():
             print(f"[recaptures] ✓ Export complete: {os.path.join(self.output_dir,'recaptures.csv')}", flush=True)
             try:
                 with open(heartbeat_path, 'a') as _hb:
-                    _hb.write(f"DONE {datetime.datetime.now().isoformat()} export={os.path.join(self.output_dir,'recaptures.csv')}\n")
-            except Exception:
-                pass
+                    _hb.write(
+                        f"DONE {datetime.datetime.now().isoformat()} export="
+                        f"{os.path.join(self.output_dir, 'recaptures.csv')}\n"
+                    )
+            except OSError as e:
+                raise RuntimeError(
+                    f"Failed to write heartbeat completion to '{heartbeat_path}': {e}"
+                ) from e
 
                 
     def undo_recaptures(self):

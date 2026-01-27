@@ -85,8 +85,8 @@ import pandas as pd
 from concurrent.futures import ProcessPoolExecutor
 try:
     from tqdm import tqdm
-except Exception:
-    # tqdm is optional — provide a lightweight passthrough iterator when not installed
+except ImportError:
+    # tqdm is optional - provide a lightweight passthrough iterator when not installed
     def tqdm(iterable, **kwargs):
         return iterable
 
@@ -106,7 +106,7 @@ import dask.array as da
 try:
     from dask_ml.cluster import KMeans
     _KMEANS_IMPL = 'dask'
-except Exception:
+except ImportError:
     # dask-ml may not be installed in all environments; fall back to scikit-learn
     from sklearn.cluster import KMeans
     _KMEANS_IMPL = 'sklearn'
@@ -133,8 +133,10 @@ def _prompt(prompt_text, default=None):
         return default
     try:
         return input(prompt_text)
-    except Exception:
-        return default
+    except (EOFError, OSError) as exc:
+        raise RuntimeError(
+            "Input prompt failed. Set PYMAST_NONINTERACTIVE=1 to use defaults."
+        ) from exc
 
 class bout():
     """
@@ -529,6 +531,382 @@ class overlap_reduction:
     formatter.time_to_event : Uses overlap decisions for filtering
     """
 
+    def _rec_id_variants(self, node):
+        node_str = str(node)
+        variants = [node_str]
+        if node_str.startswith(('R', 'r')):
+            variants.append(node_str[1:])
+        variants.append(node_str.lstrip('0'))
+        variants.append(node_str.lstrip('R').lstrip('0'))
+        digits = ''.join(filter(str.isdigit, node_str))
+        if digits:
+            variants.append(str(int(digits)))
+        seen = set()
+        variants_clean = []
+        for v in variants:
+            if not v:
+                continue
+            if v not in seen:
+                seen.add(v)
+                variants_clean.append(v)
+        return variants_clean
+
+    def _read_presence(self, node, logger):
+        pres_where = f"rec_id == '{node}'"
+        used_full_presence_read = False
+        try:
+            pres_data = pd.read_hdf(
+                self.db,
+                'presence',
+                columns=['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id', 'bout_no'],
+                where=pres_where
+            )
+        except (TypeError, ValueError):
+            # Some stores are fixed-format and don't support column selection - read entire table
+            used_full_presence_read = True
+            pres_data = pd.read_hdf(self.db, 'presence')
+
+        if len(pres_data) == 0 and not used_full_presence_read:
+            for cand in self._rec_id_variants(node):
+                alt_where = f"rec_id == '{cand}'"
+                try:
+                    alt_pres = pd.read_hdf(
+                        self.db,
+                        'presence',
+                        columns=['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id', 'bout_no'],
+                        where=alt_where
+                    )
+                    if len(alt_pres) > 0:
+                        pres_data = alt_pres
+                        logger.info("Node %s: found %d presence rows using alternate WHERE rec_id == '%s'", node, len(pres_data), cand)
+                        break
+                except (TypeError, ValueError):
+                    logger.debug("Node %s: alternate WHERE '%s' not supported by store", node, alt_where)
+                    break
+                except (KeyError, OSError, ValueError) as e:
+                    raise RuntimeError(
+                        f"Failed to read presence for node '{node}' using WHERE '{alt_where}': {e}"
+                    ) from e
+
+        return pres_data, pres_where, used_full_presence_read
+
+    def _read_recap(self, node):
+        classified_where = f"(rec_id == '{node}') & (test == 1)"
+        try:
+            recap_data = pd.read_hdf(
+                self.db,
+                'classified',
+                columns=[
+                    'freq_code', 'epoch', 'time_stamp', 'power', 'rec_id', 'iter',
+                    'test', 'posterior_T', 'posterior_F'
+                ],
+                where=classified_where
+            )
+        except (TypeError, ValueError) as e:
+            recap_data = pd.read_hdf(self.db, 'classified')
+            try:
+                recap_data = recap_data.query(classified_where)
+            except ValueError as exc:
+                raise RuntimeError(
+                    f"Failed to filter classified data for node '{node}': {exc}"
+                ) from exc
+        except (KeyError, FileNotFoundError, OSError) as e:
+            # If classified isn't available, try recaptures
+            try:
+                recap_data = pd.read_hdf(self.db, 'recaptures')
+                recap_data = recap_data.query(f"rec_id == '{node}'")
+            except (KeyError, FileNotFoundError, OSError, ValueError) as exc:
+                raise RuntimeError(
+                    f"Failed to read classified or recaptures data for node '{node}': {exc}"
+                ) from exc
+        recap_data = recap_data[recap_data['iter'] == recap_data['iter'].max()]
+        return recap_data
+
+    def _summarize_presence(self, node, pres_data, recap_data, pres_where, used_full_presence_read, logger):
+        # Ensure presence has a 'power' column by merging power from the
+        # classified/recaptures table when available. We don't change how
+        # presence is originally created (bouts), we only attach power here
+        # for downstream aggregation.
+        if 'power' not in pres_data.columns and not recap_data.empty and 'power' in recap_data.columns:
+            try:
+                pres_data = pres_data.merge(
+                    recap_data[['freq_code', 'epoch', 'rec_id', 'power']],
+                    on=['freq_code', 'epoch', 'rec_id'],
+                    how='left'
+                )
+            except (KeyError, ValueError, TypeError) as e:
+                raise RuntimeError(
+                    f"Failed to merge power into presence data for node '{node}': {e}"
+                ) from e
+
+        # Group presence data by frequency code and bout, then calculate min, max, and median power
+        # Check if power column exists first
+        if 'power' in pres_data.columns:
+            summarized_data = pres_data.groupby(['freq_code', 'bout_no', 'rec_id']).agg(
+                min_epoch=('epoch', 'min'),
+                max_epoch=('epoch', 'max'),
+                median_power=('power', 'median')
+            ).reset_index()
+        else:
+            logger.warning(f'Node {node}: Power column not found in presence data. Run bout detection first to populate power.')
+            summarized_data = pres_data.groupby(['freq_code', 'bout_no', 'rec_id']).agg(
+                min_epoch=('epoch', 'min'),
+                max_epoch=('epoch', 'max')
+            ).reset_index()
+            summarized_data['median_power'] = None
+
+        # Log detailed counts so users can see raw vs summarized presence lengths
+        raw_count = len(pres_data)
+        summarized_count = len(summarized_data)
+        logger.info(f"Node {node}: raw presence rows={raw_count}, summarized bouts={summarized_count}")
+
+        # If we had to read the full presence table, warn (this can be slow and surprising)
+        if used_full_presence_read:
+            logger.warning(
+                "Node %s: had to read entire 'presence' table (fixed-format store); this may be slow and cause large raw counts. WHERE used: %s",
+                node,
+                pres_where,
+            )
+
+        # If counts are zero or unexpectedly large, include a small sample and the WHERE clause to help debug
+        if raw_count == 0 or raw_count > 100000:
+            sample_head = pres_data.head(10).to_dict(orient='list')
+            logger.debug(
+                "Node %s: pres_data sample (up to 10 rows)=%s; WHERE=%s",
+                node,
+                sample_head,
+                pres_where,
+            )
+
+        # If we got zero rows from the column/where read, try a safe in-memory
+        # fallback: read the full presence table and match rec_id after
+        # normalizing (strip/upper). This can detect formatting mismatches
+        # (e.g. numeric vs string rec_id, padding, whitespace).
+        if raw_count == 0 and not used_full_presence_read:
+            try:
+                logger.debug(
+                    "Node %s: attempting in-memory fallback full-table read to find rec_id matches",
+                    node,
+                )
+                full_pres = pd.read_hdf(self.db, 'presence')
+                if 'rec_id' in full_pres.columns:
+                    node_norm = str(node).strip().upper()
+                    full_pres['_rec_norm'] = full_pres['rec_id'].astype(str).str.strip().str.upper()
+                    candidate = full_pres[full_pres['_rec_norm'] == node_norm]
+                    if len(candidate) > 0:
+                        # select expected columns if present
+                        cols = [c for c in ['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id', 'bout_no'] if c in candidate.columns]
+                        pres_data = candidate[cols].copy()
+                        raw_count = len(pres_data)
+                        used_full_presence_read = True
+                        logger.info(
+                            "Node %s: found %d presence rows after in-memory normalization of rec_id",
+                            node,
+                            raw_count,
+                        )
+                    else:
+                        logger.debug("Node %s: in-memory full-table read did not find rec_id matches", node)
+                else:
+                    logger.debug("Node %s: 'rec_id' column not present in full presence table", node)
+            except (KeyError, OSError, ValueError) as e:
+                raise RuntimeError(
+                    f"Failed to perform in-memory presence fallback for node '{node}': {e}"
+                ) from e
+
+        return summarized_data, raw_count
+
+    def _apply_posterior_decision(
+        self,
+        parent_dat,
+        child_dat,
+        p_indices,
+        c_indices,
+        p_power,
+        c_power,
+        min_detections,
+        p_value_threshold,
+        effect_size_threshold,
+        mean_diff_threshold,
+        decisions,
+        skip_reasons,
+        parent_mark_idx,
+        child_mark_idx,
+    ):
+        p_posteriors = parent_dat.loc[p_indices, 'posterior_T'].values if 'posterior_T' in parent_dat.columns else []
+        c_posteriors = child_dat.loc[c_indices, 'posterior_T'].values if 'posterior_T' in child_dat.columns else []
+
+        if len(p_posteriors) == 0 or len(c_posteriors) == 0:
+            decisions['keep_both'] += 1
+            skip_reasons['no_posterior_data'] += 1
+            return 0
+
+        p_posteriors = p_posteriors[~np.isnan(p_posteriors)]
+        c_posteriors = c_posteriors[~np.isnan(c_posteriors)]
+
+        if len(p_posteriors) < min_detections or len(c_posteriors) < min_detections:
+            decisions['keep_both'] += 1
+            skip_reasons['insufficient_after_nan'] += 1
+            return 0
+
+        t_stat, p_value = ttest_ind(p_posteriors, c_posteriors, equal_var=False)
+
+        mean_diff = np.mean(p_posteriors) - np.mean(c_posteriors)
+        n1, n2 = len(p_posteriors), len(c_posteriors)
+        var1 = np.var(p_posteriors, ddof=1) if n1 > 1 else 0.0
+        var2 = np.var(c_posteriors, ddof=1) if n2 > 1 else 0.0
+        pooled_std = np.sqrt(((n1-1)*var1 + (n2-1)*var2) / (n1+n2-2)) if (n1+n2-2) > 0 else 1.0
+        cohens_d = mean_diff / pooled_std if pooled_std > 0 else 0.0
+
+        if p_value < p_value_threshold and abs(cohens_d) >= effect_size_threshold:
+            if cohens_d > 0:
+                child_mark_idx.extend(c_indices)
+                decisions['remove_child'] += 1
+                return len(c_indices)
+            parent_mark_idx.extend(p_indices)
+            decisions['remove_parent'] += 1
+            return len(p_indices)
+
+        p_mean_posterior = np.mean(p_posteriors)
+        c_mean_posterior = np.mean(c_posteriors)
+
+        if not pd.isna(p_power) and not pd.isna(c_power) and (p_power + c_power) > 0:
+            p_norm_power = p_power / (p_power + c_power)
+            c_norm_power = c_power / (p_power + c_power)
+        else:
+            p_norm_power = c_norm_power = 0.5
+
+        p_score = 0.7 * p_mean_posterior + 0.3 * p_norm_power
+        c_score = 0.7 * c_mean_posterior + 0.3 * c_norm_power
+        if mean_diff_threshold is not None and abs(p_mean_posterior - c_mean_posterior) < mean_diff_threshold:
+            decisions['keep_both'] += 1
+            return 0
+        if p_score > c_score:
+            child_mark_idx.extend(c_indices)
+            decisions['remove_child'] += 1
+            return len(c_indices)
+        parent_mark_idx.extend(p_indices)
+        decisions['remove_parent'] += 1
+        return len(p_indices)
+
+    def _apply_power_decision(
+        self,
+        parent,
+        child,
+        p_indices,
+        c_indices,
+        p_power,
+        c_power,
+        p_posterior,
+        c_posterior,
+        power_threshold,
+        decisions,
+        parent_mark_idx,
+        child_mark_idx,
+        parent_ambiguous_idx,
+        child_ambiguous_idx,
+    ):
+        logger = logging.getLogger(__name__)
+        p_ambiguous = 0
+        c_ambiguous = 0
+
+        receivers = getattr(self.project, 'receivers', None)
+        parent_rec = None
+        child_rec = None
+        if receivers is None:
+            logger.warning(
+                "Receiver metadata not available; using relative power normalization."
+            )
+        else:
+            if parent in receivers.index:
+                parent_rec = receivers.loc[parent]
+            else:
+                logger.warning(
+                    "Receiver '%s' not found in receiver metadata; using relative normalization.",
+                    parent,
+                )
+            if child in receivers.index:
+                child_rec = receivers.loc[child]
+            else:
+                logger.warning(
+                    "Receiver '%s' not found in receiver metadata; using relative normalization.",
+                    child,
+                )
+
+        p_max = getattr(parent_rec, 'max_power', -40) if parent_rec is not None else -40
+        p_min = getattr(parent_rec, 'min_power', -100) if parent_rec is not None else -100
+        c_max = getattr(child_rec, 'max_power', -40) if child_rec is not None else -40
+        c_min = getattr(child_rec, 'min_power', -100) if child_rec is not None else -100
+
+        detections_added = 0
+        if pd.isna(p_power) or pd.isna(c_power):
+            if not pd.isna(p_posterior) and not pd.isna(c_posterior):
+                posterior_diff = p_posterior - c_posterior
+                if abs(posterior_diff) > 0.1:
+                    if posterior_diff > 0:
+                        child_mark_idx.extend(c_indices)
+                        decisions['remove_child'] += 1
+                        detections_added += len(c_indices)
+                    else:
+                        parent_mark_idx.extend(p_indices)
+                        decisions['remove_parent'] += 1
+                        detections_added += len(p_indices)
+                else:
+                    p_ambiguous = 1
+                    c_ambiguous = 1
+                    decisions['keep_both'] += 1
+            else:
+                p_ambiguous = 1
+                c_ambiguous = 1
+                decisions['keep_both'] += 1
+        else:
+            if parent_rec is None or child_rec is None:
+                denom = (p_power + c_power) if (p_power + c_power) != 0 else 1.0
+                p_norm = float(p_power) / denom
+                c_norm = float(c_power) / denom
+            else:
+                p_norm = (p_power - p_min) / (p_max - p_min) if (p_max - p_min) != 0 else 0.5
+                c_norm = (c_power - c_min) / (c_max - c_min) if (c_max - c_min) != 0 else 0.5
+
+            p_norm = max(0.0, min(1.0, p_norm))
+            c_norm = max(0.0, min(1.0, c_norm))
+            power_diff = p_norm - c_norm
+
+            if power_diff > power_threshold:
+                child_mark_idx.extend(c_indices)
+                decisions['remove_child'] += 1
+                detections_added += len(c_indices)
+            elif power_diff < -power_threshold:
+                parent_mark_idx.extend(p_indices)
+                decisions['remove_parent'] += 1
+                detections_added += len(p_indices)
+            else:
+                if not pd.isna(p_posterior) and not pd.isna(c_posterior):
+                    posterior_diff = p_posterior - c_posterior
+                    if abs(posterior_diff) > 0.1:
+                        if posterior_diff > 0:
+                            child_mark_idx.extend(c_indices)
+                            decisions['remove_child'] += 1
+                            detections_added += len(c_indices)
+                        else:
+                            parent_mark_idx.extend(p_indices)
+                            decisions['remove_parent'] += 1
+                            detections_added += len(p_indices)
+                    else:
+                        p_ambiguous = 1
+                        c_ambiguous = 1
+                        decisions['keep_both'] += 1
+                else:
+                    p_ambiguous = 1
+                    c_ambiguous = 1
+                    decisions['keep_both'] += 1
+
+        if p_ambiguous == 1:
+            parent_ambiguous_idx.extend(p_indices)
+        if c_ambiguous == 1:
+            child_ambiguous_idx.extend(c_indices)
+
+        return detections_added
+
     def __init__(self, nodes, edges, radio_project):
         """
         Initializes the OverlapReduction class.
@@ -558,197 +936,31 @@ class overlap_reduction:
         
         # Read and preprocess data for each node
         for node in tqdm(nodes, desc="Loading nodes", unit="node"):
-            # Read data from the HDF5 database for the given node, applying filters using the 'where' parameter
-            pres_where = f"rec_id == '{node}'"
-            used_full_presence_read = False
-            try:
-                pres_data = pd.read_hdf(
-                    self.db,
-                    'presence',
-                    columns=['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id', 'bout_no'],
-                    where=pres_where
-                )
-            except (TypeError, ValueError):
-                # Some stores are fixed-format and don't support column selection — read entire table
-                used_full_presence_read = True
-                pres_data = pd.read_hdf(self.db, 'presence')
-
-            # If we read zero rows, attempt a few fast alternate WHERE clauses that
-            # handle common formatting differences (e.g. 'R02' vs '2' vs '02') before
-            # performing a full-table in-memory fallback which is expensive.
-            if len(pres_data) == 0 and not used_full_presence_read:
-                tried_variants = []
-                node_str = str(node)
-                # generate candidate rec_id variants
-                variants = []
-                variants.append(node_str)
-                if node_str.startswith(('R', 'r')):
-                    variants.append(node_str[1:])
-                # strip leading zeros
-                variants.append(node_str.lstrip('0'))
-                variants.append(node_str.lstrip('R').lstrip('0'))
-                # numeric candidate
-                try:
-                    variants.append(str(int(''.join(filter(str.isdigit, node_str)))))
-                except Exception:
-                    pass
-                # dedupe while preserving order
-                seen = set()
-                variants_clean = []
-                for v in variants:
-                    if not v:
-                        continue
-                    if v not in seen:
-                        seen.add(v)
-                        variants_clean.append(v)
-
-                for cand in variants_clean:
-                    tried_variants.append(cand)
-                    alt_where = f"rec_id == '{cand}'"
-                    try:
-                        alt_pres = pd.read_hdf(
-                            self.db,
-                            'presence',
-                            columns=['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id', 'bout_no'],
-                            where=alt_where
-                        )
-                        if len(alt_pres) > 0:
-                            pres_data = alt_pres
-                            logger.info("Node %s: found %d presence rows using alternate WHERE rec_id == '%s'", node, len(pres_data), cand)
-                            break
-                    except (TypeError, ValueError):
-                        # column/where not supported on this store — give up trying alternates
-                        logger.debug("Node %s: alternate WHERE '%s' not supported by store", node, alt_where)
-                        break
-                    except Exception:
-                        # If this specific candidate failed, try the next
-                        logger.debug("Node %s: alternate WHERE '%s' did not match", node, alt_where)
-                        continue
-
-            classified_where = f"(rec_id == '{node}') & (test == 1)"
-            # Try to read classified with posterior columns if present
-            try:
-                recap_data = pd.read_hdf(
-                    self.db,
-                    'classified',
-                    columns=['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id', 'iter', 'test', 'posterior_T', 'posterior_F'],
-                    where=classified_where
-                )
-            except (KeyError, TypeError, ValueError):
-                # Fallback: read the whole classified table for the node
-                try:
-                    recap_data = pd.read_hdf(self.db, 'classified')
-                    recap_data = recap_data.query(classified_where)
-                except Exception:
-                    # If classified isn't available, try recaptures
-                    try:
-                        recap_data = pd.read_hdf(self.db, 'recaptures')
-                        recap_data = recap_data.query(f"rec_id == '{node}'")
-                    except Exception:
-                        recap_data = pd.DataFrame()
-        
-            # Further filter recap_data for the max iteration
-            recap_data = recap_data[recap_data['iter'] == recap_data['iter'].max()]
-
-            # Group presence data by frequency code and bout, then calculate min, max, and median
-            # Ensure presence has a 'power' column by merging power from the
-            # classified/recaptures table when available. We don't change how
-            # presence is originally created (bouts), we only attach power here
-            # for downstream aggregation.
-            if 'power' not in pres_data.columns and not recap_data.empty and 'power' in recap_data.columns:
-                try:
-                    pres_data = pres_data.merge(
-                        recap_data[['freq_code', 'epoch', 'rec_id', 'power']],
-                        on=['freq_code', 'epoch', 'rec_id'],
-                        how='left'
-                    )
-                except Exception:
-                    # If merge fails for any reason, continue without power —
-                    # grouping will produce NaNs for median_power which is OK.
-                    logger.debug('Could not merge power from recap_data into pres_data; continuing without power')
-
-            # Group presence data by frequency code and bout, then calculate min, max, and median power
-            # Check if power column exists first
-            if 'power' in pres_data.columns:
-                summarized_data = pres_data.groupby(['freq_code', 'bout_no', 'rec_id']).agg(
-                    min_epoch=('epoch', 'min'),
-                    max_epoch=('epoch', 'max'),
-                    median_power=('power', 'median')
-                ).reset_index()
-            else:
-                logger.warning(f'Node {node}: Power column not found in presence data. Run bout detection first to populate power.')
-                summarized_data = pres_data.groupby(['freq_code', 'bout_no', 'rec_id']).agg(
-                    min_epoch=('epoch', 'min'),
-                    max_epoch=('epoch', 'max')
-                ).reset_index()
-                summarized_data['median_power'] = None
-            
-            # Log detailed counts so users can see raw vs summarized presence lengths
-            raw_count = len(pres_data)
-            summarized_count = len(summarized_data)
-            logger.info(f"Node {node}: raw presence rows={raw_count}, summarized bouts={summarized_count}")
-
-            # If we had to read the full presence table, warn (this can be slow and surprising)
-            if used_full_presence_read:
-                logger.warning(
-                    "Node %s: had to read entire 'presence' table (fixed-format store); this may be slow and cause large raw counts. WHERE used: %s",
-                    node,
-                    pres_where,
-                )
-
-            # If counts are zero or unexpectedly large, include a small sample and the WHERE clause to help debug
-            if raw_count == 0 or raw_count > 100000:
-                try:
-                    sample_head = pres_data.head(10).to_dict(orient='list')
-                except Exception:
-                    sample_head = '<unavailable>'
-                logger.debug(
-                    "Node %s: pres_data sample (up to 10 rows)=%s; WHERE=%s",
-                    node,
-                    sample_head,
-                    pres_where,
-                )
-
-            # If we got zero rows from the column/where read, try a safe in-memory
-            # fallback: read the full presence table and match rec_id after
-            # normalizing (strip/upper). This can detect formatting mismatches
-            # (e.g. numeric vs string rec_id, padding, whitespace).
-            if raw_count == 0 and not used_full_presence_read:
-                try:
-                    logger.debug(
-                        "Node %s: attempting in-memory fallback full-table read to find rec_id matches",
-                        node,
-                    )
-                    full_pres = pd.read_hdf(self.db, 'presence')
-                    if 'rec_id' in full_pres.columns:
-                        node_norm = str(node).strip().upper()
-                        full_pres['_rec_norm'] = full_pres['rec_id'].astype(str).str.strip().str.upper()
-                        candidate = full_pres[full_pres['_rec_norm'] == node_norm]
-                        if len(candidate) > 0:
-                            # select expected columns if present
-                            cols = [c for c in ['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id', 'bout_no'] if c in candidate.columns]
-                            pres_data = candidate[cols].copy()
-                            raw_count = len(pres_data)
-                            used_full_presence_read = True
-                            logger.info(
-                                "Node %s: found %d presence rows after in-memory normalization of rec_id",
-                                node,
-                                raw_count,
-                            )
-                        else:
-                            logger.debug("Node %s: in-memory full-table read did not find rec_id matches", node)
-                    else:
-                        logger.debug("Node %s: 'rec_id' column not present in full presence table", node)
-                except Exception as e:
-                    logger.debug("Node %s: in-memory fallback failed: %s", node, str(e))
+            pres_data, pres_where, used_full_presence_read = self._read_presence(node, logger)
+            recap_data = self._read_recap(node)
+            summarized_data, raw_count = self._summarize_presence(
+                node,
+                pres_data,
+                recap_data,
+                pres_where,
+                used_full_presence_read,
+                logger
+            )
 
             # Store the processed data in the dictionaries
             self.node_pres_dict[node] = summarized_data
             # Don't store recap_data - load on-demand per edge (memory efficient)
             self.node_recap_dict[node] = len(recap_data)  # Just track count
-            logger.debug(f"  {node}: {len(pres_data)} presence records, {len(recap_data)} detections")
+            logger.debug(f"  {node}: {raw_count} presence records, {len(recap_data)} detections")
         
         logger.info(f"✓ Data loaded for {len(nodes)} nodes")
+
+    def _resolve_db_path(self):
+        if getattr(self, "project", None) is not None and getattr(self.project, "db", None):
+            return self.project.db
+        if getattr(self, "db", None):
+            return self.db
+        raise RuntimeError("Overlap reduction requires a database path on 'project.db' or 'db'.")
 
     def unsupervised_removal(self, method='posterior', p_value_threshold=0.05, effect_size_threshold=0.3, 
                             power_threshold=0.2, min_detections=1, bout_expansion=0, confidence_threshold=None):
@@ -778,19 +990,22 @@ class overlap_reduction:
             for cleaner movement trajectories).
         """
         logger = logging.getLogger(__name__)
+        db_path = self._resolve_db_path()
         # Preserve the confidence_threshold value for use as a posterior mean-difference
         # tiebreaker (tests pass `confidence_threshold` expecting this behavior).
         mean_diff_threshold = None
         if confidence_threshold is not None:
             try:
                 mean_diff_threshold = float(confidence_threshold)
-            except Exception:
-                mean_diff_threshold = None
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"confidence_threshold must be numeric, got {confidence_threshold!r}"
+                ) from exc
         logger.info(f"Starting unsupervised overlap removal (method={method})")
         # Create an empty '/overlapping' table early so downstream readers/tests
         # will find the key even if no rows are written during processing.
         try:
-            with pd.HDFStore(self.db, mode='a') as store:
+            with pd.HDFStore(db_path, mode='a') as store:
                 if 'overlapping' not in store.keys():
                     # Create a minimal placeholder row so the key exists reliably.
                     placeholder = pd.DataFrame([{
@@ -822,8 +1037,8 @@ class overlap_reduction:
                     # (longer strings) can be appended without hitting PyTables limits.
                     store.append(key='overlapping', value=placeholder, format='table', data_columns=True,
                                  min_itemsize={'freq_code': 50, 'rec_id': 50})
-        except Exception:
-            logger.debug('Could not pre-create overlapping key; continuing')
+        except (OSError, ValueError, KeyError, RuntimeError) as exc:
+            raise RuntimeError("Failed to pre-create /overlapping table in HDF5.") from exc
         overlaps_processed = 0
         detections_marked = 0
         decisions = {'remove_parent': 0, 'remove_child': 0, 'keep_both': 0}
@@ -838,14 +1053,39 @@ class overlap_reduction:
         node_recap_cache = {}  # node -> recap DataFrame (cache for edge loop)
         for node, bouts in self.node_pres_dict.items():
             # Load recap data and cache it for use in edge loop
-            try:
-                recaps = pd.read_hdf(self.db, 'classified', where=f"(rec_id == '{node}') & (test == 1)",
-                                    columns=['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id', 'iter', 'test', 'posterior_T', 'posterior_F'])
-                recaps = recaps[recaps['iter'] == recaps['iter'].max()]
-                node_recap_cache[node] = recaps  # Cache for later use
-            except Exception:
-                recaps = pd.DataFrame()
-                node_recap_cache[node] = pd.DataFrame()
+            cached_recaps = self.node_recap_dict.get(node)
+            if isinstance(cached_recaps, pd.DataFrame):
+                recaps = cached_recaps.copy()
+                if 'test' in recaps.columns:
+                    recaps = recaps[recaps['test'] == 1]
+                if 'iter' in recaps.columns:
+                    recaps = recaps[recaps['iter'] == recaps['iter'].max()]
+            else:
+                try:
+                    recaps = pd.read_hdf(
+                        db_path,
+                        'classified',
+                        where=f"(rec_id == '{node}') & (test == 1)",
+                        columns=[
+                            'freq_code',
+                            'epoch',
+                            'time_stamp',
+                            'power',
+                            'rec_id',
+                            'iter',
+                            'test',
+                            'posterior_T',
+                            'posterior_F',
+                        ],
+                    )
+                    if 'iter' not in recaps.columns:
+                        raise KeyError("Missing 'iter' column in classified table.")
+                    recaps = recaps[recaps['iter'] == recaps['iter'].max()]
+                except (FileNotFoundError, KeyError, OSError, ValueError) as exc:
+                    raise RuntimeError(
+                        f"Failed to read classified detections for rec_id '{node}': {exc}"
+                    ) from exc
+            node_recap_cache[node] = recaps  # Cache for later use
             
             node_bout_index[node] = {}
             node_bout_trees[node] = {}
@@ -881,10 +1121,22 @@ class overlap_reduction:
                 node_bout_index[node][fish_id] = bout_list
                 # build IntervalTree for this fish (only include intervals with numeric bounds)
                 try:
-                    tree = IntervalTree(Interval(int(a), int(b), idx) for (a, b, idx) in intervals if not (pd.isna(a) or pd.isna(b)))
+                    interval_entries = []
+                    for a, b, idx in intervals:
+                        if pd.isna(a) or pd.isna(b):
+                            continue
+                        a_int = int(a)
+                        b_int = int(b)
+                        # IntervalTree does not allow null intervals; expand single-point bouts by 1 second.
+                        if b_int <= a_int:
+                            b_int = a_int + 1
+                        interval_entries.append(Interval(a_int, b_int, idx))
+                    tree = IntervalTree(interval_entries)
                     node_bout_trees[node][fish_id] = tree
-                except Exception:
-                    node_bout_trees[node][fish_id] = IntervalTree()
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(
+                        f"Invalid bout interval bounds for node '{node}' fish '{fish_id}': {exc}"
+                    ) from exc
 
             # If the posterior-based method was requested, ensure there is at least
             # some `posterior_T` data available in the cached recapture tables. Tests
@@ -894,12 +1146,9 @@ class overlap_reduction:
                 for df in node_recap_cache.values():
                     if not df.empty and 'posterior_T' in df.columns:
                         # also ensure there is at least one non-null posterior value
-                        try:
-                            if df['posterior_T'].notna().any():
-                                has_posterior = True
-                                break
-                        except Exception:
-                            continue
+                        if df['posterior_T'].notna().any():
+                            has_posterior = True
+                            break
                 if not has_posterior:
                     raise ValueError("Method 'posterior' requested but no 'posterior_T' values are available in classified data")
 
@@ -979,8 +1228,10 @@ class overlap_reduction:
                             try:
                                 c_min = int(c_info_manual.get('min_epoch', -1))
                                 c_max = int(c_info_manual.get('max_epoch', -1))
-                            except Exception:
-                                continue
+                            except (TypeError, ValueError) as exc:
+                                raise ValueError(
+                                    f"Invalid child bout bounds for node '{child}' fish '{fish_id}'."
+                                ) from exc
                             if (c_min <= int(p_info['max_epoch'])) and (c_max >= int(p_info['min_epoch'])):
                                 # create a lightweight object with `.data` attribute to mimic Interval
                                 class _O:
@@ -999,8 +1250,10 @@ class overlap_reduction:
                         c_idx = iv.data
                         try:
                             c_info = node_bout_index[child][fish_id][c_idx]
-                        except Exception:
-                            continue
+                        except (KeyError, IndexError, TypeError) as exc:
+                            raise KeyError(
+                                f"Missing child bout index {c_idx} for node '{child}' fish '{fish_id}'."
+                            ) from exc
 
                         c_indices = c_info['indices']
                         c_conf = c_info['posterior']
@@ -1013,214 +1266,41 @@ class overlap_reduction:
                             continue
 
                         if method == 'posterior':
-                            # Statistical test approach: use t-test and Cohen's d on posterior_T
-                            # Get actual posterior_T values for both receivers
-                            p_posteriors = parent_dat.loc[p_indices, 'posterior_T'].values if 'posterior_T' in parent_dat.columns else []
-                            c_posteriors = child_dat.loc[c_indices, 'posterior_T'].values if 'posterior_T' in child_dat.columns else []
-                            
-                            # Validate we have data
-                            if len(p_posteriors) == 0 or len(c_posteriors) == 0:
-                                decisions['keep_both'] += 1
-                                skip_reasons['no_posterior_data'] += 1
-                                continue
-                            
-                            # Remove NaN values
-                            p_posteriors = p_posteriors[~np.isnan(p_posteriors)]
-                            c_posteriors = c_posteriors[~np.isnan(c_posteriors)]
-                            
-                            if len(p_posteriors) < min_detections or len(c_posteriors) < min_detections:
-                                decisions['keep_both'] += 1
-                                skip_reasons['insufficient_after_nan'] += 1
-                                continue
-                            
-                            # Perform Welch's t-test (unequal variances)
-                            t_stat, p_value = ttest_ind(p_posteriors, c_posteriors, equal_var=False)
-                            
-                            # Calculate Cohen's d effect size
-                            mean_diff = np.mean(p_posteriors) - np.mean(c_posteriors)
-                            n1, n2 = len(p_posteriors), len(c_posteriors)
-                            var1, var2 = np.var(p_posteriors, ddof=1), np.var(c_posteriors, ddof=1)
-                            pooled_std = np.sqrt(((n1-1)*var1 + (n2-1)*var2) / (n1+n2-2)) if (n1+n2-2) > 0 else 1.0
-                            cohens_d = mean_diff / pooled_std if pooled_std > 0 else 0.0
-                            
-                            # Decision: require BOTH statistical significance AND meaningful effect size
-                            if p_value < p_value_threshold and abs(cohens_d) >= effect_size_threshold:
-                                if cohens_d > 0:  # parent has significantly higher posterior_T
-                                    child_mark_idx.extend(c_indices)
-                                    decisions['remove_child'] += 1
-                                    detections_marked += len(c_indices)
-                                else:  # child has significantly higher posterior_T
-                                    parent_mark_idx.extend(p_indices)
-                                    decisions['remove_parent'] += 1
-                                    detections_marked += len(p_indices)
-                            else:
-                                # No significant difference - use combined score as tiebreaker
-                                # Weighted combination: 70% posterior_T (classifier confidence) + 30% normalized power
-                                # This accounts for both detection quality AND signal strength
-                                p_mean_posterior = np.mean(p_posteriors)
-                                c_mean_posterior = np.mean(c_posteriors)
-                                
-                                # Normalize power relative to each other (handles different receiver types)
-                                if not pd.isna(p_power) and not pd.isna(c_power) and (p_power + c_power) > 0:
-                                    p_norm_power = p_power / (p_power + c_power)
-                                    c_norm_power = c_power / (p_power + c_power)
-                                else:
-                                    # Power not available, use equal weights
-                                    p_norm_power = c_norm_power = 0.5
-                                
-                                # Combined score: 70% posterior_T, 30% power
-                                p_score = 0.7 * p_mean_posterior + 0.3 * p_norm_power
-                                c_score = 0.7 * c_mean_posterior + 0.3 * c_norm_power
-                                # If a small absolute posterior difference threshold was provided
-                                # (tests use `confidence_threshold` for this), prefer to keep both
-                                # when the posterior means are closer than that threshold.
-                                if mean_diff_threshold is not None and abs(p_mean_posterior - c_mean_posterior) < mean_diff_threshold:
-                                    decisions['keep_both'] += 1
-                                    continue
-                                if p_score > c_score:
-                                    child_mark_idx.extend(c_indices)
-                                    decisions['remove_child'] += 1
-                                    detections_marked += len(c_indices)
-                                else:
-                                    parent_mark_idx.extend(p_indices)
-                                    decisions['remove_parent'] += 1
-                                    detections_marked += len(p_indices)
-
+                            detections_marked += self._apply_posterior_decision(
+                                parent_dat,
+                                child_dat,
+                                p_indices,
+                                c_indices,
+                                p_power,
+                                c_power,
+                                min_detections,
+                                p_value_threshold,
+                                effect_size_threshold,
+                                mean_diff_threshold,
+                                decisions,
+                                skip_reasons,
+                                parent_mark_idx,
+                                child_mark_idx,
+                            )
                         elif method == 'power':
-                            # Hierarchical decision tree with normalized power, posterior
-                            # Step 1: Power → Step 2: Posterior → Step 3: Keep_both (ambiguous)
-                            
-                            # Initialize ambiguous flag for both bouts
-                            p_ambiguous = 0
-                            c_ambiguous = 0
-                            
-                            # Extract posterior from bout info
                             p_posterior = p_info.get('posterior', np.nan)
                             c_posterior = c_info.get('posterior', np.nan)
-                            
-                            # Get receiver info for power normalization. Tests may not provide
-                            # a `project.receivers` table (DummyProject), so guard access and
-                            # fall back to sensible defaults when missing.
-                            parent_rec = None
-                            child_rec = None
-                            try:
-                                receivers = getattr(self.project, 'receivers', None)
-                                if receivers is not None:
-                                    try:
-                                        parent_rec = receivers.loc[parent]
-                                    except Exception:
-                                        parent_rec = None
-                                    try:
-                                        child_rec = receivers.loc[child]
-                                    except Exception:
-                                        child_rec = None
-                            except Exception:
-                                parent_rec = None
-                                child_rec = None
-                            
-                            # Step 1: Normalized power comparison
-                            # Normalize: (power - min) / (max - min) where higher = stronger
-                            # Use reasonable defaults if receiver stats not available
-                            p_max = getattr(parent_rec, 'max_power', -40) if parent_rec is not None else -40
-                            p_min = getattr(parent_rec, 'min_power', -100) if parent_rec is not None else -100
-                            c_max = getattr(child_rec, 'max_power', -40) if child_rec is not None else -40
-                            c_min = getattr(child_rec, 'min_power', -100) if child_rec is not None else -100
-                            
-                            if pd.isna(p_power) or pd.isna(c_power):
-                                # Missing power data - try posterior
-                                if not pd.isna(p_posterior) and not pd.isna(c_posterior):
-                                    posterior_diff = p_posterior - c_posterior
-                                    if abs(posterior_diff) > 0.1:  # 10% difference in classification confidence
-                                        if posterior_diff > 0:
-                                            # Parent has higher confidence - remove child
-                                            child_mark_idx.extend(c_indices)
-                                            decisions['remove_child'] += 1
-                                            detections_marked += len(c_indices)
-                                        else:
-                                            # Child has higher confidence - remove parent
-                                            parent_mark_idx.extend(p_indices)
-                                            decisions['remove_parent'] += 1
-                                            detections_marked += len(p_indices)
-                                    else:
-                                        # Both power and posterior missing/ambiguous - keep both
-                                        p_ambiguous = 1
-                                        c_ambiguous = 1
-                                        decisions['keep_both'] += 1
-                                else:
-                                    # No data - keep both and mark as ambiguous
-                                    p_ambiguous = 1
-                                    c_ambiguous = 1
-                                    decisions['keep_both'] += 1
-                            else:
-                                # Normalize power to 0-1 scale (1 = strongest).
-                                # If receiver metadata is unavailable (parent_rec/child_rec is None)
-                                # fall back to a direct relative normalization using both powers.
-                                if parent_rec is None or child_rec is None:
-                                    denom = (p_power + c_power) if (p_power + c_power) != 0 else 1.0
-                                    p_norm = float(p_power) / denom
-                                    c_norm = float(c_power) / denom
-                                else:
-                                    p_norm = (p_power - p_min) / (p_max - p_min) if (p_max - p_min) != 0 else 0.5
-                                    c_norm = (c_power - c_min) / (c_max - c_min) if (c_max - c_min) != 0 else 0.5
-                                
-                                # Clamp to 0-1 range
-                                p_norm = max(0.0, min(1.0, p_norm))
-                                c_norm = max(0.0, min(1.0, c_norm))
-                                
-                                power_diff = p_norm - c_norm
-                                
-                                if power_diff > power_threshold:
-                                    # Parent significantly stronger - remove child
-                                    child_mark_idx.extend(c_indices)
-                                    decisions['remove_child'] += 1
-                                    detections_marked += len(c_indices)
-                                    # Clear decision, not ambiguous
-                                    p_ambiguous = 0
-                                    c_ambiguous = 0
-                                elif power_diff < -power_threshold:
-                                    # Child significantly stronger - remove parent
-                                    parent_mark_idx.extend(p_indices)
-                                    decisions['remove_parent'] += 1
-                                    detections_marked += len(p_indices)
-                                    # Clear decision, not ambiguous
-                                    p_ambiguous = 0
-                                    c_ambiguous = 0
-                                else:
-                                    # Power is ambiguous - try Step 2: Posterior_T
-                                    if not pd.isna(p_posterior) and not pd.isna(c_posterior):
-                                        posterior_diff = p_posterior - c_posterior
-                                        if abs(posterior_diff) > 0.1:  # 10% difference in classification confidence
-                                            if posterior_diff > 0:
-                                                # Parent has higher confidence - remove child
-                                                child_mark_idx.extend(c_indices)
-                                                decisions['remove_child'] += 1
-                                                detections_marked += len(c_indices)
-                                                p_ambiguous = 0
-                                                c_ambiguous = 0
-                                            else:
-                                                # Child has higher confidence - remove parent
-                                                parent_mark_idx.extend(p_indices)
-                                                decisions['remove_parent'] += 1
-                                                detections_marked += len(p_indices)
-                                                p_ambiguous = 0
-                                                c_ambiguous = 0
-                                        else:
-                                            # Both power and posterior ambiguous - keep both
-                                            p_ambiguous = 1
-                                            c_ambiguous = 1
-                                            decisions['keep_both'] += 1
-                                    else:
-                                        # No posterior data - keep both and mark as ambiguous
-                                        p_ambiguous = 1
-                                        c_ambiguous = 1
-                                        decisions['keep_both'] += 1
-                            
-                            # Store ambiguous flags in the dataframe
-                            if p_ambiguous == 1:
-                                parent_ambiguous_idx.extend(p_indices)
-                            if c_ambiguous == 1:
-                                child_ambiguous_idx.extend(c_indices)
-
+                            detections_marked += self._apply_power_decision(
+                                parent,
+                                child,
+                                p_indices,
+                                c_indices,
+                                p_power,
+                                c_power,
+                                p_posterior,
+                                c_posterior,
+                                power_threshold,
+                                decisions,
+                                parent_mark_idx,
+                                child_mark_idx,
+                                parent_ambiguous_idx,
+                                child_ambiguous_idx,
+                            )
                         else:
                             raise ValueError(f"Unknown method: {method}")
 
@@ -1268,7 +1348,7 @@ class overlap_reduction:
         # Calculate statistics from HDF5 overlapping table
         logger.info("Calculating final statistics from overlapping table...")
         try:
-            with pd.HDFStore(self.project.db, mode='r') as store:
+            with pd.HDFStore(db_path, mode='r') as store:
                 if '/overlapping' in store:
                     overlapping_table = store.select('overlapping')
                     total_written = len(overlapping_table)
@@ -1278,9 +1358,10 @@ class overlap_reduction:
                     unique_receivers = overlapping_table['rec_id'].nunique()
                 else:
                     total_written = overlapping_count = ambiguous_count = unique_fish = unique_receivers = 0
-        except Exception as e:
-            logger.warning(f"Could not read overlapping table for statistics: {e}")
-            total_written = overlapping_count = ambiguous_count = unique_fish = unique_receivers = 0
+        except (OSError, KeyError, ValueError) as exc:
+            raise RuntimeError(
+                f"Could not read overlapping table for statistics: {exc}"
+            ) from exc
 
         print("\n" + "="*80)
         logger.info("✓ Unsupervised overlap removal complete")
@@ -1301,7 +1382,7 @@ class overlap_reduction:
         
         # Ensure an '/overlapping' key exists in the HDF5 file even if no rows were written.
         try:
-            with pd.HDFStore(self.project.db, mode='a') as store:
+            with pd.HDFStore(db_path, mode='a') as store:
                 if 'overlapping' not in store.keys():
                     empty_df = pd.DataFrame(columns=['freq_code', 'epoch', 'time_stamp', 'rec_id', 'overlapping', 'ambiguous_overlap', 'power', 'posterior_T', 'posterior_F'])
                     # set dtypes consistent with write_results_to_hdf5
@@ -1318,9 +1399,10 @@ class overlap_reduction:
                     # Use put instead of append to ensure an empty table is created
                     store.put(key='overlapping', value=empty_df, format='table', data_columns=True,
                               min_itemsize={'freq_code': 50, 'rec_id': 50})
-        except Exception:
-            # Non-fatal: logging already used elsewhere; don't raise to avoid breaking callers
-            pass
+        except (OSError, KeyError, ValueError) as exc:
+            raise RuntimeError(
+                f"Failed to ensure /overlapping table exists: {exc}"
+            ) from exc
 
         # Apply bout-based spatial filter to handle antenna bleed
         self._apply_bout_spatial_filter()
@@ -1343,26 +1425,35 @@ class overlap_reduction:
         """
         import logging
         logger = logging.getLogger(__name__)
+        db_path = self._resolve_db_path()
         
         print(f"\n{'='*80}")
         print(f"BOUT-BASED SPATIAL FILTER")
         print(f"{'='*80}")
         print(f"[overlap] Resolving antenna bleed using bout strength...")
         
+        # Read overlapping table
         try:
-            # Read overlapping table
-            overlapping_data = pd.read_hdf(self.db, key='/overlapping')
-            
-            if overlapping_data.empty:
-                print(f"[overlap] No data in overlapping table")
-                return
-            
-            # Get bout summaries from presence table
-            presence_data = pd.read_hdf(self.db, key='/presence')
-            
-            if presence_data.empty or 'bout_no' not in presence_data.columns:
-                print(f"[overlap] No bout data available, skipping spatial filter")
-                return
+            overlapping_data = pd.read_hdf(db_path, key='/overlapping')
+        except (OSError, KeyError, ValueError) as exc:
+            raise RuntimeError(f"Failed to read /overlapping table: {exc}") from exc
+
+        if overlapping_data.empty:
+            print(f"[overlap] No data in overlapping table")
+            return
+
+        # Get bout summaries from presence table
+        try:
+            presence_data = pd.read_hdf(db_path, key='/presence')
+        except KeyError:
+            logger.warning("Presence table missing; skipping bout-based spatial filter.")
+            print("[overlap] /presence table missing; skipping bout-based spatial filter.")
+            return
+        except (OSError, ValueError) as exc:
+            raise RuntimeError(f"Failed to read /presence table: {exc}") from exc
+
+        if presence_data.empty or 'bout_no' not in presence_data.columns:
+            raise ValueError("[overlap] Presence data empty or missing bout_no")
             
             # Build bout summary: min/max epoch, detection count per bout
             bout_summary = presence_data.groupby(['freq_code', 'rec_id', 'bout_no']).agg({
@@ -1475,7 +1566,7 @@ class overlap_reduction:
                 overlapping_with_bouts = overlapping_with_bouts.drop(columns=['bout_no'])
                 
                 # Write back to HDF5 (replace entire table)
-                with pd.HDFStore(self.project.db, mode='a') as store:
+                with pd.HDFStore(db_path, mode='a') as store:
                     # Remove old table
                     if '/overlapping' in store:
                         store.remove('overlapping')
@@ -1496,15 +1587,9 @@ class overlap_reduction:
                 print(f"  Total overlapping detections: {final_overlapping:,} ({final_overlapping/len(overlapping_data)*100:.1f}%)")
                 
                 logger.info(f"Bout spatial filter marked {newly_marked} additional detections as overlapping")
-            else:
-                print(f"[overlap] No temporally overlapping bouts found across different receivers")
-                logger.info("Bout spatial filter: no conflicts found")
-        
-        except Exception as e:
-            logger.error(f"Error in bout spatial filter: {e}")
-            print(f"[overlap] Error in bout spatial filter: {e}")
-            import traceback
-            traceback.print_exc()
+        else:
+            print(f"[overlap] No temporally overlapping bouts found across different receivers")
+            logger.info("Bout spatial filter: no conflicts found")
 
     def nested_doll(self):
         """
@@ -1580,83 +1665,82 @@ class overlap_reduction:
         that each record is written incrementally to minimize memory usage.
         """
         logger = logging.getLogger(__name__)
+        # Initialize ambiguous_overlap column if not present
+        if 'ambiguous_overlap' not in df.columns:
+            df['ambiguous_overlap'] = np.float32(0)
+
+        # Determine which columns to write
+        base_columns = ['freq_code', 'epoch', 'time_stamp', 'rec_id', 'overlapping', 'ambiguous_overlap']
+        optional_columns = ['power', 'posterior_T', 'posterior_F']
+
+        columns_to_write = base_columns.copy()
+        for col in optional_columns:
+            if col in df.columns:
+                columns_to_write.append(col)
+
+        # Set data types for base columns
+        dtype_dict = {
+            'freq_code': 'object',
+            'epoch': 'int32',
+            'rec_id': 'object',
+            'overlapping': 'int32',
+            'ambiguous_overlap': 'float32',
+        }
+
+        # Add optional column types if present
+        if 'power' in df.columns:
+            dtype_dict['power'] = 'float32'
+        if 'posterior_T' in df.columns:
+            dtype_dict['posterior_T'] = 'float32'
+        if 'posterior_F' in df.columns:
+            dtype_dict['posterior_F'] = 'float32'
+
         try:
-            # Initialize ambiguous_overlap column if not present
-            if 'ambiguous_overlap' not in df.columns:
-                df['ambiguous_overlap'] = np.float32(0)
-            
-            # Determine which columns to write
-            base_columns = ['freq_code', 'epoch', 'time_stamp', 'rec_id', 'overlapping', 'ambiguous_overlap']
-            optional_columns = ['power', 'posterior_T', 'posterior_F']
-            
-            columns_to_write = base_columns.copy()
-            for col in optional_columns:
-                if col in df.columns:
-                    columns_to_write.append(col)
-            
-            # Set data types for base columns
-            dtype_dict = {
-                'freq_code': 'object',
-                'epoch': 'int32',
-                'rec_id': 'object',
-                'overlapping': 'int32',
-                'ambiguous_overlap': 'float32',
-            }
-            
-            # Add optional column types if present
-            if 'power' in df.columns:
-                dtype_dict['power'] = 'float32'
-            if 'posterior_T' in df.columns:
-                dtype_dict['posterior_T'] = 'float32'
-            if 'posterior_F' in df.columns:
-                dtype_dict['posterior_F'] = 'float32'
-            
             df = df.astype(dtype_dict)
-            
-            # To avoid PyTables validation errors when the incoming DataFrame has
-            # a different set of columns or dtypes than an existing `/overlapping`
-            # table, read the existing table (if present), concatenate and replace
-            # it atomically.
-            with pd.HDFStore(self.project.db, mode='a') as store:
-                if '/overlapping' in store:
-                    try:
-                        existing = store.select('overlapping')
-                        # Ensure existing and new columns align: add missing cols as NaN
-                        for c in columns_to_write:
-                            if c not in existing.columns:
-                                existing[c] = np.nan
-                        for c in existing.columns:
-                            if c not in columns_to_write:
-                                df[c] = np.nan
-                        # Reorder df columns to match final schema
-                        final_cols = list(existing.columns)
-                        # Concatenate and replace
-                        combined = pd.concat([existing, df[final_cols]], ignore_index=True)
-                        # Remove old table and write combined. Use `put` to replace the
-                        # table atomically to avoid PyTables append-schema validation
-                        # errors when the incoming schema differs.
-                        try:
-                            store.remove('overlapping')
-                        except Exception:
-                            pass
-                        store.put(key='overlapping', value=combined, format='table', data_columns=True,
-                                  min_itemsize={'freq_code': 50, 'rec_id': 50})
-                    except Exception:
-                        # If any failure reading/appending, write/replace the table
-                        # using `put` with the incoming df so we control the schema.
-                        try:
-                            store.put(key='overlapping', value=df[columns_to_write], format='table', data_columns=True,
-                                      min_itemsize={'freq_code': 50, 'rec_id': 50})
-                        except Exception:
-                            # Last-resort: raise so tests can see the failure
-                            raise
-                else:
+        except (ValueError, TypeError) as exc:
+            raise ValueError(f"Failed to cast overlapping data types: {exc}") from exc
+
+        # To avoid PyTables validation errors when the incoming DataFrame has
+        # a different set of columns or dtypes than an existing `/overlapping`
+        # table, read the existing table (if present), concatenate and replace
+        # it atomically.
+        db_path = self._resolve_db_path()
+        with pd.HDFStore(db_path, mode='a') as store:
+            if '/overlapping' in store:
+                try:
+                    existing = store.select('overlapping')
+                except (OSError, KeyError, ValueError) as exc:
+                    raise RuntimeError(f"Failed to read /overlapping table: {exc}") from exc
+
+                # Ensure existing and new columns align: add missing cols as NaN
+                for c in columns_to_write:
+                    if c not in existing.columns:
+                        existing[c] = np.nan
+                for c in existing.columns:
+                    if c not in columns_to_write:
+                        df[c] = np.nan
+                # Reorder df columns to match final schema
+                final_cols = list(existing.columns)
+                # Concatenate and replace
+                combined = pd.concat([existing, df[final_cols]], ignore_index=True)
+
+                try:
+                    store.remove('overlapping')
+                except (OSError, KeyError, ValueError) as exc:
+                    raise RuntimeError(f"Failed to remove /overlapping table: {exc}") from exc
+
+                try:
+                    store.put(key='overlapping', value=combined, format='table', data_columns=True,
+                              min_itemsize={'freq_code': 50, 'rec_id': 50})
+                except (OSError, ValueError) as exc:
+                    raise RuntimeError(f"Failed to write /overlapping table: {exc}") from exc
+            else:
+                try:
                     store.append(key='overlapping', value=df[columns_to_write], format='table', data_columns=True,
                                  min_itemsize={'freq_code': 50, 'rec_id': 50})
-            logger.debug(f"    Wrote {len(df)} detections to /overlapping (ambiguous: {df['ambiguous_overlap'].sum()})")
-        except Exception as e:
-            logger.error(f"Error writing to HDF5: {e}")
-            raise
+                except (OSError, ValueError) as exc:
+                    raise RuntimeError(f"Failed to append /overlapping table: {exc}") from exc
+        logger.debug(f"    Wrote {len(df)} detections to /overlapping (ambiguous: {df['ambiguous_overlap'].sum()})")
 
 
 
@@ -2018,10 +2102,9 @@ class overlap_reduction:
         # Load overlapping data
         try:
             overlapping = pd.read_hdf(self.db, key='/overlapping')
-            print(f"Loaded {len(overlapping):,} detections from /overlapping table")
-        except Exception as e:
-            print(f"Error loading overlapping data: {e}")
-            return
+        except (OSError, KeyError, ValueError) as exc:
+            raise RuntimeError(f"Error loading overlapping data: {exc}") from exc
+        print(f"Loaded {len(overlapping):,} detections from /overlapping table")
         
         if overlapping.empty:
             print("No overlap data to visualize")

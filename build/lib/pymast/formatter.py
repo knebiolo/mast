@@ -772,7 +772,15 @@ class time_to_event():
             release_dat = project.tags.copy()
             
             # do some data management
-            release_dat['rel_date'] = pd.to_datetime(release_dat.rel_date)
+            rel_raw = release_dat['rel_date']
+            rel_parsed = pd.to_datetime(rel_raw, format="%m/%d/%y %H:%M", errors="coerce")
+            if rel_parsed.isna().any():
+                alt_parsed = pd.to_datetime(rel_raw, format="%m/%d/%Y %H:%M", errors="coerce")
+                rel_parsed = rel_parsed.fillna(alt_parsed)
+            if rel_parsed.isna().any():
+                missing = int(rel_parsed.isna().sum())
+                raise ValueError(f"[TTE] Failed to parse {missing} release dates in tags table.")
+            release_dat['rel_date'] = rel_parsed
             release_dat['epoch'] = np.round((release_dat.rel_date - pd.Timestamp("1970-01-01")) / pd.Timedelta('1s'),6)
             release_dat.rename(columns = {'rel_date':'time_stamp'}, inplace = True)
             release_dat['rec_id'] = np.repeat('rel', len(release_dat))
@@ -798,10 +806,8 @@ class time_to_event():
 
             # add to recaptures table and create a start times table
             self.recap_data = pd.concat([self.recap_data, release_dat], axis=0, ignore_index=True)
-            self.start_times = release_dat[['freq_code','epoch']]
-            self.start_times.rename(columns = {'epoch':'first_recapture'},
-                                    inplace = True)
-            self.start_times.set_index('freq_code', inplace = True) 
+            self.start_times = release_dat[['freq_code', 'epoch']].copy()
+            self.start_times = self.start_times.rename(columns={'epoch': 'first_recapture'}).set_index('freq_code')
         else:
             # movement from state 1
             self.start_times = self.recap_data[self.recap_data.state == 1].\
@@ -824,6 +830,133 @@ class time_to_event():
                 # we only care about movements from the initial sstate - this is a competing risks model
                 if fish not in self.start_times.index:
                     self.recap_data = self.recap_data[self.recap_data.freq_code != fish]
+
+    def _apply_adjacency_filter(self, adjacency_filter):
+        '''When the truth value of a detection is assessed, a detection
+        may be valid for a fish that is not present.
+
+        In some instances, especially when using Yagi antennas, back-lobes
+        may develop where a fish in the tailrace of a powerhouse is
+        detected in the forebay antenna.  In these instances, a downstream
+        migrating fish would not have migrated up through the powerhouse.
+
+        From a false positive perspective, these records are valid detections.
+        However, from a movement perspective, these series of detections
+        could not occur and should be removed.
+
+        This function repeatedly removes rows with 'illegal' movements
+        until there are none left.  Rows with 'illegal' transitions are
+        identified with a list that is passed to the function.
+
+        input = list of illegal transitions stored as (from, to) tuples
+        '''
+        fish = self.master_state_table.freq_code.unique()
+        filtered = pd.DataFrame()
+        for i in fish:
+            fish_dat =  self.master_state_table[self.master_state_table.freq_code == i]
+
+            # create a condition, we're running this filter because we know illogical movements are present
+            bad_moves_present = True
+
+            # while there are illogical movements, keep filtering
+            while bad_moves_present == True:
+                # let's keep count of the number of rows we are filtering
+                filtered_rows = 0.0
+
+                # for every known bad movement
+                for j in adjacency_filter:
+                    # find those rows where this movement exists
+                    if 'transition' not in fish_dat.columns:
+                        raise KeyError(
+                            f"[TTE] Missing 'transition' column while filtering fish {i}."
+                        )
+                    fish_dat['transition_filter'] = np.where(fish_dat.transition == j, 1, 0)
+                    #fish_dat.set_index(['time_0'], inplace = True)
+
+                    if fish_dat.transition_filter.sum() > 0:
+                        # add up those rows
+                        filtered_rows = filtered_rows + fish_dat.transition_filter.sum()
+                        print ('%s rows found with %s movements'%(fish_dat.transition_filter.sum(),j))
+
+                        # do some data management, we need to take the start state and t0 of the affected rows and place them on the subsequent row
+                        idx = fish_dat.index[fish_dat['transition_filter']==1]
+                        time0 = fish_dat.iloc[0]['time_0']
+
+                        for k in idx:
+                            idx_int = fish_dat.index.get_loc(k)
+                            t0_col = fish_dat.columns.get_loc('time_0')
+                            start_col = fish_dat.columns.get_loc('start_state')
+
+                            # get start time and start state
+                            start = fish_dat.iloc[idx_int]['start_state']
+                            t0 = fish_dat.iloc[idx_int]['time_0']
+
+                            # write it to next row
+                            idx1 = idx_int + 1
+                            try:
+                                fish_dat.iloc[idx1, start_col] = start
+                                fish_dat.iloc[idx1, t0_col] = t0
+                            except IndexError:
+                                # when this occurs, there is no extra row - this last row will be deleted
+                                continue
+
+                        # remove those rows
+                        fish_dat = fish_dat[fish_dat.transition_filter != 1]
+                        # NOTE: do NOT assign a single time0 to the entire DataFrame
+                        # (that overwrites time_0 for all remaining rows). The
+                        # intended behavior is to copy start/time to the next row
+                        # above (done in the loop that writes to idx1), so we
+                        # leave the remaining time_0 values intact.
+
+                        # create a new transition field
+                        fish_dat['transition'] = list(zip(fish_dat.start_state.values.astype(int),
+                                                          fish_dat.end_state.values.astype(int)))  # Fixed: was tuple, should be list
+                        
+                        #fish_dat.reset_index(inplace = True)
+                    else:
+                        pass  # No illegal movements for this transition type
+                        #fish_dat.reset_index(inplace = True)
+
+                if filtered_rows == 0.0:
+                    # stop that loop
+                    bad_moves_present = False
+                else:
+                    pass  # Continue filtering
+            
+            # we can only have 1 transmission to point of no return - let's grab the last recapture
+            equal_rows = fish_dat[fish_dat['start_state'] == fish_dat['end_state']]
+
+            # Step 2: Get the index of the last occurrence where column1 equals column2
+            if fish_dat.empty:
+                raise ValueError(f"[TTE] No transitions remain for fish {i} after filtering.")
+            last_index = fish_dat.index[-1]
+
+            # Step 3: Drop all rows where column1 equals column2 except the last one
+            if len(equal_rows) > 1 and equal_rows.index[-1] == last_index:
+                fish_dat = fish_dat.drop(equal_rows.index[:-1])
+            elif len(equal_rows) > 1 and equal_rows.index[-1] != last_index:
+                fish_dat = fish_dat.drop(equal_rows.index)
+            elif len(equal_rows) == 1:
+                fish_dat = fish_dat.drop(equal_rows.index)
+
+            fish_dat.drop(labels = ['transition_filter'], axis = 1, inplace = True)
+            filtered = pd.concat([filtered, fish_dat])
+        
+        # Print summary statistics
+        initial_transitions = len(self.master_state_table)
+        final_transitions = len(filtered)
+        removed = initial_transitions - final_transitions
+        if initial_transitions == 0:
+            raise ValueError("[TTE] Adjacency filter cannot run: master_state_table is empty.")
+        print(f"\n[TTE] Adjacency filter complete:")
+        print(f"  Initial transitions: {initial_transitions:,}")
+        print(f"  Final transitions: {final_transitions:,}")
+        print(f"  Removed illegal movements: {removed:,} ({removed/initial_transitions*100:.1f}%)")
+        
+        if self.initial_state_release == False:
+            self.master_state_table 
+
+        self.master_state_table = filtered
 
     def data_prep(self, project, unknown_state=None, bucket_length_min=15, adjacency_filter=None):
         self.project = project
@@ -861,7 +994,9 @@ class time_to_event():
             self.recap_data = self.recap_data[self.recap_data.prev_state > 0]
         # Set time_0 to the previous epoch or first_recapture if it's the first observation
         self.recap_data['time_0'] = self.recap_data.groupby('freq_code')['epoch'].shift(1)
-        self.recap_data['time_0'].fillna(self.recap_data['first_recapture'], inplace=True)
+        self.recap_data['time_0'] = self.recap_data['time_0'].fillna(
+            self.recap_data['first_recapture']
+        )
     
         self.recap_data['time_delta'] = self.recap_data['epoch'] - self.recap_data['time_0']
     
@@ -900,150 +1035,22 @@ class time_to_event():
                 self._ensure_diagonals()
                 self._insert_missing_releases(project)
                 self._normalize_master()
-            except Exception:
-                pass
+            except (KeyError, ValueError, TypeError, IndexError) as e:
+                raise RuntimeError(
+                    "[TTE] Failed to apply initial release normalization. "
+                    "Check release rows and state transitions for validity."
+                ) from e
 
         if adjacency_filter is not None:
-            '''When the truth value of a detection is assessed, a detection
-            may be valid for a fish that is not present.
-
-            In some instances, especially when using Yagi antennas, back-lobes
-            may develop where a fish in the tailrace of a powerhouse is
-            detected in the forebay antenna.  In these instances, a downstream
-            migrating fish would not have migrated up through the powerhouse.
-
-            From a false positive perspective, these records are valid detections.
-            However, from a movement perspective, these series of detections
-            could not occur and should be removed.
-
-            This function repeatedly removes rows with 'illegal' movements
-            until there are none left.  Rows with 'illegal' transitions are
-            identified with a list that is passed to the function.
-
-            input = list of illegal transitions stored as (from, to) tuples
-            '''
-            fish = self.master_state_table.freq_code.unique()
-            filtered = pd.DataFrame()
-            for i in fish:
-                fish_dat =  self.master_state_table[self.master_state_table.freq_code == i]
-
-                # create a condition, we're running this filter because we know illogical movements are present
-                bad_moves_present = True
-
-                # while there are illogical movements, keep filtering
-                while bad_moves_present == True:
-                    # let's keep count of the number of rows we are filtering
-                    filtered_rows = 0.0
-
-                    # for every known bad movement
-                    for j in adjacency_filter:
-                        # find those rows where this movement exists
-                        try:
-                            fish_dat['transition_filter'] = np.where(fish_dat.transition == j,1,0)
-                        except:
-                            bad_moves_present = False  # Fixed: was == instead of =
-                            break
-                        #fish_dat.set_index(['time_0'], inplace = True)
-
-                        if fish_dat.transition_filter.sum() > 0:
-                            # add up those rows
-                            filtered_rows = filtered_rows + fish_dat.transition_filter.sum()
-                            print ('%s rows found with %s movements'%(fish_dat.transition_filter.sum(),j))
-
-                            # do some data management, we need to take the start state and t0 of the affected rows and place them on the subsequent row
-                            idx = fish_dat.index[fish_dat['transition_filter']==1]
-                            time0 = fish_dat.iloc[0]['time_0']
-
-                            for k in idx:
-                                idx_int = fish_dat.index.get_loc(k)
-                                t0_col = fish_dat.columns.get_loc('time_0')
-                                start_col = fish_dat.columns.get_loc('start_state')
-
-                                # get start time and start state
-                                start = fish_dat.iloc[idx_int]['start_state']
-                                t0 = fish_dat.iloc[idx_int]['time_0']
-
-                                # write it to next row
-                                try:
-                                    idx1 = idx_int + 1
-                                except:
-                                    start = fish_dat.iloc[idx_int].index[0]
-                                    idx1 = start + 1
-                                try:
-                                    fish_dat.iloc[idx1, start_col] = start
-                                    fish_dat.iloc[idx1, t0_col] = t0
-                                except IndexError:
-                                    # when this occurs, there is no extra row - this last row will be deleted
-                                    continue
-
-                            # remove those rows
-                            fish_dat = fish_dat[fish_dat.transition_filter != 1]
-                            # NOTE: do NOT assign a single time0 to the entire DataFrame
-                            # (that overwrites time_0 for all remaining rows). The
-                            # intended behavior is to copy start/time to the next row
-                            # above (done in the loop that writes to idx1), so we
-                            # leave the remaining time_0 values intact.
-
-                            # create a new transition field
-                            fish_dat['transition'] = list(zip(fish_dat.start_state.values.astype(int),
-                                                              fish_dat.end_state.values.astype(int)))  # Fixed: was tuple, should be list
-                            
-                            #fish_dat.reset_index(inplace = True)
-                        else:
-                            pass  # No illegal movements for this transition type
-                            #fish_dat.reset_index(inplace = True)
-
-                    if filtered_rows == 0.0:
-                        # stop that loop
-                        bad_moves_present = False
-                    else:
-                        pass  # Continue filtering
-                
-                # we can only have 1 transmission to point of no return - let's grab the last recapture
-                equal_rows = fish_dat[fish_dat['start_state'] == fish_dat['end_state']]
-
-                # Step 2: Get the index of the last occurrence where column1 equals column2
-                try:
-                    last_index = fish_dat.index[-1]
-
-                    # Step 3: Drop all rows where column1 equals column2 except the last one
-                    if len(equal_rows) > 1 and equal_rows.index[-1] == last_index:
-                        fish_dat = fish_dat.drop(equal_rows.index[:-1])
-                    elif len(equal_rows) > 1 and equal_rows.index[-1] != last_index:
-                        fish_dat = fish_dat.drop(equal_rows.index)
-                    elif len(equal_rows) == 1:
-                        fish_dat = fish_dat.drop(equal_rows.index)
-                    else:
-                        pass
-    
-                    fish_dat.drop(labels = ['transition_filter'], axis = 1, inplace = True)
-                    filtered = pd.concat([filtered, fish_dat])
-                except Exception as e:
-                    print (f"[TTE] Warning: Error processing fish {i}: {e}")
-            
-            # Print summary statistics
-            initial_transitions = len(self.master_state_table)
-            final_transitions = len(filtered)
-            removed = initial_transitions - final_transitions
-            print(f"\n[TTE] Adjacency filter complete:")
-            print(f"  Initial transitions: {initial_transitions:,}")
-            print(f"  Final transitions: {final_transitions:,}")
-            print(f"  Removed illegal movements: {removed:,} ({removed/initial_transitions*100:.1f}%)")
-            
-            if self.initial_state_release == False:
-                self.master_state_table 
-
-            self.master_state_table = filtered
+            self._apply_adjacency_filter(adjacency_filter)
         # Apply species filter to master_state_table if requested (defer filtering until master built)
-        try:
-            if getattr(self, 'species', None) is not None:
-                if 'species' in self.master_state_table.columns:
-                    before = len(self.master_state_table)
-                    self.master_state_table = self.master_state_table[self.master_state_table.species == self.species].copy()
-                    after = len(self.master_state_table)
-                    print(f"[TTE] Applied species filter '{self.species}': {before} -> {after} rows")
-        except Exception:
-            pass
+        if getattr(self, 'species', None) is not None:
+            if 'species' not in self.master_state_table.columns:
+                raise ValueError("[TTE] Species filter requested but 'species' column is missing.")
+            before = len(self.master_state_table)
+            self.master_state_table = self.master_state_table[self.master_state_table.species == self.species].copy()
+            after = len(self.master_state_table)
+            print(f"[TTE] Applied species filter '{self.species}': {before} -> {after} rows")
         #self.master_stateTable = self.master_stateTable[self.master_stateTable.firstObs == 0]
         #self.master_state_table.to_csv(os.path.join(project.output_dir,'state_table.csv')
         
@@ -1186,8 +1193,10 @@ class time_to_event():
             try:
                 rows['time_1'] = rows['time_1'].astype('int64')
                 rows['time_0'] = rows['time_0'].astype('int64')
-            except Exception:
-                pass
+            except (ValueError, TypeError) as exc:
+                raise ValueError(
+                    f"[TTE] Invalid time_0/time_1 values for fish {fish}."
+                ) from exc
             last_idx = rows['time_1'].idxmax()
             last_row = rows.loc[last_idx]
             last_state = int(last_row['end_state'])
@@ -1205,8 +1214,10 @@ class time_to_event():
                         start_pos -= 1
                     try:
                         entry_time = int(fr.at[start_pos, 'time_0'])
-                    except Exception:
-                        entry_time = last_time
+                    except (KeyError, ValueError, TypeError) as exc:
+                        raise ValueError(
+                            f"[TTE] Invalid entry time for fish {fish} at state {last_state}."
+                        ) from exc
 
                 diag = {
                     'freq_code': fish,
@@ -1229,91 +1240,90 @@ class time_to_event():
                 if c in self.master_state_table.columns:
                     try:
                         diag_df[c] = diag_df[c].astype(self.master_state_table[c].dtype)
-                    except Exception:
-                        pass
+                    except (ValueError, TypeError) as exc:
+                        raise ValueError(
+                            f"[TTE] Failed to cast diagonal column '{c}' for fish rows."
+                        ) from exc
             self.master_state_table = pd.concat([self.master_state_table, diag_df], axis=0, ignore_index=True)
 
     def _insert_missing_releases(self, project=None):
         """Insert a release (start_state==0) row for fish missing one using
         release times from project's tag table (must have `freq_code`)."""
-        try:
-            tag_table = None
-            if hasattr(self, 'project') and hasattr(self.project, 'tags'):
-                tag_table = self.project.tags
-            elif project is not None and hasattr(project, 'tags'):
-                tag_table = project.tags
-            tag_df = None
-            if tag_table is not None:
-                try:
-                    if 'freq_code' in tag_table.columns:
-                        tag_df = tag_table.copy()
-                    else:
-                        tag_df = tag_table.reset_index()
-                except Exception:
-                    tag_df = None
-            if tag_df is None or 'freq_code' not in tag_df.columns:
-                return
+        tag_table = None
+        if hasattr(self, 'project') and hasattr(self.project, 'tags'):
+            tag_table = self.project.tags
+        elif project is not None and hasattr(project, 'tags'):
+            tag_table = project.tags
+        if tag_table is None:
+            raise ValueError("[TTE] Tag table missing; cannot insert missing releases.")
 
-            missing = []
-            for fish in self.master_state_table['freq_code'].unique():
-                fish_df = self.master_state_table[self.master_state_table['freq_code'] == fish]
-                if ((fish_df['start_state'] == 0).any()):
-                    continue
-                earliest = fish_df.sort_values(['time_0','time_1']).iloc[0]
-                try:
-                    candidate_end = int(earliest.get('start_state', earliest.get('end_state', 0)))
-                except Exception:
-                    candidate_end = int(earliest.get('end_state', 0))
-                if candidate_end == 0:
-                    candidate_end = int(earliest.get('end_state', 0))
+        if 'freq_code' in tag_table.columns:
+            tag_df = tag_table.copy()
+        else:
+            tag_df = tag_table.reset_index()
+        if 'freq_code' not in tag_df.columns:
+            raise ValueError("[TTE] Tag table missing required 'freq_code' column.")
 
-                try:
-                    rows = tag_df[tag_df['freq_code'].astype(str) == str(fish)]
-                except Exception:
-                    rows = pd.DataFrame()
-                if rows.empty:
-                    continue
+        missing = []
+        for fish in self.master_state_table['freq_code'].unique():
+            fish_df = self.master_state_table[self.master_state_table['freq_code'] == fish]
+            if (fish_df['start_state'] == 0).any():
+                continue
+            earliest = fish_df.sort_values(['time_0', 'time_1']).iloc[0]
+            try:
+                candidate_end = int(earliest.get('start_state', earliest.get('end_state', 0)))
+            except (ValueError, TypeError) as exc:
+                raise ValueError(f"[TTE] Invalid start_state for fish {fish}.") from exc
+            if candidate_end == 0:
+                candidate_end = int(earliest.get('end_state', 0))
 
-                if 'rel_date' in rows.columns:
+            rows = tag_df[tag_df['freq_code'].astype(str) == str(fish)]
+            if rows.empty:
+                raise ValueError(f"[TTE] Missing release data for fish {fish}.")
+
+            if 'rel_date' in rows.columns:
+                try:
+                    rel_epoch = int(
+                        (pd.to_datetime(rows['rel_date'].iloc[0]) - pd.Timestamp('1970-01-01'))
+                        / pd.Timedelta('1s')
+                    )
+                except (ValueError, TypeError) as exc:
+                    raise ValueError(f"[TTE] Invalid rel_date for fish {fish}.") from exc
+            elif 'epoch' in rows.columns:
+                try:
+                    rel_epoch = int(rows['epoch'].iloc[0])
+                except (ValueError, TypeError) as exc:
+                    raise ValueError(f"[TTE] Invalid epoch for fish {fish}.") from exc
+            else:
+                raise ValueError(f"[TTE] Tag table missing rel_date/epoch for fish {fish}.")
+
+            species_val = rows['species'].iloc[0] if 'species' in rows.columns else np.nan
+            release_row = {
+                'freq_code': fish,
+                'species': species_val,
+                'start_state': 0,
+                'end_state': candidate_end,
+                'presence': 0,
+                'time_stamp': pd.to_datetime(rel_epoch, unit='s'),
+                'time_delta': int(earliest['time_0'] - rel_epoch) if 'time_0' in earliest else 0,
+                'first_obs': 0,
+                'time_0': int(rel_epoch),
+                'time_1': int(earliest['time_0']) if 'time_0' in earliest else int(rel_epoch),
+                'transition': (0, candidate_end)
+            }
+            missing.append(release_row)
+
+        if missing:
+            mr = pd.DataFrame(missing)
+            for c in mr.columns:
+                if c in self.master_state_table.columns:
                     try:
-                        rel_epoch = int((pd.to_datetime(rows['rel_date'].iloc[0]) - pd.Timestamp('1970-01-01')) / pd.Timedelta('1s'))
-                    except Exception:
-                        continue
-                elif 'epoch' in rows.columns:
-                    try:
-                        rel_epoch = int(rows['epoch'].iloc[0])
-                    except Exception:
-                        continue
-                else:
-                    continue
-
-                species_val = rows['species'].iloc[0] if 'species' in rows.columns else np.nan
-                release_row = {
-                    'freq_code': fish,
-                    'species': species_val,
-                    'start_state': 0,
-                    'end_state': candidate_end,
-                    'presence': 0,
-                    'time_stamp': pd.to_datetime(rel_epoch, unit='s'),
-                    'time_delta': int(earliest['time_0'] - rel_epoch) if 'time_0' in earliest else 0,
-                    'first_obs': 0,
-                    'time_0': int(rel_epoch),
-                    'time_1': int(earliest['time_0']) if 'time_0' in earliest else int(rel_epoch),
-                    'transition': (0, candidate_end)
-                }
-                missing.append(release_row)
-
-            if missing:
-                mr = pd.DataFrame(missing)
-                for c in mr.columns:
-                    if c in self.master_state_table.columns:
-                        try:
-                            mr[c] = mr[c].astype(self.master_state_table[c].dtype)
-                        except Exception:
-                            pass
-                self.master_state_table = pd.concat([self.master_state_table, mr], axis=0, ignore_index=True)
-        except Exception:
-            return
+                        mr[c] = mr[c].astype(self.master_state_table[c].dtype)
+                    except (ValueError, TypeError) as exc:
+                        raise ValueError(
+                            f"[TTE] Failed to cast release column '{c}' for missing releases."
+                        ) from exc
+            self.master_state_table = pd.concat([self.master_state_table, mr], axis=0, ignore_index=True)
 
     def _normalize_master(self):
         """Normalize master_state_table: coerce time dtypes, drop duplicates,
@@ -1321,22 +1331,17 @@ class time_to_event():
         try:
             self.master_state_table['time_0'] = self.master_state_table['time_0'].astype('int64')
             self.master_state_table['time_1'] = self.master_state_table['time_1'].astype('int64')
-        except Exception:
-            pass
+        except (ValueError, TypeError) as exc:
+            raise ValueError("[TTE] time_0/time_1 must be numeric epoch seconds.") from exc
 
         dup_subset = ['freq_code', 'start_state', 'end_state', 'time_0', 'time_1']
         self.master_state_table = self.master_state_table.drop_duplicates(subset=dup_subset, keep='first').copy()
         self.master_state_table.sort_values(by=['freq_code', 'time_0', 'time_1'], inplace=True)
 
-        def _recompute(g):
-            g = g.copy()
-            g['presence'] = np.arange(len(g)).astype('int32')
-            g['first_obs'] = 0
-            if len(g) > 0:
-                g.iloc[0, g.columns.get_loc('first_obs')] = int(g.iloc[0].get('first_obs', 1))
-            return g
-
-        self.master_state_table = self.master_state_table.groupby('freq_code', group_keys=False).apply(_recompute).reset_index(drop=True)
+        self.master_state_table['presence'] = (
+            self.master_state_table.groupby('freq_code').cumcount().astype('int32')
+        )
+        self.master_state_table['first_obs'] = 0
 
 # Example usage
 # master_state_table = pd.DataFrame({...})
