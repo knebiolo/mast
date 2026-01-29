@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.1] - 2026-01-28
+
+### Fixed
+- PIT parser: allow fixed-width Biomark exports to map receivers via `Reader ID` when `ant_to_rec_dict` is provided.
+- PIT parser: clearer error message when no antenna/reader column is found in fixed-width files.
+
+---
+
 ## [1.0.0] - 2025-11-24
 
 **First Official Public Release** - Implementing peer-reviewed algorithms from Nebiolo & Castro-Santos (2024)

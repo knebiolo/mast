@@ -1842,7 +1842,15 @@ def PIT(file_name,
             antenna_col = None
             for col in telem_dat.columns:
                 col_lower = str(col).lower().strip()
-                if col_lower in ('antenna id', 'antenna', 'ant', 'antennae', 'antennae id'):
+                if col_lower in (
+                    'antenna id',
+                    'antenna',
+                    'ant',
+                    'antennae',
+                    'antennae id',
+                    'reader id',
+                    'readerid',
+                ):
                     antenna_col = col
                     break
 
@@ -1877,7 +1885,10 @@ def PIT(file_name,
                 # drop detections that do not map to a known receiver
                 telem_dat = telem_dat.dropna(subset=['rec_id'])
             else:
-                raise ValueError('Multi-antenna fixed-width PIT file requires an antenna column but none was found')
+                raise ValueError(
+                    'Multi-antenna fixed-width PIT file requires an antenna/reader column '
+                    '(e.g., "Antenna ID" or "Reader ID"), but none was found'
+                )
 
     # Data cleaning - remove invalid entries
     print(f"\nCleaning data - original records: {len(telem_dat)}")

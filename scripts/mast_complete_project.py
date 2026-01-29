@@ -20,8 +20,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 #%% set up project
-project_dir = r"C:\path\to\your\project"  # UPDATE THIS
-db_name = 'Scotland'
+project_dir = r"C:\Users\Kevin.Nebiolo\OneDrive - Kleinschmidt Associates\Software\mast\data\data_package\setup"  # UPDATE THIS
+db_name = 'thompson_2025_qc'
 
 detection_count = 5
 duration = 1
@@ -45,26 +45,30 @@ project = radio_project(project_dir,
 #,presence,classified,trained
 
 #%%  import data
-# rec_id = 'R15'
-# rec_type = 'srx800'
-#  #TODO - remove these directory arguments - the project is smart
-# training_dir = os.path.join(project_dir,'Data','Training_Files')
-# db_dir = os.path.join(project_dir,'%s.h5'%(db_name))
-# scan_time = 1 #10.5        
-# channels = 1. #2
-# antenna_to_rec_dict = {'A0':rec_id}
+rec_id = 'R0001'
+rec_type = 'PIT'
+ #TODO - remove these directory arguments - the project is smart
+training_dir = os.path.join(project_dir,'Data','Training_Files')
+db_dir = os.path.join(project_dir,'%s.h5'%(db_name))
+scan_time = 1 #10.5        
+channels = 1. #2
+antenna_to_rec_dict = {1:'R0001',
+                        2:'R0002',
+                        3:'R0003',
+                        4:'R0004',
+                        5:'R0005'}
 
-# project.telem_data_import(rec_id,
-#                            rec_type,
-#                            training_dir,
-#                            db_dir,
-#                            scan_time,
-#                            channels,
-#                            antenna_to_rec_dict,
-#                            True)
+project.telem_data_import(rec_id,
+                           rec_type,
+                           training_dir,
+                           db_dir,
+                           scan_time,
+                           channels,
+                           antenna_to_rec_dict,
+                           True)
 
-# # undo import
-# # project.undo_import(rec_id)
+# undo import
+# project.undo_import(rec_id)
 
 #%%  train data
 # # set parameters and get a list of fish to iterate over
@@ -177,58 +181,56 @@ print('Overlap reduction took', time.time() - start_t, 'seconds')
 # project.undo_recaptures()
 # project.repack_database()
 
-#project.make_recaptures_table(export = True) 
+#project.make_recaptures_table(export = True, pit_study = True) 
 
 #%% create Time to Event Model
     
 # what is the Node to State relationship - use Python dictionary
 # node_to_state = {'T5':1,'T6':1,'T7':2,'T15':3,'T3':4}
-upstream_states = {'R15':1,'R14':1,    # occum
-                 'R13':2,'R12':2,    # downstream gate
-                 'R10':3,            # tailrace
-                 'R11':4,            # fish lift entrance
-                 'R08':5,'R09':5,    # spillway
-                 'R06':6,'R07':6,    # surface bypasss
-                 'R05':7,            # submerged bypass
-                 'R04':8,            # fish lift exit
-                 'R03':9,            # forebay
-                 'R01':10,'R02':10}  # windham
+states = {'R1696':1,
+          'R1699-1':2,
+          'R1699-2':3,
+          'R1698':4,
+          'R1699-3':5,
+          'R1695':5,
+          'R0004':6,
+          'R0005':6,
+          'R0001':7,
+          'R0002':7,
+          'R0003':8} 
 
-downstream_states = {'R15':1,'R14':1,# occum
-                 'R13':2,'R12':2,    # downstream gate
-                 'R10':2,            # tailrace
-                 'R11':2,            # fish lift entrance
-                 'R08':3,'R09':3,    # spillway
-                 'R06':6,'R07':6,    # surface bypasss
-                 'R05':7,            # submerged bypass
-                 'R04':9,            # fish lift exit
-                 'R03':9,            # forebay
-                 'R01':10,'R02':10}  # windham
+# states = {'R1699-3':5,
+#           'R1695':5,
+#           'R0004':6,
+#           'R0005':6,
+#           'R0001':7,
+#           'R0002':7,
+#           'R0003':8}
                                    
-
-# Step 1, create time to event data class 
-tte = formatter.time_to_event(upstream_states,
+# Step 1: Create time to event data class 
+tte = formatter.time_to_event(states,
                               project,
                               initial_state_release = True,
                               last_presence_time0 = False,
+                              hit_ratio_filter = False,
                               cap_loc = None,
-                              rel_loc = 'sprague',
-                              species = None,
+                              rel_loc = None,
+                              species = "BULL",
                               rel_date = None,
                               recap_date = None)
 
-upstream_adjacency_filter = [(9, 1),(9, 2),(9, 3),(9, 5),(9, 8),(9, 9),(9, 6),
-                              (8, 1),(8, 2),(8, 3),(8, 5),(8, 9),(8, 8),(8, 6),
-                               (6, 1),(6, 6),(6, 5),
-                                (1, 8),(1, 9),(2, 9),(2, 8),(3, 8),(3, 9),(0, 8),(0, 9),(5, 9)]
+# upstream_adjacency_filter = [(9, 1),(9, 2),(9, 3),(9, 5),(9, 8),(9, 9),(9, 6),
+#                               (8, 1),(8, 2),(8, 3),(8, 5),(8, 9),(8, 8),(8, 6),
+#                                (6, 1),(6, 6),(6, 5),
+#                                 (1, 8),(1, 9),(2, 9),(2, 8),(3, 8),(3, 9),(0, 8),(0, 9),(5, 9)]
 
-downstream_adjacency_filter = [(1, 6),(1, 7),(1, 8),(1, 9),
-                               (9, 1),(8, 1),(9, 2),(9, 3),
-                               (2, 9),(2, 7),(2, 6),(2, 10),(2, 3),
-                               (3, 2),(3, 9)]
+# downstream_adjacency_filter = [(1, 6),(1, 7),(1, 8),(1, 9),
+#                                (9, 1),(8, 1),(9, 2),(9, 3),
+#                                (2, 9),(2, 7),(2, 6),(2, 10),(2, 3),
+#                                (3, 2),(3, 9)]
 
 # Step 2, format data - without covariates
-tte.data_prep(project, adjacency_filter = upstream_adjacency_filter)
+tte.data_prep(project)
 # Step 3, generate a summary
 stats = tte.summary()
 #tte.master_state_table.to_csv(os.path.join(project_dir,'Output','thompson_falls.csv'))
