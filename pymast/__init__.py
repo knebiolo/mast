@@ -28,7 +28,7 @@ from .parsers import *
 from .radio_project import *
 
 # Version
-__version__ = '1.0.0'
+__version__ = '1.0.2'
 
 # Define what's available when using "from pymast import *"
 __all__ = [

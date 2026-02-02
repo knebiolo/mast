@@ -13,6 +13,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.2] - 2026-02-02
+
+### Added
+- **Import Statistics**: `telem_data_import()` now displays comprehensive statistics after import:
+  - Total detection count with summary statistics
+  - 5-number summary (min, Q1, median, Q3, max) for detections per file to identify outliers
+  - Unique tag count
+  - Duplicate detection count and IDs (same timestamp)
+  - Time coverage: start/end dates, duration, and detection rate per hour
+- Statistics are formatted for readability and logged at INFO level
+- Graceful error handling if statistics cannot be calculated
+
+---
+
 ## [1.0.1] - 2026-01-28
 
 ### Fixed

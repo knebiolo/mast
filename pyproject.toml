@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pymast"
-version = "1.0.1"
+version = "1.0.2"
 description = "Movement Analysis Software for Telemetry (MAST) - False positive removal and movement analysis for radio telemetry data"
 readme = "README.md"
 authors = [

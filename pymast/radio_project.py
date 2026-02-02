@@ -496,9 +496,19 @@ class radio_project():
         
         logger.info(f"  Found {len(tFiles)} file(s) to import")
         
+        # Track detections per file for statistics
+        detections_per_file = []
+        
         # for every file call the correct text parser and import
         for i, f in enumerate(tqdm(tFiles, desc=f"Importing {rec_id}", unit="file"), 1):
             logger.debug(f"  Processing file {i}/{len(tFiles)}: {f}")
+            
+            # Count detections before import
+            try:
+                pre_count = len(pd.read_hdf(self.db, key='raw_data', where=f'rec_id = "{rec_id}"'))
+            except (KeyError, FileNotFoundError):
+                pre_count = 0
+            
             # get the complete file directory
             f_dir = os.path.join(file_dir,f)
             
@@ -533,8 +543,91 @@ class radio_project():
             else:
                 logger.error(f"No import routine for receiver type: {rec_type}")
                 raise ValueError(f"No import routine available for receiver type: {rec_type}")
+            
+            # Count detections after import
+            try:
+                post_count = len(pd.read_hdf(self.db, key='raw_data', where=f'rec_id = "{rec_id}"'))
+                detections_this_file = post_count - pre_count
+                detections_per_file.append(detections_this_file)
+            except (KeyError, FileNotFoundError):
+                detections_per_file.append(0)
         
         logger.info(f"✓ Import complete for receiver {rec_id}: {len(tFiles)} file(s) processed")
+        
+        # Calculate and display import statistics
+        try:
+            raw_data = pd.read_hdf(self.db, key='raw_data', where=f'rec_id = "{rec_id}"')
+            
+            # Total Detection Count
+            total_detections = len(raw_data)
+            logger.info(f"\n{'='*60}")
+            logger.info(f"IMPORT STATISTICS FOR {rec_id}")
+            logger.info(f"{'='*60}")
+            logger.info(f"Total Detection Count: {total_detections:,}")
+            
+            if total_detections > 0:
+                # Detection count summary statistics
+                logger.info(f"\nDetection Summary Statistics:")
+                logger.info(f"  Mean detections per file: {total_detections / len(tFiles):.1f}")
+                logger.info(f"  Files processed: {len(tFiles)}")
+                
+                # 5-number summary for detections per file
+                if len(detections_per_file) > 0:
+                    det_array = np.array(detections_per_file)
+                    logger.info(f"\nDetections Per File (5-number summary):")
+                    logger.info(f"  Min:    {np.min(det_array):,.0f}")
+                    logger.info(f"  Q1:     {np.percentile(det_array, 25):,.0f}")
+                    logger.info(f"  Median: {np.median(det_array):,.0f}")
+                    logger.info(f"  Q3:     {np.percentile(det_array, 75):,.0f}")
+                    logger.info(f"  Max:    {np.max(det_array):,.0f}")
+                
+                # Unique Tag Count
+                unique_tags = raw_data['freq_code'].nunique()
+                logger.info(f"\nUnique Tag Count: {unique_tags}")
+                
+                # Duplicate Tag Count and IDs
+                # Check for detections at the exact same timestamp (true duplicates)
+                if 'time_stamp' in raw_data.columns:
+                    dup_mask = raw_data.duplicated(subset=['freq_code', 'time_stamp'], keep=False)
+                    duplicate_count = dup_mask.sum()
+                    
+                    if duplicate_count > 0:
+                        duplicate_tags = raw_data.loc[dup_mask, 'freq_code'].unique()
+                        logger.info(f"\nDuplicate Detection Count (same timestamp): {duplicate_count:,}")
+                        logger.info(f"Duplicate Tag IDs ({len(duplicate_tags)} tags):")
+                        for tag in sorted(duplicate_tags)[:10]:  # Show first 10
+                            tag_dups = dup_mask & (raw_data['freq_code'] == tag)
+                            logger.info(f"  {tag}: {tag_dups.sum()} duplicate(s)")
+                        if len(duplicate_tags) > 10:
+                            logger.info(f"  ... and {len(duplicate_tags) - 10} more")
+                    else:
+                        logger.info(f"\nDuplicate Detection Count: 0 (no exact timestamp duplicates)")
+                
+                # Time Coverage
+                if 'time_stamp' in raw_data.columns:
+                    raw_data['time_stamp'] = pd.to_datetime(raw_data['time_stamp'])
+                    start_time = raw_data['time_stamp'].min()
+                    end_time = raw_data['time_stamp'].max()
+                    duration = end_time - start_time
+                    
+                    logger.info(f"\nTime Coverage:")
+                    logger.info(f"  Start: {start_time}")
+                    logger.info(f"  End:   {end_time}")
+                    logger.info(f"  Duration: {duration.days} days, {duration.seconds // 3600} hours")
+                    
+                    # Detection rate
+                    if duration.total_seconds() > 0:
+                        det_per_hour = total_detections / (duration.total_seconds() / 3600)
+                        logger.info(f"  Detection rate: {det_per_hour:.1f} detections/hour")
+                
+                logger.info(f"{'='*60}\n")
+            else:
+                logger.warning(f"No detections found for receiver {rec_id}")
+                
+        except KeyError:
+            logger.warning(f"Could not retrieve statistics - raw_data table not found in database")
+        except Exception as e:
+            logger.warning(f"Error calculating import statistics: {e}")
     
     def get_fish(self, rec_id, train = True, reclass_iter = None):
         logger.info(f"Getting fish for receiver {rec_id}")
@@ -1603,6 +1696,7 @@ class radio_project():
     def make_recaptures_table(self, export=True, pit_study=False):
         '''Creates a recaptures key in the HDF5 file, iterating over receivers to manage memory.'''
         logger.info("Creating recaptures table")
+        logger.info(f"  PIT study mode: {pit_study}")
         logger.info(f"  Processing {len(self.receivers)} receiver(s)")
         # prepare a heartbeat log so long runs can be monitored (one-line per receiver)
         heartbeat_dir = os.path.join(self.project_dir, 'build')
@@ -1622,7 +1716,9 @@ class radio_project():
                 f"Failed to write heartbeat start to '{heartbeat_path}': {e}"
             ) from e
         
-        if pit_study==False:
+        if not pit_study:
+            # RADIO STUDY PATH
+            logger.info("  Using RADIO study processing path")
             # Convert release dates to datetime if not already done
             self.tags['rel_date'] = pd.to_datetime(self.tags['rel_date'])
             tags_copy = self.tags.copy()
@@ -1796,6 +1892,8 @@ class radio_project():
                     ) from e
                 
         else:
+            # PIT STUDY PATH
+            logger.info("  Using PIT study processing path")
             # Loop over each receiver in self.receivers
             for rec in tqdm(self.receivers.index, desc="Processing PIT receivers", unit="receiver"):
                 logger.info(f"  Processing {rec} (PIT study)...")
