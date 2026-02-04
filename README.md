@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"/></a>
-  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.8+-blue.svg" alt="Python 3.8+"/></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.9+-blue.svg" alt="Python 3.9+"/></a>
 </p>
 
 **PyMAST** (Movement Analysis Software for Telemetry) is a Python toolkit for processing, analyzing, and modeling radio telemetry data. From data import to statistical model export, PyMAST provides a complete solution for aquatic telemetry studies.
@@ -29,14 +29,31 @@
 
 **New users: Start with [GETTING_STARTED.md](GETTING_STARTED.md) for a complete walkthrough.**
 
+### Requirements
+
+- **Python 3.9 or higher** (Python 3.8 is not supported due to dask-ml requirements)
+- Compatible with Windows, macOS, and Linux
+
 ### Installation
 
+**Standard installation:**
 ```bash
 pip install pymast
 ```
 
-Or from source:
+**For Spyder/Anaconda users:**
 
+To ensure installation in the correct environment, use:
+```bash
+python -m pip install pymast
+```
+
+To verify you're using the right Python interpreter:
+```bash
+python -c "import sys; print(sys.executable)"
+```
+
+**From source:**
 ```bash
 cd mast
 pip install -e .

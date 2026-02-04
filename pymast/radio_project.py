@@ -107,9 +107,12 @@ import dask.array as da
 try:
     from dask_ml.cluster import KMeans
     _KMEANS_IMPL = 'dask'
-except ImportError:
-    from sklearn.cluster import KMeans
-    _KMEANS_IMPL = 'sklearn'
+except ImportError as e:
+    raise ImportError(
+        "dask-ml is required but not installed. "
+        "Please ensure you have Python >=3.9 and install pymast with: pip install pymast\n"
+        f"Original error: {e}"
+    ) from e
 
 # Initialize logger
 logger = logging.getLogger('pymast.radio_project')
@@ -496,19 +499,9 @@ class radio_project():
         
         logger.info(f"  Found {len(tFiles)} file(s) to import")
         
-        # Track detections per file for statistics
-        detections_per_file = []
-        
         # for every file call the correct text parser and import
         for i, f in enumerate(tqdm(tFiles, desc=f"Importing {rec_id}", unit="file"), 1):
             logger.debug(f"  Processing file {i}/{len(tFiles)}: {f}")
-            
-            # Count detections before import
-            try:
-                pre_count = len(pd.read_hdf(self.db, key='raw_data', where=f'rec_id = "{rec_id}"'))
-            except (KeyError, FileNotFoundError):
-                pre_count = 0
-            
             # get the complete file directory
             f_dir = os.path.join(file_dir,f)
             
@@ -543,14 +536,6 @@ class radio_project():
             else:
                 logger.error(f"No import routine for receiver type: {rec_type}")
                 raise ValueError(f"No import routine available for receiver type: {rec_type}")
-            
-            # Count detections after import
-            try:
-                post_count = len(pd.read_hdf(self.db, key='raw_data', where=f'rec_id = "{rec_id}"'))
-                detections_this_file = post_count - pre_count
-                detections_per_file.append(detections_this_file)
-            except (KeyError, FileNotFoundError):
-                detections_per_file.append(0)
         
         logger.info(f"✓ Import complete for receiver {rec_id}: {len(tFiles)} file(s) processed")
         
@@ -560,6 +545,14 @@ class radio_project():
             
             # Total Detection Count
             total_detections = len(raw_data)
+            
+            # Print to console (always visible)
+            print(f"\n{'='*60}")
+            print(f"IMPORT STATISTICS FOR {rec_id}")
+            print(f"{'='*60}")
+            print(f"Total Detection Count: {total_detections:,}")
+            
+            # Also log for logging systems
             logger.info(f"\n{'='*60}")
             logger.info(f"IMPORT STATISTICS FOR {rec_id}")
             logger.info(f"{'='*60}")
@@ -567,41 +560,41 @@ class radio_project():
             
             if total_detections > 0:
                 # Detection count summary statistics
+                print(f"\nDetection Summary Statistics:")
+                print(f"  Mean detections per file: {total_detections / len(tFiles):.1f}")
+                print(f"  Files processed: {len(tFiles)}")
+                
                 logger.info(f"\nDetection Summary Statistics:")
                 logger.info(f"  Mean detections per file: {total_detections / len(tFiles):.1f}")
                 logger.info(f"  Files processed: {len(tFiles)}")
                 
-                # 5-number summary for detections per file
-                if len(detections_per_file) > 0:
-                    det_array = np.array(detections_per_file)
-                    logger.info(f"\nDetections Per File (5-number summary):")
-                    logger.info(f"  Min:    {np.min(det_array):,.0f}")
-                    logger.info(f"  Q1:     {np.percentile(det_array, 25):,.0f}")
-                    logger.info(f"  Median: {np.median(det_array):,.0f}")
-                    logger.info(f"  Q3:     {np.percentile(det_array, 75):,.0f}")
-                    logger.info(f"  Max:    {np.max(det_array):,.0f}")
-                
                 # Unique Tag Count
                 unique_tags = raw_data['freq_code'].nunique()
+                print(f"\nUnique Tag Count: {unique_tags}")
                 logger.info(f"\nUnique Tag Count: {unique_tags}")
                 
-                # Duplicate Tag Count and IDs
-                # Check for detections at the exact same timestamp (true duplicates)
-                if 'time_stamp' in raw_data.columns:
-                    dup_mask = raw_data.duplicated(subset=['freq_code', 'time_stamp'], keep=False)
-                    duplicate_count = dup_mask.sum()
-                    
-                    if duplicate_count > 0:
-                        duplicate_tags = raw_data.loc[dup_mask, 'freq_code'].unique()
-                        logger.info(f"\nDuplicate Detection Count (same timestamp): {duplicate_count:,}")
-                        logger.info(f"Duplicate Tag IDs ({len(duplicate_tags)} tags):")
-                        for tag in sorted(duplicate_tags)[:10]:  # Show first 10
-                            tag_dups = dup_mask & (raw_data['freq_code'] == tag)
-                            logger.info(f"  {tag}: {tag_dups.sum()} duplicate(s)")
-                        if len(duplicate_tags) > 10:
-                            logger.info(f"  ... and {len(duplicate_tags) - 10} more")
+                # Check for duplicate freq_codes in the MASTER TAGS TABLE (configuration error)
+                tags_with_detections = raw_data['freq_code'].unique()
+                tags_in_table = set(self.tags.index if self.tags.index.name == 'freq_code' else self.tags['freq_code'])
+                
+                # Check if tags table has duplicates (bad!)
+                if hasattr(self.tags, 'index') and self.tags.index.name == 'freq_code':
+                    if self.tags.index.duplicated().any():
+                        dup_count = self.tags.index.duplicated(keep=False).sum()
+                        print(f"\n⚠️  WARNING: {dup_count} duplicate freq_codes in TAGS TABLE")
+                        logger.warning(f"{dup_count} duplicate freq_codes in TAGS TABLE")
                     else:
-                        logger.info(f"\nDuplicate Detection Count: 0 (no exact timestamp duplicates)")
+                        print(f"\nTag Table Check: ✓ No duplicate freq_codes")
+                        logger.info(f"Tag Table Check: No duplicate freq_codes")
+                
+                # Check for orphan tags (in raw_data but not in tags table)
+                orphan_tags = set(tags_with_detections) - tags_in_table
+                if orphan_tags:
+                    print(f"\n⚠️  WARNING: {len(orphan_tags)} orphan tags (detected but not in tags table)")
+                    logger.warning(f"{len(orphan_tags)} orphan tags (detected but not in tags table)")
+                else:
+                    print(f"\nOrphan Tags Check: ✓ All detected tags in tags table")
+                    logger.info(f"Orphan Tags Check: All detected tags in tags table")
                 
                 # Time Coverage
                 if 'time_stamp' in raw_data.columns:
@@ -609,6 +602,11 @@ class radio_project():
                     start_time = raw_data['time_stamp'].min()
                     end_time = raw_data['time_stamp'].max()
                     duration = end_time - start_time
+                    
+                    print(f"\nTime Coverage:")
+                    print(f"  Start: {start_time}")
+                    print(f"  End:   {end_time}")
+                    print(f"  Duration: {duration.days} days, {duration.seconds // 3600} hours")
                     
                     logger.info(f"\nTime Coverage:")
                     logger.info(f"  Start: {start_time}")
@@ -618,15 +616,20 @@ class radio_project():
                     # Detection rate
                     if duration.total_seconds() > 0:
                         det_per_hour = total_detections / (duration.total_seconds() / 3600)
+                        print(f"  Detection rate: {det_per_hour:.1f} detections/hour")
                         logger.info(f"  Detection rate: {det_per_hour:.1f} detections/hour")
                 
+                print(f"{'='*60}\n")
                 logger.info(f"{'='*60}\n")
             else:
+                print(f"No detections found for receiver {rec_id}")
                 logger.warning(f"No detections found for receiver {rec_id}")
                 
         except KeyError:
+            print(f"Could not retrieve statistics - raw_data table not found in database")
             logger.warning(f"Could not retrieve statistics - raw_data table not found in database")
         except Exception as e:
+            print(f"Error calculating import statistics: {e}")
             logger.warning(f"Error calculating import statistics: {e}")
     
     def get_fish(self, rec_id, train = True, reclass_iter = None):

@@ -20,8 +20,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 #%% set up project
-project_dir = r"C:\Users\Kevin.Nebiolo\OneDrive - Kleinschmidt Associates\Software\mast\data\data_package\setup"  # UPDATE THIS
-db_name = 'thompson_2025_qc'
+project_dir = r"K:\Jobs\3671\014\Analysis\kpn_2025_12_04"  # UPDATE THIS
+db_name = 'thompson_2025_qc_1'
 
 detection_count = 5
 duration = 1
@@ -45,7 +45,7 @@ project = radio_project(project_dir,
 #,presence,classified,trained
 
 #%%  import data
-rec_id = 'R0001'
+rec_id = 'R1695'
 rec_type = 'PIT'
  #TODO - remove these directory arguments - the project is smart
 training_dir = os.path.join(project_dir,'Data','Training_Files')
@@ -64,7 +64,7 @@ project.telem_data_import(rec_id,
                            db_dir,
                            scan_time,
                            channels,
-                           antenna_to_rec_dict,
+                           None,
                            True)
 
 # undo import

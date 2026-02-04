@@ -106,10 +106,12 @@ import dask.array as da
 try:
     from dask_ml.cluster import KMeans
     _KMEANS_IMPL = 'dask'
-except ImportError:
-    # dask-ml may not be installed in all environments; fall back to scikit-learn
-    from sklearn.cluster import KMeans
-    _KMEANS_IMPL = 'sklearn'
+except ImportError as e:
+    raise ImportError(
+        "dask-ml is required but not installed. "
+        "Please ensure you have Python >=3.9 and install pymast with: pip install pymast\n"
+        f"Original error: {e}"
+    ) from e
 from dask import delayed
 import sys
 import matplotlib
