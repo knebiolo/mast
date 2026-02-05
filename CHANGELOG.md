@@ -12,17 +12,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - R package wrapper
 
 ---
+## [1.0.5] - 2026-02-05
+
+### Fixed
+- **Critical Import Fix**: Resolved `InvalidVersion` error when dask package has malformed version string
+  - Moved all `dask` module imports from module-level to function-level (lazy loading)
+  - Prevents import failures when `dask.__version__ = 'unknown'` or when dask/dask-ml have version conflicts
+  - Affected modules: `pymast.overlap_removal`, `pymast.radio_project`
+  - Package now imports successfully even with broken dask installations
+  - Dask is only imported when `make_recaptures_table()` is called
+
+### Technical Details
+- Root cause: Some Anaconda environments have dask packages with `__version__ = 'unknown'`
+- When `dask-ml` was present (from v1.0.3 or earlier), it would fail parsing dask version during module import
+- Solution: Deferred all dask imports until runtime when specific functions need them
+- Backward compatible: All existing code continues to work unchanged
+
+---
+## [1.0.5] - 2026-02-05
+
+### Fixed
+- **Critical Import Fix**: Resolved `InvalidVersion` error when dask package has malformed version string
+  - Moved all `dask` module imports from module-level to function-level (lazy loading)
+  - Prevents import failures when `dask.__version__ = 'unknown'` or when dask/dask-ml have version conflicts
+  - Affected modules: `pymast.overlap_removal`, `pymast.radio_project`
+  - Package now imports successfully even with broken dask installations
+  - Dask is only imported when `make_recaptures_table()` is called
+
+### Technical Details
+- Root cause: Some Anaconda environments have dask packages with `__version__ = 'unknown'`
+- When `dask-ml` was present (from v1.0.3 or earlier), it would fail parsing dask version during module import
+- Solution: Deferred all dask imports until runtime when specific functions need them
+- Backward compatible: All existing code continues to work unchanged
+
+---
+
+## [1.0.4] - 2026-02-04
+
+### Fixed
+- Removed hard runtime import failures on systems without `dask-ml`.
+- Removed `dask-ml` from package dependency manifests (`pyproject.toml`, `requirements.txt`, `environment.yml`).
+- Updated installation smoke tests to validate `scikit-learn` availability instead of `dask-ml`.
+- Updated docs to reflect that `dask-ml` is no longer required for installation.
+
+---
+
+## [1.0.3] - 2026-02-03
+
+### Fixed
+- **Critical Installation Fix**: Ensured `dask-ml` dependency is always installed when using `pip install pymast`
+  - Raised minimum Python version from 3.8 to 3.9 (required for modern dask-ml compatibility)
+  - Updated `dask-ml` version constraint to `>=2022.1.22` for better stability
+  - Removed silent fallback that masked missing dask-ml installation
+  - Added clear error messages when dask-ml is missing, guiding users to correct Python version
+  - Updated Python classifiers in `pyproject.toml` to reflect 3.9-3.12 support
+
+### Added
+- **Installation smoke test**: `tests/test_installation_smoke.py` verifies all critical dependencies install correctly
+- **Improved documentation**: Added Spyder/Anaconda installation guidance to README
+  - Recommend `python -m pip install pymast` to ensure correct environment
+  - Added Python version requirement (3.9+) prominently in README
+
+### Changed
+- Updated badge in README from Python 3.8+ to Python 3.9+
+- Synchronized `requirements.txt` with `pyproject.toml` dependencies
+
+---
 
 ## [1.0.2] - 2026-02-02
 
 ### Added
 - **Import Statistics**: `telem_data_import()` now displays comprehensive statistics after import:
-  - Total detection count with summary statistics
-  - 5-number summary (min, Q1, median, Q3, max) for detections per file to identify outliers
+  - Total detection count
+  - Mean detections per file
   - Unique tag count
-  - Duplicate detection count and IDs (same timestamp)
+  - Tag table validation: checks for duplicate freq_codes in the master tags table (configuration error)
+  - Orphan tags check: identifies tags detected but not defined in the tags table
   - Time coverage: start/end dates, duration, and detection rate per hour
-- Statistics are formatted for readability and logged at INFO level
+- Statistics are formatted for readability and printed to console (visible without logging configuration)
+- Both print() and logger output for maximum visibility
 - Graceful error handling if statistics cannot be calculated
 
 ---
