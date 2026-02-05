@@ -119,7 +119,7 @@ MAST requires these packages (installed automatically):
 
 **Parallel Processing:**
 - dask (>=2021.10)
-- dask-ml (>=2021.10)
+- distributed (>=2021.10)
 
 **Data Storage:**
 - tables (>=3.7) - PyTables for HDF5

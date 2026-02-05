@@ -3,7 +3,7 @@ Smoke test to verify package installation and critical dependencies.
 
 This test ensures:
 1. The pymast package can be imported
-2. Critical dependencies like dask-ml are installed
+2. Critical dependencies are installed
 3. Core functionality is accessible
 """
 
@@ -18,15 +18,14 @@ def test_pymast_imports():
     assert pymast.__version__ is not None
 
 
-def test_dask_ml_dependency():
-    """Verify dask-ml is installed (critical runtime dependency)."""
+def test_scikit_learn_dependency():
+    """Verify scikit-learn clustering primitives are available."""
     try:
-        import dask_ml
-        import dask_ml.cluster
-        assert hasattr(dask_ml.cluster, 'KMeans')
+        import sklearn.cluster
+        assert hasattr(sklearn.cluster, 'KMeans')
     except ImportError as e:
         pytest.fail(
-            f"dask-ml is not installed but is required. "
+            f"scikit-learn is not installed but is required. "
             f"Ensure Python >= 3.9 and install with: pip install pymast\n"
             f"Error: {e}"
         )
@@ -36,7 +35,7 @@ def test_python_version():
     """Verify Python version meets minimum requirements."""
     assert sys.version_info >= (3, 9), (
         f"Python 3.9+ is required (found {sys.version_info.major}.{sys.version_info.minor}). "
-        "dask-ml and other dependencies require Python >= 3.9."
+        "Core dependencies require Python >= 3.9."
     )
 
 
@@ -60,7 +59,6 @@ def test_critical_dependencies():
         'sklearn',
         'h5py',
         'dask',
-        'dask_ml',
         'distributed',
         'numba',
         'tables',

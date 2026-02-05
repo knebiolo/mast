@@ -101,24 +101,10 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.cluster import AgglomerativeClustering
 from sklearn.mixture import GaussianMixture
 from sklearn.preprocessing import MinMaxScaler
-import dask.dataframe as dd
-import dask.array as da
-try:
-    from dask_ml.cluster import KMeans
-    _KMEANS_IMPL = 'dask'
-except ImportError as e:
-    raise ImportError(
-        "dask-ml is required but not installed. "
-        "Please ensure you have Python >=3.9 and install pymast with: pip install pymast\n"
-        f"Original error: {e}"
-    ) from e
-from dask import delayed
+# dask imports removed from module level - not used in current code
+# If needed in future, import within specific functions
 import sys
 import matplotlib
-from dask import config
-config.set({"dataframe.convert-string": False})
-from dask.distributed import Client
-#client = Client(processes=False, threads_per_worker=1, memory_limit = '8GB')  # Single-threaded mode
 from intervaltree import Interval, IntervalTree
 import gc
 gc.collect()

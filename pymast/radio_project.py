@@ -102,17 +102,8 @@ except ImportError:
         return iterable
 import shutil
 import warnings
-import dask.dataframe as dd
-import dask.array as da
-try:
-    from dask_ml.cluster import KMeans
-    _KMEANS_IMPL = 'dask'
-except ImportError as e:
-    raise ImportError(
-        "dask-ml is required but not installed. "
-        "Please ensure you have Python >=3.9 and install pymast with: pip install pymast\n"
-        f"Original error: {e}"
-    ) from e
+# dask imports moved to make_recaptures_table to prevent import errors
+# when dask has version issues but is not needed for basic operations
 
 # Initialize logger
 logger = logging.getLogger('pymast.radio_project')
@@ -1698,6 +1689,9 @@ class radio_project():
 
     def make_recaptures_table(self, export=True, pit_study=False):
         '''Creates a recaptures key in the HDF5 file, iterating over receivers to manage memory.'''
+        # Import dask here to avoid import-time failures when dask is not needed
+        import dask.dataframe as dd
+        
         logger.info("Creating recaptures table")
         logger.info(f"  PIT study mode: {pit_study}")
         logger.info(f"  Processing {len(self.receivers)} receiver(s)")

@@ -31,7 +31,7 @@
 
 ### Requirements
 
-- **Python 3.9 or higher** (Python 3.8 is not supported due to dask-ml requirements)
+- **Python 3.9 or higher**
 - Compatible with Windows, macOS, and Linux
 
 ### Installation

@@ -66,6 +66,7 @@ parts/
 sdist/
 var/
 wheels/
+.test/
 
 # Unit test / coverage
 htmlcov/
@@ -78,6 +79,7 @@ coverage.xml
 *.cover
 .hypothesis/
 .pytest_cache/
+.temp/
 
 # Logs
 *.log
