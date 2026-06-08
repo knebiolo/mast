@@ -7,28 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **GUI Launcher (RUN_PYMAST_GUI.bat)**: Robust Windows batch launcher with multi-method fallback
+  - Attempts 4 launch methods in order: system python (pip users) → custom conda env → conda registry → Anaconda default path
+  - Automatically detects and uses custom conda environment at `C:\Users\Kevin.Nebiolo\Desktop\conda_envs\pymast`
+  - Works seamlessly with both pip install and conda install users
+  - Clear installation/troubleshooting guidance on launch failure
+  - No manual repo path configuration needed
+
 ### Planned for v1.1.0
 - Interactive UI
 - R package wrapper
 
 ---
-## [1.0.5] - 2026-02-05
 
-### Fixed
-- **Critical Import Fix**: Resolved `InvalidVersion` error when dask package has malformed version string
-  - Moved all `dask` module imports from module-level to function-level (lazy loading)
-  - Prevents import failures when `dask.__version__ = 'unknown'` or when dask/dask-ml have version conflicts
-  - Affected modules: `pymast.overlap_removal`, `pymast.radio_project`
-  - Package now imports successfully even with broken dask installations
-  - Dask is only imported when `make_recaptures_table()` is called
+## [1.0.6] - 2026-02-05
 
-### Technical Details
-- Root cause: Some Anaconda environments have dask packages with `__version__ = 'unknown'`
-- When `dask-ml` was present (from v1.0.3 or earlier), it would fail parsing dask version during module import
-- Solution: Deferred all dask imports until runtime when specific functions need them
-- Backward compatible: All existing code continues to work unchanged
+### Improved
+- **Better Error Handling**: Added helpful error message when dask import fails in `make_recaptures_table()`
+  - Provides clear guidance on fixing broken dask installations
+  - Recommends uninstalling dask-ml if present
+  - Suggests reinstalling dask with --force-reinstall
+  - Prevents cryptic error messages when dask has version conflicts
 
 ---
+
 ## [1.0.5] - 2026-02-05
 
 ### Fixed
