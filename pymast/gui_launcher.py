@@ -25,6 +25,7 @@ try:
         QDoubleSpinBox,
         QFileDialog,
         QFormLayout,
+        QGridLayout,
         QGroupBox,
         QHBoxLayout,
         QLabel,
@@ -50,6 +51,7 @@ except ImportError:
             QDoubleSpinBox,
             QFileDialog,
             QFormLayout,
+            QGridLayout,
             QGroupBox,
             QHBoxLayout,
             QLabel,
@@ -223,37 +225,79 @@ class WorkflowWindow(QMainWindow):
 
     def _build_home_page(self) -> QWidget:
         page = QWidget()
-        layout = QVBoxLayout(page)
+        page_layout = QHBoxLayout(page)
+
+        # Left pane: Logo
+        left_pane = QWidget()
+        left_layout = QVBoxLayout(left_pane)
+        left_layout.setContentsMargins(20, 20, 20, 20)
 
         if self.logo_path.exists():
             logo_label = QLabel()
-            logo_label.setPixmap(self._full_logo_pixmap(width=560))
+            logo_label.setPixmap(self._full_logo_pixmap(width=320))
             logo_label.setAlignment(Qt.AlignCenter)
-            layout.addWidget(logo_label)
+            left_layout.addWidget(logo_label)
 
-        title = QLabel("PyMAST End-to-End GUI")
+        title = QLabel("PyMAST")
         title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet("font-size: 28px; font-weight: 700;")
-        layout.addWidget(title)
+        title.setStyleSheet("font-size: 24px; font-weight: 700;")
+        left_layout.addWidget(title)
 
-        subtitle = QLabel("No scripts, no notebooks. Configure and run each workflow step directly.")
+        subtitle = QLabel("End-to-End Workflow")
         subtitle.setAlignment(Qt.AlignCenter)
-        subtitle.setStyleSheet("font-size: 14px; color: #444;")
-        layout.addWidget(subtitle)
+        subtitle.setStyleSheet("font-size: 12px; color: #666;")
+        left_layout.addWidget(subtitle)
 
-        setup_btn = QPushButton("Project Setup")
-        setup_btn.setMinimumHeight(42)
+        left_layout.addStretch(1)
+        page_layout.addWidget(left_pane, stretch=1)
+
+        # Right pane: Number-pad style button grid
+        right_pane = QWidget()
+        right_layout = QVBoxLayout(right_pane)
+        right_layout.setContentsMargins(20, 20, 20, 20)
+
+        grid_title = QLabel("Workflow Steps")
+        grid_title.setStyleSheet("font-size: 16px; font-weight: 700;")
+        right_layout.addWidget(grid_title)
+
+        # Build 3x3 grid (Project Setup + 8 steps)
+        grid = QWidget()
+        grid_layout = self._make_grid_layout()
+
+        setup_btn = QPushButton("Setup")
+        setup_btn.setMinimumHeight(60)
+        setup_btn.setMinimumWidth(80)
+        setup_btn.setStyleSheet("font-size: 11px; font-weight: 600;")
         setup_btn.clicked.connect(lambda checked=False: self.goto_step(0))
-        layout.addWidget(setup_btn)
+        grid_layout.addWidget(setup_btn, 0, 0)
 
-        for step in range(1, 9):
-            btn = QPushButton(f"Step {step:02d} - {STEP_TITLES[step]}")
-            btn.setMinimumHeight(42)
+        for i, step in enumerate(range(1, 9), start=1):
+            btn = QPushButton(f"{step}")
+            btn.setMinimumHeight(60)
+            btn.setMinimumWidth(80)
+            btn.setStyleSheet("font-size: 13px; font-weight: 700;")
+            btn.setToolTip(STEP_TITLES[step])
             btn.clicked.connect(lambda checked=False, s=step: self.goto_step(s))
-            layout.addWidget(btn)
+            row = (i) // 3
+            col = (i) % 3
+            grid_layout.addWidget(btn, row, col)
 
-        layout.addStretch(1)
+        grid.setLayout(grid_layout)
+        right_layout.addWidget(grid)
+
+        info_text = QLabel("Click a step number to configure and run workflow stages.")
+        info_text.setStyleSheet("font-size: 10px; color: #666;")
+        info_text.setWordWrap(True)
+        right_layout.addWidget(info_text)
+
+        right_layout.addStretch(1)
+        page_layout.addWidget(right_pane, stretch=1)
+
         return page
+
+    def _make_grid_layout(self):
+        """Helper to create a 3x3 grid layout."""
+        return QGridLayout()
 
     def _build_step_page(self, step: int) -> QWidget:
         page = QWidget()
@@ -827,11 +871,11 @@ class WorkflowWindow(QMainWindow):
         if pix.isNull():
             return pix
 
-        # Crop to fish + signal region only (remove text), using proportions for robustness.
-        x = int(pix.width() * 0.18)
-        y = int(pix.height() * 0.17)
-        w = int(pix.width() * 0.52)
-        h = int(pix.height() * 0.36)
+        # Crop tightly to fish + signal region only (minimal font pickup).
+        x = int(pix.width() * 0.22)
+        y = int(pix.height() * 0.20)
+        w = int(pix.width() * 0.44)
+        h = int(pix.height() * 0.30)
         icon = pix.copy(x, y, w, h)
         return icon.scaledToWidth(width, Qt.SmoothTransformation)
 
