@@ -72,14 +72,14 @@ except ImportError:
 
 STEP_TITLES = {
     0: "Project Setup",
-    1: "Import Data",
-    2: "Train Classifier",
-    3: "Classify Detections",
+    1: "Import",
+    2: "False Positive Training",
+    3: "False Positive Classification",
     4: "Calculate Bouts",
     5: "Reduce Overlap",
-    6: "Create Recaptures",
-    7: "Time-to-Event Model",
-    8: "CJS Model",
+    6: "Create Recaptures Table",
+    7: "Create Time to Event Model",
+    8: "Create CJS Model",
 }
 
 STEP_HELP = {
@@ -272,9 +272,9 @@ class WorkflowWindow(QMainWindow):
         grid_layout.addWidget(setup_btn, 0, 0)
 
         for i, step in enumerate(range(1, 9), start=1):
-            btn = QPushButton(f"{step}")
+            btn = QPushButton(STEP_TITLES[step])
             btn.setMinimumHeight(60)
-            btn.setMinimumWidth(80)
+            btn.setMinimumWidth(160)
             btn.setStyleSheet("font-size: 13px; font-weight: 700;")
             btn.setToolTip(STEP_TITLES[step])
             btn.clicked.connect(lambda checked=False, s=step: self.goto_step(s))
