@@ -291,6 +291,7 @@ class WorkflowWindow(QMainWindow):
         layout = QVBoxLayout(group)
 
         controls = QHBoxLayout()
+        shortcut_row = QHBoxLayout()
 
         key_label = QLabel("HDF Key")
         self.viewer_key_combo = QComboBox()
@@ -319,6 +320,18 @@ class WorkflowWindow(QMainWindow):
         refresh_view_btn.clicked.connect(self.refresh_data_viewer)
         self._tip(refresh_view_btn, "Load a preview slice from the selected HDF key.")
 
+        step_view_btn = QPushButton("Load Step Output")
+        step_view_btn.clicked.connect(self.load_current_step_view)
+        self._tip(step_view_btn, "Select the HDF table most relevant to the currently visible workflow step.")
+
+        filter_rec_btn = QPushButton("Filter Current Receiver")
+        filter_rec_btn.clicked.connect(self.filter_viewer_to_current_receiver)
+        self._tip(filter_rec_btn, "Apply a quick where-clause filter using the receiver ID from the active workflow step when available.")
+
+        clear_filter_btn = QPushButton("Clear Filter")
+        clear_filter_btn.clicked.connect(self.clear_viewer_filter)
+        self._tip(clear_filter_btn, "Clear the current where-clause filter.")
+
         controls.addWidget(key_label)
         controls.addWidget(self.viewer_key_combo)
         controls.addWidget(refresh_keys_btn)
@@ -329,8 +342,18 @@ class WorkflowWindow(QMainWindow):
         controls.addWidget(self.viewer_where_edit, stretch=1)
         controls.addWidget(refresh_view_btn)
 
+        shortcut_row.addWidget(step_view_btn)
+        shortcut_row.addWidget(filter_rec_btn)
+        shortcut_row.addWidget(clear_filter_btn)
+        shortcut_row.addStretch(1)
+
         self.viewer_status_label = QLabel("No project database loaded.")
         self.viewer_status_label.setStyleSheet("color: #666;")
+
+        self.viewer_summary = QPlainTextEdit()
+        self.viewer_summary.setReadOnly(True)
+        self.viewer_summary.setPlaceholderText("Dataset summary will appear here.")
+        self.viewer_summary.setMaximumHeight(100)
 
         self.viewer_table = QTableWidget()
         self.viewer_table.setAlternatingRowColors(True)
@@ -339,7 +362,9 @@ class WorkflowWindow(QMainWindow):
         self.viewer_table.verticalHeader().setVisible(False)
 
         layout.addLayout(controls)
+        layout.addLayout(shortcut_row)
         layout.addWidget(self.viewer_status_label)
+        layout.addWidget(self.viewer_summary)
         layout.addWidget(self.viewer_table)
 
         return group
@@ -943,6 +968,7 @@ class WorkflowWindow(QMainWindow):
         page = self.step_pages.get(step)
         if page is not None:
             self.stack.setCurrentWidget(page)
+            self._set_viewer_key_for_step(step)
 
     def log(self, message: str) -> None:
         self.log_output.appendPlainText(message)
@@ -964,6 +990,53 @@ class WorkflowWindow(QMainWindow):
         self.save_session_btn.setEnabled(enabled)
         self.load_session_btn.setEnabled(enabled)
         return self._session_state_path
+
+    def _current_step_index(self) -> int:
+        if self.stack.currentWidget() is self.home_page:
+            return 0
+        for step, page in self.step_pages.items():
+            if self.stack.currentWidget() is page:
+                return step
+        return 0
+
+    def _suggested_viewer_key_for_step(self, step: int) -> Optional[str]:
+        mapping = {
+            0: "/project_setup/receivers",
+            1: "/raw_data",
+            2: "/trained",
+            3: "/classified",
+            4: "/presence",
+            5: "/overlapping",
+            6: "/recaptures",
+            7: "/recaptures",
+            8: "/recaptures",
+        }
+        return mapping.get(step)
+
+    def _set_viewer_key_for_step(self, step: int) -> None:
+        key = self._suggested_viewer_key_for_step(step)
+        if not key:
+            return
+        idx = self.viewer_key_combo.findText(key)
+        if idx >= 0:
+            self.viewer_key_combo.setCurrentIndex(idx)
+
+    def _current_receiver_context(self) -> Optional[str]:
+        step = self._current_step_index()
+        field_by_step = {
+            1: "import_rec_id",
+            2: "train_rec_id",
+            3: "class_rec_id",
+            4: "bout_rec_id",
+        }
+        field_name = field_by_step.get(step)
+        if not field_name:
+            return None
+        widget = getattr(self, field_name, None)
+        if isinstance(widget, QLineEdit):
+            value = widget.text().strip()
+            return value or None
+        return None
 
     def _supported_state_widgets(self) -> Dict[str, QWidget]:
         supported = {}
@@ -1052,6 +1125,7 @@ class WorkflowWindow(QMainWindow):
         state = json.loads(session_path.read_text(encoding="utf-8"))
         self._apply_gui_session_state(state)
         self.refresh_data_viewer_keys()
+        self._set_viewer_key_for_step(self._current_step_index())
         self.log(f"Loaded GUI session: {session_path}")
 
     def refresh_data_viewer_keys(self) -> None:
@@ -1059,6 +1133,7 @@ class WorkflowWindow(QMainWindow):
         if db_path is None or not db_path.exists():
             self.viewer_key_combo.clear()
             self.viewer_status_label.setText("No project database loaded.")
+            self.viewer_summary.setPlainText("")
             self.viewer_table.clear()
             self.viewer_table.setRowCount(0)
             self.viewer_table.setColumnCount(0)
@@ -1076,6 +1151,25 @@ class WorkflowWindow(QMainWindow):
                 self.viewer_key_combo.setCurrentIndex(idx)
 
         self.viewer_status_label.setText(f"Loaded {len(keys)} HDF key(s) from {db_path.name}")
+        self._set_viewer_key_for_step(self._current_step_index())
+
+    def _summarize_loaded_preview(self, preview: pd.DataFrame, selected_key: str, total_rows: Optional[int]) -> None:
+        lines = [f"Key: {selected_key}"]
+        if total_rows is not None:
+            lines.append(f"Total rows in table: {total_rows}")
+        lines.append(f"Preview rows loaded: {len(preview)}")
+        lines.append(f"Columns: {len(preview.columns)}")
+
+        if "rec_id" in preview.columns:
+            lines.append(f"Preview receivers: {preview['rec_id'].nunique()}")
+        if "freq_code" in preview.columns:
+            lines.append(f"Preview fish: {preview['freq_code'].nunique()}")
+        if "time_stamp" in preview.columns and not preview.empty:
+            timestamps = pd.to_datetime(preview["time_stamp"], errors="coerce")
+            if timestamps.notna().any():
+                lines.append(f"Preview time range: {timestamps.min()} -> {timestamps.max()}")
+
+        self.viewer_summary.setPlainText("\n".join(lines))
 
     def _populate_data_viewer_table(self, frame: pd.DataFrame) -> None:
         display_frame = frame.copy()
@@ -1108,7 +1202,21 @@ class WorkflowWindow(QMainWindow):
         where_clause = self.viewer_where_edit.text().strip() or None
 
         with pd.HDFStore(str(db_path), mode="r") as store:
-            preview = store.select(selected_key, where=where_clause, start=start, stop=stop)
+            storer = store.get_storer(selected_key)
+            total_rows = getattr(storer, "nrows", None)
+            try:
+                preview = store.select(selected_key, where=where_clause, start=start, stop=stop)
+            except (ValueError, KeyError) as exc:
+                if where_clause is None:
+                    raise
+                preview_full = store.select(selected_key)
+                try:
+                    preview = preview_full.query(where_clause).iloc[start:stop]
+                except Exception as query_exc:  # noqa: BLE001
+                    raise ValueError(
+                        f"Viewer filter could not be applied as HDF where-clause or pandas query: {query_exc}"
+                    ) from query_exc
+                self.log(f"Viewer used in-memory filtering fallback for {selected_key}: {exc}")
 
         if isinstance(preview, pd.Series):
             preview = preview.to_frame()
@@ -1116,10 +1224,28 @@ class WorkflowWindow(QMainWindow):
             preview = pd.DataFrame(preview)
 
         self._populate_data_viewer_table(preview)
+        self._summarize_loaded_preview(preview, selected_key, total_rows)
         self.viewer_status_label.setText(
             f"Previewing {selected_key}: rows {start} to {max(start, stop - 1)} | loaded {len(preview)} row(s), {len(preview.columns)} column(s)"
         )
         self.log(f"Loaded data preview for {selected_key} ({len(preview)} row(s)).")
+
+    def load_current_step_view(self) -> None:
+        self._set_viewer_key_for_step(self._current_step_index())
+        self.refresh_data_viewer()
+
+    def filter_viewer_to_current_receiver(self) -> None:
+        rec_id = self._current_receiver_context()
+        if not rec_id:
+            self.log("No receiver context is available for the current step.")
+            return
+        self.viewer_where_edit.setText(f"rec_id == '{rec_id}'")
+        self.log(f"Applied viewer filter for receiver {rec_id}.")
+        self.refresh_data_viewer()
+
+    def clear_viewer_filter(self) -> None:
+        self.viewer_where_edit.clear()
+        self.log("Cleared viewer filter.")
 
     def _required_project(self) -> radio_project:
         if self.project is None:

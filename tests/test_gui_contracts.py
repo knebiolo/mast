@@ -187,3 +187,46 @@ def test_gui_session_round_trip(app, tmp_path):
     assert window.class_threshold.value() == pytest.approx(1.7)
     assert window.like_power.isChecked() is False
     assert window.viewer_where_edit.text() == "rec_id == 'R01'"
+
+
+def test_goto_step_updates_viewer_key(app, tmp_path):
+    gui = _load_gui_module_or_skip()
+    window = gui.WorkflowWindow(Path("."))
+
+    db_path = tmp_path / "step_viewer.h5"
+    pd.DataFrame({"freq_code": ["F1"], "rec_id": ["R01"]}).to_hdf(db_path, key="raw_data", format="table", mode="w")
+    pd.DataFrame({"freq_code": ["F1"], "rec_id": ["R01"], "test": [1]}).to_hdf(db_path, key="classified", format="table", mode="a")
+
+    window.import_db_dir.setText(str(db_path))
+    window.refresh_data_viewer_keys()
+
+    window.goto_step(1)
+    assert window.viewer_key_combo.currentText() == "/raw_data"
+
+    window.goto_step(3)
+    assert window.viewer_key_combo.currentText() == "/classified"
+
+
+def test_filter_viewer_to_current_receiver_uses_active_step(app, tmp_path):
+    gui = _load_gui_module_or_skip()
+    window = gui.WorkflowWindow(Path("."))
+
+    db_path = tmp_path / "receiver_filter.h5"
+    pd.DataFrame(
+        {
+            "freq_code": ["F1", "F2"],
+            "rec_id": ["REC001", "REC002"],
+            "test": [1, 1],
+        }
+    ).to_hdf(db_path, key="classified", format="table", mode="w")
+
+    window.import_db_dir.setText(str(db_path))
+    window.refresh_data_viewer_keys()
+    window.goto_step(3)
+    window.class_rec_id.setText("REC001")
+    window.viewer_limit_spin.setValue(10)
+
+    window.filter_viewer_to_current_receiver()
+
+    assert window.viewer_where_edit.text() == "rec_id == 'REC001'"
+    assert window.viewer_table.rowCount() == 1
