@@ -230,3 +230,33 @@ def test_filter_viewer_to_current_receiver_uses_active_step(app, tmp_path):
 
     assert window.viewer_where_edit.text() == "rec_id == 'REC001'"
     assert window.viewer_table.rowCount() == 1
+
+
+def test_load_step_qc_summary_for_classified_data(app, tmp_path):
+    gui = _load_gui_module_or_skip()
+    window = gui.WorkflowWindow(Path("."))
+
+    db_path = tmp_path / "qc_summary.h5"
+    pd.DataFrame(
+        {
+            "freq_code": ["F1", "F2", "F3"],
+            "rec_id": ["REC001", "REC001", "REC002"],
+            "test": [1, 0, 1],
+            "iter": [2, 2, 2],
+            "posterior_T": [0.9, 0.2, 0.8],
+            "time_stamp": pd.to_datetime(["2026-01-01", "2026-01-02", "2026-01-03"]),
+        }
+    ).to_hdf(db_path, key="classified", format="table", mode="w")
+
+    window.import_db_dir.setText(str(db_path))
+    window.refresh_data_viewer_keys()
+    window.goto_step(3)
+    window.class_rec_id.setText("REC001")
+
+    window.load_step_qc_summary()
+
+    qc_text = window.viewer_qc_summary.toPlainText()
+    assert "Stage QC: /classified" in qc_text
+    assert "Rows: 2" in qc_text
+    assert "Classified true detections: 1 (50.0%)" in qc_text
+    assert "Latest iteration in view: 2" in qc_text

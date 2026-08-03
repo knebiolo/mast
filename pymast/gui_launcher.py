@@ -332,6 +332,10 @@ class WorkflowWindow(QMainWindow):
         clear_filter_btn.clicked.connect(self.clear_viewer_filter)
         self._tip(clear_filter_btn, "Clear the current where-clause filter.")
 
+        qc_summary_btn = QPushButton("Load Step QC")
+        qc_summary_btn.clicked.connect(self.load_step_qc_summary)
+        self._tip(qc_summary_btn, "Generate a scientist-oriented QC summary for the active workflow stage.")
+
         controls.addWidget(key_label)
         controls.addWidget(self.viewer_key_combo)
         controls.addWidget(refresh_keys_btn)
@@ -345,6 +349,7 @@ class WorkflowWindow(QMainWindow):
         shortcut_row.addWidget(step_view_btn)
         shortcut_row.addWidget(filter_rec_btn)
         shortcut_row.addWidget(clear_filter_btn)
+        shortcut_row.addWidget(qc_summary_btn)
         shortcut_row.addStretch(1)
 
         self.viewer_status_label = QLabel("No project database loaded.")
@@ -354,6 +359,11 @@ class WorkflowWindow(QMainWindow):
         self.viewer_summary.setReadOnly(True)
         self.viewer_summary.setPlaceholderText("Dataset summary will appear here.")
         self.viewer_summary.setMaximumHeight(100)
+
+        self.viewer_qc_summary = QPlainTextEdit()
+        self.viewer_qc_summary.setReadOnly(True)
+        self.viewer_qc_summary.setPlaceholderText("Stage-specific QC summary will appear here.")
+        self.viewer_qc_summary.setMaximumHeight(150)
 
         self.viewer_table = QTableWidget()
         self.viewer_table.setAlternatingRowColors(True)
@@ -365,6 +375,7 @@ class WorkflowWindow(QMainWindow):
         layout.addLayout(shortcut_row)
         layout.addWidget(self.viewer_status_label)
         layout.addWidget(self.viewer_summary)
+        layout.addWidget(self.viewer_qc_summary)
         layout.addWidget(self.viewer_table)
 
         return group
@@ -1134,6 +1145,7 @@ class WorkflowWindow(QMainWindow):
             self.viewer_key_combo.clear()
             self.viewer_status_label.setText("No project database loaded.")
             self.viewer_summary.setPlainText("")
+            self.viewer_qc_summary.setPlainText("")
             self.viewer_table.clear()
             self.viewer_table.setRowCount(0)
             self.viewer_table.setColumnCount(0)
@@ -1171,6 +1183,145 @@ class WorkflowWindow(QMainWindow):
 
         self.viewer_summary.setPlainText("\n".join(lines))
 
+    def _select_hdf_rows(
+        self,
+        store: pd.HDFStore,
+        selected_key: str,
+        where_clause: Optional[str] = None,
+        start: Optional[int] = None,
+        stop: Optional[int] = None,
+    ) -> pd.DataFrame:
+        try:
+            frame = store.select(selected_key, where=where_clause, start=start, stop=stop)
+        except (ValueError, KeyError) as exc:
+            if where_clause is None:
+                raise
+            frame_full = store.select(selected_key)
+            try:
+                frame = frame_full.query(where_clause)
+                if start is not None or stop is not None:
+                    frame = frame.iloc[start:stop]
+            except Exception as query_exc:  # noqa: BLE001
+                raise ValueError(
+                    f"Viewer filter could not be applied as HDF where-clause or pandas query: {query_exc}"
+                ) from query_exc
+            self.log(f"Viewer used in-memory filtering fallback for {selected_key}: {exc}")
+
+        if isinstance(frame, pd.Series):
+            frame = frame.to_frame()
+        if not isinstance(frame, pd.DataFrame):
+            frame = pd.DataFrame(frame)
+        return frame
+
+    def _summary_where_clause_for_step(self, step: int) -> Optional[str]:
+        rec_id = self._current_receiver_context()
+        if rec_id and step in {1, 2, 3, 4, 6}:
+            return f"rec_id == '{rec_id}'"
+        return None
+
+    def _build_stage_qc_summary(
+        self,
+        selected_key: str,
+        frame: pd.DataFrame,
+        total_rows: Optional[int],
+        sampled: bool,
+    ) -> str:
+        lines = [f"Stage QC: {selected_key}"]
+        if sampled:
+            lines.append("Summary scope: sampled preview only (table too large for full scan)")
+        elif total_rows is not None:
+            lines.append("Summary scope: full selected dataset")
+
+        if frame.empty:
+            lines.append("No rows available for the selected stage/filter.")
+            return "\n".join(lines)
+
+        lines.append(f"Rows: {len(frame):,}")
+        if 'freq_code' in frame.columns:
+            lines.append(f"Fish: {frame['freq_code'].nunique():,}")
+        if 'rec_id' in frame.columns:
+            lines.append(f"Receivers: {frame['rec_id'].nunique():,}")
+
+        if selected_key == "/raw_data":
+            orphan_count = None
+            if self.project is not None and hasattr(self.project, 'tags') and 'freq_code' in frame.columns:
+                master_codes = set(self.project.tags.index.astype(str)) if self.project.tags.index.name == 'freq_code' else set(self.project.tags['freq_code'].astype(str))
+                orphan_count = int((~frame['freq_code'].astype(str).isin(master_codes)).sum())
+            if orphan_count is not None:
+                lines.append(f"Orphan detections: {orphan_count:,}")
+
+        elif selected_key == "/classified":
+            if 'test' in frame.columns:
+                kept = int((frame['test'] == 1).sum())
+                lines.append(f"Classified true detections: {kept:,} ({100 * kept / len(frame):.1f}%)")
+            if 'iter' in frame.columns:
+                lines.append(f"Latest iteration in view: {frame['iter'].max()}")
+            if 'posterior_T' in frame.columns:
+                post = pd.to_numeric(frame['posterior_T'], errors='coerce')
+                if post.notna().any():
+                    lines.append(f"Mean posterior_T: {post.mean():.3f}")
+
+        elif selected_key == "/presence":
+            if 'bout_no' in frame.columns:
+                bout_counts = frame.groupby(['freq_code', 'rec_id', 'bout_no']).size()
+                lines.append(f"Bouts: {len(bout_counts):,}")
+                if len(bout_counts) > 0:
+                    lines.append(f"Mean detections per bout: {bout_counts.mean():.2f}")
+
+        elif selected_key == "/overlapping":
+            if 'overlapping' in frame.columns:
+                overlap_n = int((frame['overlapping'] == 1).sum())
+                lines.append(f"Marked overlapping: {overlap_n:,}")
+            if 'ambiguous_overlap' in frame.columns:
+                ambig_n = int((frame['ambiguous_overlap'] == 1).sum())
+                lines.append(f"Marked ambiguous: {ambig_n:,}")
+
+        elif selected_key == "/recaptures":
+            if 'overlapping' in frame.columns:
+                lines.append(f"Remaining overlapping rows: {int((frame['overlapping'] == 1).sum()):,}")
+            if 'ambiguous_overlap' in frame.columns:
+                lines.append(f"Remaining ambiguous rows: {int((frame['ambiguous_overlap'] == 1).sum()):,}")
+            if 'bout_no' in frame.columns:
+                lines.append(f"Distinct bouts in view: {frame['bout_no'].nunique():,}")
+
+        if 'time_stamp' in frame.columns:
+            timestamps = pd.to_datetime(frame['time_stamp'], errors='coerce')
+            if timestamps.notna().any():
+                lines.append(f"Time range: {timestamps.min()} -> {timestamps.max()}")
+
+        return "\n".join(lines)
+
+    def load_step_qc_summary(self) -> None:
+        db_path = self._resolve_project_db_path()
+        if db_path is None or not db_path.exists():
+            raise RuntimeError("Project database is not available for QC summary.")
+
+        step = self._current_step_index()
+        self._set_viewer_key_for_step(step)
+        selected_key = self.viewer_key_combo.currentText().strip()
+        if not selected_key:
+            raise ValueError("Select an HDF key before generating QC summary.")
+
+        where_clause = self.viewer_where_edit.text().strip() or self._summary_where_clause_for_step(step)
+        sampled = False
+        with pd.HDFStore(str(db_path), mode='r') as store:
+            storer = store.get_storer(selected_key)
+            total_rows = getattr(storer, 'nrows', None)
+            if where_clause:
+                frame = self._select_hdf_rows(store, selected_key, where_clause=where_clause)
+            elif total_rows is not None and total_rows > 50000:
+                frame = self._select_hdf_rows(store, selected_key, start=0, stop=min(5000, total_rows))
+                sampled = True
+            else:
+                frame = self._select_hdf_rows(store, selected_key)
+
+        self.viewer_qc_summary.setPlainText(
+            self._build_stage_qc_summary(selected_key, frame, total_rows, sampled)
+        )
+        if where_clause and not self.viewer_where_edit.text().strip():
+            self.viewer_where_edit.setText(where_clause)
+        self.log(f"Generated QC summary for {selected_key} ({len(frame)} row(s) inspected).")
+
     def _populate_data_viewer_table(self, frame: pd.DataFrame) -> None:
         display_frame = frame.copy()
         if not isinstance(display_frame.index, pd.RangeIndex):
@@ -1204,24 +1355,7 @@ class WorkflowWindow(QMainWindow):
         with pd.HDFStore(str(db_path), mode="r") as store:
             storer = store.get_storer(selected_key)
             total_rows = getattr(storer, "nrows", None)
-            try:
-                preview = store.select(selected_key, where=where_clause, start=start, stop=stop)
-            except (ValueError, KeyError) as exc:
-                if where_clause is None:
-                    raise
-                preview_full = store.select(selected_key)
-                try:
-                    preview = preview_full.query(where_clause).iloc[start:stop]
-                except Exception as query_exc:  # noqa: BLE001
-                    raise ValueError(
-                        f"Viewer filter could not be applied as HDF where-clause or pandas query: {query_exc}"
-                    ) from query_exc
-                self.log(f"Viewer used in-memory filtering fallback for {selected_key}: {exc}")
-
-        if isinstance(preview, pd.Series):
-            preview = preview.to_frame()
-        if not isinstance(preview, pd.DataFrame):
-            preview = pd.DataFrame(preview)
+            preview = self._select_hdf_rows(store, selected_key, where_clause=where_clause, start=start, stop=stop)
 
         self._populate_data_viewer_table(preview)
         self._summarize_loaded_preview(preview, selected_key, total_rows)
