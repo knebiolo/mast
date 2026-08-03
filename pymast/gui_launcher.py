@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import json
 import os
 import sys
 import traceback
@@ -37,6 +38,8 @@ try:
         QScrollArea,
         QSpinBox,
         QStackedWidget,
+        QTableWidget,
+        QTableWidgetItem,
         QVBoxLayout,
         QWidget,
     )
@@ -63,6 +66,8 @@ except ImportError:
             QScrollArea,
             QSpinBox,
             QStackedWidget,
+            QTableWidget,
+            QTableWidgetItem,
             QVBoxLayout,
             QWidget,
         )
@@ -228,6 +233,7 @@ class WorkflowWindow(QMainWindow):
         self._active_worker: Optional[AsyncActionWorker] = None
         self._cancel_requested = False
         self._active_action_label: Optional[str] = None
+        self._session_state_path: Optional[Path] = None
 
         self.setWindowTitle("PyMAST Full GUI Workflow")
         self.resize(1300, 900)
@@ -253,8 +259,21 @@ class WorkflowWindow(QMainWindow):
         self.cancel_action_btn.setEnabled(False)
         self.cancel_action_btn.clicked.connect(self.cancel_active_action)
         self._tip(self.cancel_action_btn, "Request cancellation for the currently running background action.")
+        self.save_session_btn = QPushButton("Save GUI Session")
+        self.save_session_btn.setEnabled(False)
+        self.save_session_btn.clicked.connect(self.save_gui_session)
+        self._tip(self.save_session_btn, "Save current GUI form values to a sidecar file next to the project HDF5 database.")
+        self.load_session_btn = QPushButton("Load GUI Session")
+        self.load_session_btn.setEnabled(False)
+        self.load_session_btn.clicked.connect(self.load_gui_session)
+        self._tip(self.load_session_btn, "Reload previously saved GUI form values for the current project database.")
+        log_controls.addWidget(self.save_session_btn)
+        log_controls.addWidget(self.load_session_btn)
         log_controls.addWidget(self.cancel_action_btn)
         root_layout.addLayout(log_controls)
+
+        self.data_viewer_group = self._build_data_viewer_group()
+        root_layout.addWidget(self.data_viewer_group, stretch=3)
 
         self.setCentralWidget(root)
 
@@ -266,6 +285,64 @@ class WorkflowWindow(QMainWindow):
             page = self._build_step_page(step)
             self.step_pages[step] = page
             self.stack.addWidget(page)
+
+    def _build_data_viewer_group(self) -> QGroupBox:
+        group = QGroupBox("Project Data Viewer")
+        layout = QVBoxLayout(group)
+
+        controls = QHBoxLayout()
+
+        key_label = QLabel("HDF Key")
+        self.viewer_key_combo = QComboBox()
+        self.viewer_key_combo.setMinimumWidth(180)
+        self._tip(self.viewer_key_combo, "Select an HDF table/group to preview.")
+
+        refresh_keys_btn = QPushButton("Refresh Keys")
+        refresh_keys_btn.clicked.connect(self.refresh_data_viewer_keys)
+        self._tip(refresh_keys_btn, "Reload available HDF keys from the current project database.")
+
+        self.viewer_limit_spin = QSpinBox()
+        self.viewer_limit_spin.setRange(1, 10000)
+        self.viewer_limit_spin.setValue(250)
+        self._tip(self.viewer_limit_spin, "Number of rows to preview per page.")
+
+        self.viewer_offset_spin = QSpinBox()
+        self.viewer_offset_spin.setRange(0, 100000000)
+        self.viewer_offset_spin.setSingleStep(250)
+        self._tip(self.viewer_offset_spin, "Row offset into the selected dataset for paging through data.")
+
+        self.viewer_where_edit = QLineEdit()
+        self.viewer_where_edit.setPlaceholderText("Optional where clause, e.g. rec_id == 'R01'")
+        self._tip(self.viewer_where_edit, "Optional PyTables where clause for fast filtered preview when the table supports it.")
+
+        refresh_view_btn = QPushButton("Load Preview")
+        refresh_view_btn.clicked.connect(self.refresh_data_viewer)
+        self._tip(refresh_view_btn, "Load a preview slice from the selected HDF key.")
+
+        controls.addWidget(key_label)
+        controls.addWidget(self.viewer_key_combo)
+        controls.addWidget(refresh_keys_btn)
+        controls.addWidget(QLabel("Rows"))
+        controls.addWidget(self.viewer_limit_spin)
+        controls.addWidget(QLabel("Offset"))
+        controls.addWidget(self.viewer_offset_spin)
+        controls.addWidget(self.viewer_where_edit, stretch=1)
+        controls.addWidget(refresh_view_btn)
+
+        self.viewer_status_label = QLabel("No project database loaded.")
+        self.viewer_status_label.setStyleSheet("color: #666;")
+
+        self.viewer_table = QTableWidget()
+        self.viewer_table.setAlternatingRowColors(True)
+        self.viewer_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.viewer_table.setSortingEnabled(False)
+        self.viewer_table.verticalHeader().setVisible(False)
+
+        layout.addLayout(controls)
+        layout.addWidget(self.viewer_status_label)
+        layout.addWidget(self.viewer_table)
+
+        return group
 
     def _build_home_page(self) -> QWidget:
         page = QWidget()
@@ -871,6 +948,179 @@ class WorkflowWindow(QMainWindow):
         self.log_output.appendPlainText(message)
         QApplication.processEvents()
 
+    def _resolve_project_db_path(self) -> Optional[Path]:
+        if self.project is not None and getattr(self.project, "db", None):
+            return Path(self.project.db)
+
+        raw_path = self.import_db_dir.text().strip() if hasattr(self, "import_db_dir") else ""
+        if raw_path:
+            return Path(raw_path)
+        return None
+
+    def _update_session_state_path(self) -> Optional[Path]:
+        db_path = self._resolve_project_db_path()
+        self._session_state_path = db_path.with_suffix(db_path.suffix + ".gui_session.json") if db_path else None
+        enabled = self._session_state_path is not None
+        self.save_session_btn.setEnabled(enabled)
+        self.load_session_btn.setEnabled(enabled)
+        return self._session_state_path
+
+    def _supported_state_widgets(self) -> Dict[str, QWidget]:
+        supported = {}
+        excluded = {
+            "log_output",
+            "viewer_table",
+            "stack",
+            "home_page",
+        }
+        for name, value in self.__dict__.items():
+            if name.startswith("_") or name in excluded:
+                continue
+            if isinstance(value, (QLineEdit, QPlainTextEdit, QCheckBox, QSpinBox, QDoubleSpinBox, QComboBox)):
+                supported[name] = value
+        return supported
+
+    def _collect_gui_session_state(self) -> Dict[str, Any]:
+        widget_state: Dict[str, Any] = {}
+        for name, widget in self._supported_state_widgets().items():
+            if isinstance(widget, QLineEdit):
+                widget_state[name] = widget.text()
+            elif isinstance(widget, QPlainTextEdit):
+                widget_state[name] = widget.toPlainText()
+            elif isinstance(widget, QCheckBox):
+                widget_state[name] = widget.isChecked()
+            elif isinstance(widget, QSpinBox):
+                widget_state[name] = widget.value()
+            elif isinstance(widget, QDoubleSpinBox):
+                widget_state[name] = widget.value()
+            elif isinstance(widget, QComboBox):
+                widget_state[name] = widget.currentText()
+
+        current_step = 0
+        for step, page in self.step_pages.items():
+            if self.stack.currentWidget() is page:
+                current_step = step
+                break
+
+        return {
+            "current_step": current_step,
+            "widgets": widget_state,
+        }
+
+    def _apply_gui_session_state(self, state: Dict[str, Any]) -> None:
+        widgets = state.get("widgets", {})
+        for name, value in widgets.items():
+            widget = getattr(self, name, None)
+            if widget is None:
+                continue
+
+            if isinstance(widget, QLineEdit):
+                widget.setText(str(value))
+            elif isinstance(widget, QPlainTextEdit):
+                widget.setPlainText(str(value))
+            elif isinstance(widget, QCheckBox):
+                widget.setChecked(bool(value))
+            elif isinstance(widget, QSpinBox):
+                widget.setValue(int(value))
+            elif isinstance(widget, QDoubleSpinBox):
+                widget.setValue(float(value))
+            elif isinstance(widget, QComboBox):
+                idx = widget.findText(str(value))
+                if idx >= 0:
+                    widget.setCurrentIndex(idx)
+
+        step = state.get("current_step")
+        if isinstance(step, int) and step in self.step_pages:
+            self.goto_step(step)
+
+    def save_gui_session(self) -> None:
+        session_path = self._update_session_state_path()
+        if session_path is None:
+            raise RuntimeError("No project database is available for GUI session persistence yet.")
+
+        session_path.write_text(json.dumps(self._collect_gui_session_state(), indent=2), encoding="utf-8")
+        self.log(f"Saved GUI session: {session_path}")
+
+    def load_gui_session(self) -> None:
+        session_path = self._update_session_state_path()
+        if session_path is None:
+            raise RuntimeError("No project database is available for GUI session persistence yet.")
+        if not session_path.exists():
+            self.log(f"No saved GUI session found at: {session_path}")
+            return
+
+        state = json.loads(session_path.read_text(encoding="utf-8"))
+        self._apply_gui_session_state(state)
+        self.refresh_data_viewer_keys()
+        self.log(f"Loaded GUI session: {session_path}")
+
+    def refresh_data_viewer_keys(self) -> None:
+        db_path = self._resolve_project_db_path()
+        if db_path is None or not db_path.exists():
+            self.viewer_key_combo.clear()
+            self.viewer_status_label.setText("No project database loaded.")
+            self.viewer_table.clear()
+            self.viewer_table.setRowCount(0)
+            self.viewer_table.setColumnCount(0)
+            return
+
+        current_key = self.viewer_key_combo.currentText()
+        with pd.HDFStore(str(db_path), mode="r") as store:
+            keys = sorted(store.keys())
+
+        self.viewer_key_combo.clear()
+        self.viewer_key_combo.addItems(keys)
+        if current_key:
+            idx = self.viewer_key_combo.findText(current_key)
+            if idx >= 0:
+                self.viewer_key_combo.setCurrentIndex(idx)
+
+        self.viewer_status_label.setText(f"Loaded {len(keys)} HDF key(s) from {db_path.name}")
+
+    def _populate_data_viewer_table(self, frame: pd.DataFrame) -> None:
+        display_frame = frame.copy()
+        if not isinstance(display_frame.index, pd.RangeIndex):
+            display_frame = display_frame.reset_index()
+
+        display_frame = display_frame.fillna("")
+        self.viewer_table.setRowCount(len(display_frame))
+        self.viewer_table.setColumnCount(len(display_frame.columns))
+        self.viewer_table.setHorizontalHeaderLabels([str(col) for col in display_frame.columns])
+
+        for row_idx, (_, row) in enumerate(display_frame.iterrows()):
+            for col_idx, value in enumerate(row):
+                item = QTableWidgetItem(str(value))
+                self.viewer_table.setItem(row_idx, col_idx, item)
+
+        self.viewer_table.resizeColumnsToContents()
+
+    def refresh_data_viewer(self) -> None:
+        db_path = self._resolve_project_db_path()
+        if db_path is None or not db_path.exists():
+            raise RuntimeError("Project database is not available for preview.")
+
+        selected_key = self.viewer_key_combo.currentText().strip()
+        if not selected_key:
+            raise ValueError("Select an HDF key before loading preview data.")
+
+        start = int(self.viewer_offset_spin.value())
+        stop = start + int(self.viewer_limit_spin.value())
+        where_clause = self.viewer_where_edit.text().strip() or None
+
+        with pd.HDFStore(str(db_path), mode="r") as store:
+            preview = store.select(selected_key, where=where_clause, start=start, stop=stop)
+
+        if isinstance(preview, pd.Series):
+            preview = preview.to_frame()
+        if not isinstance(preview, pd.DataFrame):
+            preview = pd.DataFrame(preview)
+
+        self._populate_data_viewer_table(preview)
+        self.viewer_status_label.setText(
+            f"Previewing {selected_key}: rows {start} to {max(start, stop - 1)} | loaded {len(preview)} row(s), {len(preview.columns)} column(s)"
+        )
+        self.log(f"Loaded data preview for {selected_key} ({len(preview)} row(s)).")
+
     def _required_project(self) -> radio_project:
         if self.project is None:
             raise RuntimeError("Project is not initialized. Run Step 01 project initialization first.")
@@ -1055,8 +1305,13 @@ class WorkflowWindow(QMainWindow):
             db_path = os.path.join(project_dir, f"{db_name}.h5")
             self.import_db_dir.setText(db_path)
             self.cjs_output_ws.setText(os.path.join(project_dir, "Output"))
+            self._update_session_state_path()
+            self.refresh_data_viewer_keys()
             self.log(f"Project DB: {db_path}")
             self.log(f"Loaded tags={len(tag_data)}, receivers={len(receiver_data)}, nodes={len(nodes_data)}")
+
+            if self._session_state_path is not None and self._session_state_path.exists():
+                self.load_gui_session()
 
         self._run_action("Initialize / Reload Project", _impl)
 
@@ -1350,6 +1605,14 @@ class WorkflowWindow(QMainWindow):
 
         success_msg = f"CJS outputs written to {output_ws}\n  CSV: {csv_path}\n  INP: {inp_path}"
         self._run_action_async("Run CJS Export", _impl, success_message=success_msg)
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        try:
+            if self._resolve_project_db_path() is not None:
+                self.save_gui_session()
+        except Exception as exc:  # noqa: BLE001
+            self.log(f"GUI session save skipped on close: {exc}")
+        super().closeEvent(event)
 
 
 def _find_repo_root() -> Path:

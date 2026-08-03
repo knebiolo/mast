@@ -5,6 +5,7 @@ These tests are skipped when Qt bindings are not available.
 
 from pathlib import Path
 import importlib
+import json
 
 import pandas as pd
 import pytest
@@ -123,3 +124,66 @@ def test_check_cancel_requested_raises(app):
 
     with pytest.raises(gui.ActionCancelled):
         window._check_cancel_requested()
+
+
+def test_refresh_data_viewer_reads_hdf_preview(app, tmp_path):
+    gui = _load_gui_module_or_skip()
+    window = gui.WorkflowWindow(Path("."))
+
+    db_path = tmp_path / "viewer_test.h5"
+    source = pd.DataFrame(
+        {
+            "freq_code": ["F1", "F2"],
+            "rec_id": ["R01", "R02"],
+            "value": [1, 2],
+        }
+    )
+    source.to_hdf(db_path, key="recaptures", format="table", mode="w")
+
+    window.import_db_dir.setText(str(db_path))
+    window.refresh_data_viewer_keys()
+    window.viewer_limit_spin.setValue(10)
+    window.viewer_offset_spin.setValue(0)
+    window.viewer_key_combo.setCurrentText("/recaptures")
+
+    window.refresh_data_viewer()
+
+    assert window.viewer_table.rowCount() == 2
+    assert window.viewer_table.columnCount() >= 3
+    assert "loaded 2 row(s)" in window.viewer_status_label.text().lower()
+
+
+def test_gui_session_round_trip(app, tmp_path):
+    gui = _load_gui_module_or_skip()
+    window = gui.WorkflowWindow(Path("."))
+
+    db_path = tmp_path / "session_test.h5"
+    pd.DataFrame({"value": [1]}).to_hdf(db_path, key="raw_data", format="table", mode="w")
+
+    window.import_db_dir.setText(str(db_path))
+    session_path = window._update_session_state_path()
+    assert session_path is not None
+
+    window.project_dir_edit.setText(r"C:\example\project")
+    window.db_name_edit.setText("demo_db")
+    window.class_threshold.setValue(1.7)
+    window.like_power.setChecked(False)
+    window.viewer_where_edit.setText("rec_id == 'R01'")
+
+    window.save_gui_session()
+    assert session_path.exists()
+
+    saved = json.loads(session_path.read_text(encoding="utf-8"))
+    assert saved["widgets"]["db_name_edit"] == "demo_db"
+
+    window.db_name_edit.setText("changed")
+    window.class_threshold.setValue(2.5)
+    window.like_power.setChecked(True)
+    window.viewer_where_edit.setText("")
+
+    window.load_gui_session()
+
+    assert window.db_name_edit.text() == "demo_db"
+    assert window.class_threshold.value() == pytest.approx(1.7)
+    assert window.like_power.isChecked() is False
+    assert window.viewer_where_edit.text() == "rec_id == 'R01'"
