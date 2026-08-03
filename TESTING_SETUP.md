@@ -39,7 +39,7 @@ Your PyMAST project now has a **comprehensive automated testing system** with:
    
 7. **`.github/workflows/tests.yml`** - CI/CD pipeline
    - Multi-platform testing (Windows/Mac/Linux)
-   - Python 3.8-3.12 support
+   - Python 3.9-3.12 support
    - Coverage upload to Codecov
    - Linting and formatting checks
 

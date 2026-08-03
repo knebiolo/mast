@@ -203,9 +203,8 @@ logger.info("="*60)
 for rec_id in successful_receivers:
     try:
         logger.info(f"  Calculating bouts for {rec_id}...")
-        bout = pymast.bout(project, rec_id, lag_window=2, time_limit=21600)
-        threshold = bout.fit_processes()
-        bout.presence(threshold)
+        bout_obj = pymast.bout(project, rec_id, eps_multiplier=5, lag_window=2)
+        bout_obj.presence()
         logger.info(f"  ✓ Bouts calculated for {rec_id}")
     except Exception as e:
         logger.warning(f"  Could not calculate bouts for {rec_id}: {e}")

@@ -41,6 +41,16 @@
 pip install pymast
 ```
 
+**Recommended first step on Windows (improves wheel resolution):**
+```bash
+python -m pip install --upgrade pip setuptools wheel
+```
+
+**GUI dependencies (optional):**
+```bash
+pip install "pymast[gui]"
+```
+
 **For Spyder/Anaconda users:**
 
 To ensure installation in the correct environment, use:
@@ -68,16 +78,19 @@ import pandas as pd
 # Initialize project
 proj = radio_project(
     project_dir='C:/my_study',
-    db_name='study.h5',
-    tag_list=pd.read_csv('tags.csv'),
-    rec_list=pd.read_csv('receivers.csv')
+  db_name='study',
+  detection_count=5,
+  duration=1,
+  tag_data=pd.read_csv('tags.csv'),
+  receiver_data=pd.read_csv('receivers.csv')
 )
 
 # Import receiver data
-proj.import_data(
-    file_name='receiver_001.csv',
-    receiver_make='srx1200',
+proj.telem_data_import(
     rec_id='REC001',
+  rec_type='srx1200',
+  file_dir='C:/my_study/Data/Training_Files',
+  db_dir=proj.db,
     scan_time=2.5,
     channels=1
 )
@@ -133,7 +146,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for details.
 
 ## System Requirements
 
-- **Python**: 3.8 or higher
+- **Python**: 3.9 or higher
 - **RAM**: 8+ GB recommended for large datasets
 - **Storage**: HDF5 database typically 20-50% of raw data size
 - **Disk Space**: 10+ GB for large projects with beacon tags
@@ -323,16 +336,10 @@ Identify discrete presence events at receivers.
 import pymast
 
 node = 'N01'
-bout = pymast.bout(project, node, lag_window=2, time_limit=21600)
+bout_obj = pymast.bout(project, node, eps_multiplier=5, lag_window=2)
 
-# Fit processes to find optimal threshold
-threshold = bout.fit_processes()
-
-# Calculate presences using fitted threshold
-bout.presence(threshold)
-
-# Or use a manual threshold (seconds)
-# bout.presence(120)
+# Write DBSCAN presence records
+bout_obj.presence()
 
 # Undo if needed
 # project.undo_bouts(node)
@@ -422,13 +429,13 @@ node_to_state = {
 
 # Create time-to-event data
 tte = time_to_event(
-    node_to_state=node_to_state,
-    project=project,
-    bucket_length_min=15  # Time bin size in minutes
+  receiver_to_state=node_to_state,
+  project=project
 )
 
-# Export for survival analysis in R
-tte.to_csv(os.path.join(project.output_dir, 'time_to_event.csv'))
+# Build transition records and export for survival analysis in R
+tte.data_prep(project, bucket_length_min=15)
+tte.master_state_table.to_csv(os.path.join(project.output_dir, 'time_to_event.csv'), index=False)
 ```
 
 ---
@@ -462,7 +469,7 @@ fh.fish_plot('164.123 45')
 | Lotek        | SRX1200         | `srx1200`  | Standard format                 |
 | SigmaEight   | Orion           | `orion`    | Supports multi-channel/antenna  |
 | SigmaEight   | Ares            | `ares`     | Multiple firmware versions      |
-| Vemco        | VR2             | `VR2`      | Standard format                 |
+| Vemco        | VR2             | `vr2`      | Standard format                 |
 
 ---
 

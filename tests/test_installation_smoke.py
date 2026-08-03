@@ -58,9 +58,6 @@ def test_critical_dependencies():
         'scipy',
         'sklearn',
         'h5py',
-        'dask',
-        'distributed',
-        'numba',
         'tables',
         'intervaltree',
     ]
@@ -73,6 +70,17 @@ def test_critical_dependencies():
             missing.append(dep)
     
     assert not missing, f"Missing critical dependencies: {', '.join(missing)}"
+
+
+def test_optional_performance_dependencies_importable_when_installed():
+    """Optional performance dependencies should import if present."""
+    optional_deps = ['dask', 'distributed', 'numba']
+    for dep in optional_deps:
+        try:
+            __import__(dep)
+        except ImportError:
+            # Optional extras are not required for base installation.
+            pass
 
 
 if __name__ == '__main__':

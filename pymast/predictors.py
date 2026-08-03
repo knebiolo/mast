@@ -56,7 +56,6 @@ naive_bayes.train : Classifier training using these predictors
 parsers : Data import where predictors are first calculated
 """
 
-import numba as nb
 import numpy as np
 import pandas as pd
 pd.set_option('display.float_format', '{:.10f}'.format)

@@ -455,12 +455,22 @@ class radio_project():
         FileNotFoundError
             If file_dir doesn't exist or contains no data files
         """
-        # Validate receiver type
-        VALID_REC_TYPES = ['srx600', 'srx800', 'srx1200', 'orion', 'ares', 'VR2','PIT']
-        if rec_type not in VALID_REC_TYPES:
+        # Validate receiver type (case-insensitive)
+        valid_rec_types = {
+            'srx600',
+            'srx800',
+            'srx1200',
+            'orion',
+            'ares',
+            'vr2',
+            'pit',
+            'pit_multiple',
+        }
+        rec_type_norm = str(rec_type).strip().lower()
+        if rec_type_norm not in valid_rec_types:
             raise ValueError(
                 f"Unsupported receiver type: '{rec_type}'. "
-                f"Supported types: {', '.join(VALID_REC_TYPES)}"
+                f"Supported types: {', '.join(sorted(valid_rec_types))}"
             )
         
         # Validate receiver ID
@@ -496,28 +506,28 @@ class radio_project():
             # get the complete file directory
             f_dir = os.path.join(file_dir,f)
             
-            if rec_type == 'srx600' :
+            if rec_type_norm == 'srx600' :
                 parsers.srx600(f_dir, db_dir, rec_id, self.study_tags, scan_time = scan_time, channels = channels, ant_to_rec_dict = ant_to_rec_dict)
             
-            elif rec_type == 'srx800':
+            elif rec_type_norm == 'srx800':
                 parsers.srx800(f_dir, db_dir, rec_id, self.study_tags, scan_time = scan_time, channels = channels, ant_to_rec_dict = ant_to_rec_dict)
             
-            elif rec_type == 'srx1200':
-                parsers.srx1200(f_dir, db_dir, rec_id, self.study_tags, scan_time = scan_time, channels = channels, ant_to_rec_dict = ant_to_rec_dict, ka_format = 'True')
+            elif rec_type_norm == 'srx1200':
+                parsers.srx1200(f_dir, db_dir, rec_id, self.study_tags, scan_time = scan_time, channels = channels, ant_to_rec_dict = ant_to_rec_dict, ka_format = ka_format)
             
-            elif rec_type == 'orion':
+            elif rec_type_norm == 'orion':
                 parsers.orion_import(f_dir,db_dir,rec_id, self.study_tags, scan_time = scan_time, channels = channels, ant_to_rec_dict = ant_to_rec_dict)
             
-            elif rec_type == 'vr2':
-                parsers.vr2_import(f_dir,db_dir,rec_id)
+            elif rec_type_norm == 'vr2':
+                parsers.vr2_import(f_dir, db_dir, self.study_tags, rec_id)
                 
-            elif rec_type == 'ares':
+            elif rec_type_norm == 'ares':
                 parsers.ares(f_dir,db_dir,rec_id, self.study_tags, scan_time = scan_time, channels = channels, ant_to_rec_dict = ant_to_rec_dict)
 
-            elif rec_type == 'PIT':
+            elif rec_type_norm == 'pit':
                 parsers.PIT(f_dir,db_dir,rec_id, self.study_tags, scan_time = scan_time, channels = channels, ant_to_rec_dict = ant_to_rec_dict)
                 
-            elif rec_type == 'PIT_Multiple':
+            elif rec_type_norm == 'pit_multiple':
                 parsers.PIT_Multiple(f_dir, db_dir,
                                      study_tags=self.study_tags,
                                      ant_to_rec_dict=ant_to_rec_dict,
@@ -1689,8 +1699,14 @@ class radio_project():
 
     def make_recaptures_table(self, export=True, pit_study=False):
         '''Creates a recaptures key in the HDF5 file, iterating over receivers to manage memory.'''
-        # Import dask here to avoid import-time failures when dask is not needed
-        import dask.dataframe as dd
+        # Import dask lazily; fallback to pandas when dask is not installed.
+        try:
+            import dask.dataframe as dd
+            use_dask = True
+        except ImportError:
+            dd = None
+            use_dask = False
+            logger.warning("dask is not installed; using pandas fallback for recaptures table generation.")
         
         logger.info("Creating recaptures table")
         logger.info(f"  PIT study mode: {pit_study}")
@@ -1724,12 +1740,13 @@ class radio_project():
                 logger.info(f"  Processing receiver {rec}...")
                 print(f"[recaptures] processing receiver {rec}...", flush=True)
     
-                # Read classified data for this receiver as a Dask DataFrame
-                # Reading the data (assuming self.db and rec are predefined variables)
-                rec_dat = dd.read_hdf(self.db, key='classified')
-                
-                # Filter for specific rec_id and convert to pandas DataFrame
-                rec_dat = rec_dat[rec_dat['rec_id'] == rec].compute()
+                # Read classified data for this receiver
+                if use_dask:
+                    rec_dat = dd.read_hdf(self.db, key='classified')
+                    rec_dat = rec_dat[rec_dat['rec_id'] == rec].compute()
+                else:
+                    rec_dat = pd.read_hdf(self.db, key='classified')
+                    rec_dat = rec_dat[rec_dat['rec_id'] == rec]
                 
                 # Convert 'timestamp' column to datetime
                 rec_dat['time_stamp'] = pd.to_datetime(rec_dat['time_stamp'])
@@ -1755,16 +1772,20 @@ class radio_project():
 
                 # Check if 'presence' exists before trying to read it
                 try:
-                    presence_data = dd.read_hdf(self.db, key='presence')
-                    # Filter immediately instead of checking len() which triggers expensive compute
-                    presence_data = presence_data[presence_data['rec_id'] == rec]
+                    if use_dask:
+                        presence_data = dd.read_hdf(self.db, key='presence')
+                        presence_data = presence_data[presence_data['rec_id'] == rec]
+                    else:
+                        presence_data = pd.read_hdf(self.db, key='presence')
+                        presence_data = presence_data[presence_data['rec_id'] == rec]
                     presence_exists = True
-                except (KeyError, FileNotFoundError):
+                except (KeyError, FileNotFoundError, ValueError):
                     presence_exists = False
                     
                 if presence_exists:
                     try:
-                        presence_data = presence_data.compute()
+                        if use_dask:
+                            presence_data = presence_data.compute()
                         presence_data = presence_data[presence_data['freq_code'].isin(self.tags[self.tags.tag_type=='study'].index)]
                         presence_data = presence_data[['freq_code', 'epoch', 'rec_id', 'bout_no']]
                         logger.debug(f"    Presence data: {len(presence_data)} records")
@@ -1776,16 +1797,20 @@ class radio_project():
     
                 # Read overlap data - filter immediately to avoid expensive len() compute
                 try:
-                    overlap_data = dd.read_hdf(self.db, key='overlapping')
-                    # Filter to this receiver first before checking anything
-                    overlap_data = overlap_data[overlap_data['rec_id'] == rec]
+                    if use_dask:
+                        overlap_data = dd.read_hdf(self.db, key='overlapping')
+                        overlap_data = overlap_data[overlap_data['rec_id'] == rec]
+                    else:
+                        overlap_data = pd.read_hdf(self.db, key='overlapping')
+                        overlap_data = overlap_data[overlap_data['rec_id'] == rec]
                     overlap_exists = True
-                except (KeyError, FileNotFoundError):
+                except (KeyError, FileNotFoundError, ValueError):
                     overlap_exists = False
         
                 if overlap_exists:
                     try:
-                        overlap_data = overlap_data.compute()
+                        if use_dask:
+                            overlap_data = overlap_data.compute()
                         overlap_data = overlap_data[overlap_data['freq_code'].isin(self.tags[self.tags.tag_type=='study'].index)]
                         # Aggregate both overlapping and ambiguous_overlap columns
                         if 'ambiguous_overlap' in overlap_data.columns:
@@ -1924,8 +1949,12 @@ class radio_project():
         
                 if presence_exists:
                     try:
-                        presence_data = dd.read_hdf(self.db, key='presence')
-                        presence_data = presence_data[presence_data['rec_id'] == rec].compute()
+                        if use_dask:
+                            presence_data = dd.read_hdf(self.db, key='presence')
+                            presence_data = presence_data[presence_data['rec_id'] == rec].compute()
+                        else:
+                            presence_data = pd.read_hdf(self.db, key='presence')
+                            presence_data = presence_data[presence_data['rec_id'] == rec]
                         presence_data = presence_data[presence_data['freq_code'].isin(self.tags[self.tags.tag_type=='study'].index)]
                         presence_data = presence_data[['freq_code', 'epoch', 'rec_id', 'bout_no']]
                         
@@ -1943,8 +1972,12 @@ class radio_project():
         
                 if overlap_exists:
                     try:
-                        overlap_data = dd.read_hdf(self.db, key='overlapping')
-                        overlap_data = overlap_data[overlap_data['rec_id'] == rec].compute()
+                        if use_dask:
+                            overlap_data = dd.read_hdf(self.db, key='overlapping')
+                            overlap_data = overlap_data[overlap_data['rec_id'] == rec].compute()
+                        else:
+                            overlap_data = pd.read_hdf(self.db, key='overlapping')
+                            overlap_data = overlap_data[overlap_data['rec_id'] == rec]
                         overlap_data = overlap_data[overlap_data['freq_code'].isin(self.tags[self.tags.tag_type=='study'].index)]
                         # Aggregate: take max for both overlapping and ambiguous_overlap
                         agg_dict = {'overlapping': 'max'}
@@ -2024,7 +2057,10 @@ class radio_project():
         if export:
             logger.info("Exporting recaptures to CSV...")
             print("[recaptures] exporting recaptures to CSV...", flush=True)
-            rec_data = dd.read_hdf(self.db, 'recaptures').compute()
+            if use_dask:
+                rec_data = dd.read_hdf(self.db, 'recaptures').compute()
+            else:
+                rec_data = pd.read_hdf(self.db, key='recaptures')
             rec_data.to_csv(os.path.join(self.output_dir,'recaptures.csv'), index=False)
             logger.info(f"  ✓ Export complete: {os.path.join(self.output_dir,'recaptures.csv')}")
             print(f"[recaptures] ✓ Export complete: {os.path.join(self.output_dir,'recaptures.csv')}", flush=True)

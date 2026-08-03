@@ -41,17 +41,18 @@ project.training_summary('srx800', site=['R01'])
 ### 4. Classify
 ```python
 project.reclassify(
-    project, 'R01', 1.0,
-    ['hit_ratio', 'cons_length', 'noise_ratio', 'lag_diff'],
-    'srx800'
+    project=project,
+    rec_id='R01',
+    threshold_ratio=1.0,
+    likelihood_model=['hit_ratio', 'cons_length', 'noise_ratio', 'lag_diff'],
+    rec_type='srx800'
 )
 ```
 
 ### 5. Calculate Bouts
 ```python
-bout = pymast.bout(project, 'R01', 2, 21600)
-threshold = bout.fit_processes()
-bout.presence(threshold)
+bout_obj = pymast.bout(project, 'R01', eps_multiplier=5, lag_window=2)
+bout_obj.presence()
 ```
 
 ### 6. Remove Overlap
@@ -95,7 +96,7 @@ cjs.input_file('model_name', project.output_dir)
 - `srx600`, `srx800`, `srx1200` (Lotek)
 - `orion` (Sigma Eight)
 - `ares` (ATS)
-- `VR2` (Vemco acoustic)
+- `vr2` (Vemco acoustic)
 
 ## Input Files
 - `tblMasterTag.csv` - freq_code, pulse_rate, tag_type, rel_date...

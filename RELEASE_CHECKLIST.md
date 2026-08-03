@@ -23,7 +23,7 @@ This checklist ensures consistent, high-quality releases of PyMAST.
 - [ ] All unit tests passing (`pytest tests/`)
 - [ ] Integration tests passing
 - [ ] Manual testing of key workflows:
-  - [ ] Data import (SRX, Orion, ARES, VR2)
+  - [ ] Data import (SRX, Orion, ARES, vr2, PIT)
   - [ ] Naive Bayes classification
   - [ ] Bout detection
   - [ ] Overlap resolution
@@ -34,7 +34,6 @@ This checklist ensures consistent, high-quality releases of PyMAST.
   - [ ] macOS (Apple Silicon)
   - [ ] Linux (Ubuntu)
 - [ ] Python version testing:
-  - [ ] Python 3.8
   - [ ] Python 3.9
   - [ ] Python 3.10
   - [ ] Python 3.11

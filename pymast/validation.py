@@ -99,9 +99,10 @@ def validate_receiver_data(receiver_data):
             f"Each rec_id must be unique."
         )
     
-    # Check receiver types
-    valid_rec_types = ['srx600', 'srx800', 'srx1200', 'orion', 'ares', 'VR2']
-    invalid_types = set(receiver_data['rec_type'].unique()) - set(valid_rec_types)
+    # Check receiver types (case-insensitive)
+    valid_rec_types = ['srx600', 'srx800', 'srx1200', 'orion', 'ares', 'vr2', 'pit', 'pit_multiple']
+    observed_types = set(receiver_data['rec_type'].astype(str).str.strip().str.lower().unique())
+    invalid_types = observed_types - set(valid_rec_types)
     if invalid_types:
         raise ValidationError(
             f"Invalid rec_type values found: {', '.join(invalid_types)}. "

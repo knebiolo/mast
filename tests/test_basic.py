@@ -5,7 +5,10 @@ Basic tests for MAST core functionality
 import pytest
 import pandas as pd
 import numpy as np
+import importlib
 from pymast import predictors, naive_bayes
+
+radio_project_module = importlib.import_module('pymast.radio_project')
 
 
 @pytest.mark.unit
@@ -132,6 +135,71 @@ class TestDataStructures:
         
         for col in required_cols:
             assert col in receiver_data.columns
+
+
+@pytest.mark.unit
+class TestImportDispatchRegression:
+    """Regression tests for telemetry import dispatch behavior."""
+
+    def _build_minimal_project(self):
+        proj = radio_project_module.radio_project.__new__(radio_project_module.radio_project)
+        proj.receivers = pd.DataFrame({'rec_type': ['vr2']}, index=['R01'])
+        proj.study_tags = np.array(['A69-1601-12345'], dtype=object)
+        proj.db = 'dummy.h5'
+        proj.training_dir = 'dummy_training_dir'
+        return proj
+
+    def test_telem_data_import_passes_ka_format_through(self, monkeypatch):
+        proj = self._build_minimal_project()
+        captured = {}
+
+        monkeypatch.setattr(radio_project_module.os.path, 'exists', lambda _p: True)
+        monkeypatch.setattr(radio_project_module.os, 'listdir', lambda _p: ['file1.txt'])
+        monkeypatch.setattr(radio_project_module, 'tqdm', lambda it, **_kwargs: it)
+        monkeypatch.setattr(radio_project_module.pd, 'read_hdf', lambda *_args, **_kwargs: pd.DataFrame({'rec_id': ['R01']}))
+
+        def fake_srx1200(_f, _db, _rec_id, _study_tags, **kwargs):
+            captured['ka_format'] = kwargs.get('ka_format')
+
+        monkeypatch.setattr(radio_project_module.parsers, 'srx1200', fake_srx1200)
+
+        proj.telem_data_import(
+            rec_id='R01',
+            rec_type='srx1200',
+            file_dir='dummy_training_dir',
+            db_dir='dummy.h5',
+            ka_format=False,
+        )
+
+        assert captured['ka_format'] is False
+
+    def test_telem_data_import_accepts_uppercase_vr2_and_calls_parser(self, monkeypatch):
+        proj = self._build_minimal_project()
+        captured = {}
+
+        monkeypatch.setattr(radio_project_module.os.path, 'exists', lambda _p: True)
+        monkeypatch.setattr(radio_project_module.os, 'listdir', lambda _p: ['vr2.csv'])
+        monkeypatch.setattr(radio_project_module, 'tqdm', lambda it, **_kwargs: it)
+        monkeypatch.setattr(radio_project_module.pd, 'read_hdf', lambda *_args, **_kwargs: pd.DataFrame({'rec_id': ['R01']}))
+
+        def fake_vr2_import(file_name, db_dir, study_tags, rec_id):
+            captured['file_name'] = file_name
+            captured['db_dir'] = db_dir
+            captured['study_tags'] = study_tags
+            captured['rec_id'] = rec_id
+
+        monkeypatch.setattr(radio_project_module.parsers, 'vr2_import', fake_vr2_import)
+
+        proj.telem_data_import(
+            rec_id='R01',
+            rec_type='VR2',
+            file_dir='dummy_training_dir',
+            db_dir='dummy.h5',
+        )
+
+        assert captured['db_dir'] == 'dummy.h5'
+        assert captured['rec_id'] == 'R01'
+        assert list(captured['study_tags']) == ['A69-1601-12345']
 
 
 if __name__ == '__main__':

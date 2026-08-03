@@ -66,7 +66,7 @@ print("=" * 80)
 
 # Configure for your receiver
 rec_id = 'R01'  # UPDATE THIS
-rec_type = 'srx800'  # Options: 'srx600', 'srx800', 'srx1200', 'orion', 'ares', 'VR2'
+rec_type = 'srx800'  # Options: 'srx600', 'srx800', 'srx1200', 'orion', 'ares', 'vr2', 'pit', 'pit_multiple'
 scan_time = 1.0  # Channel scan time (seconds)
 channels = 1  # Number of channels
 antenna_to_rec_dict = {'A0': rec_id}  # Map antennas to receivers
@@ -139,17 +139,13 @@ print("\n" + "=" * 80)
 print("STEP 5: Calculating bouts and presences")
 print("=" * 80)
 
-# Create a bout object
-node = rec_id  # Can be a node with multiple receivers
-bout = pymast.bout(project, node, lag_window=2, time_limit=21600)
+# Create a bout object (DBSCAN runs during initialization)
+bout_obj = pymast.bout(project, rec_id, eps_multiplier=5, lag_window=2)
 
-# Fit the bout model
-threshold = bout.fit_processes()
+# Write presence records to database
+bout_obj.presence()
 
-# Calculate presences using the threshold
-bout.presence(threshold)
-
-print(f"✓ Bouts calculated for node {node}")
+print(f"✓ Bouts calculated for receiver {rec_id}")
 
 # =============================================================================
 # STEP 6: Remove Overlap (if applicable)

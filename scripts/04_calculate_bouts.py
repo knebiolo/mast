@@ -35,18 +35,14 @@ project = radio_project(project_dir,
                         nodes_data)
 
 #%% Calculate bouts
-# Get nodes
-node = 'R15'
+# Receiver to process
+rec_id = 'R15'
 
-# Create a bout object
-bout = pymast.bout(project, node, 2, 21600)
-    
-# Find the threshold
-threshold = bout.fit_processes()
-    
-# Calculate presences - or pass float
-bout.presence(threshold)
-# bout.presence(120)
+# Create a bout object (DBSCAN runs during initialization)
+bout_obj = pymast.bout(project, rec_id, eps_multiplier=5, lag_window=2)
+
+# Write presence records
+bout_obj.presence()
 
 # Undo bouts if needed
-# project.undo_bouts(node)
+# project.undo_bouts(rec_id)

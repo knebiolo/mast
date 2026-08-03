@@ -16,7 +16,7 @@ from pymast.overlap_removal import bout, overlap_reduction
 from pymast.radio_project import radio_project
 
 try:
-    from PySide6.QtCore import Qt
+    from PySide6.QtCore import QObject, QThread, Qt, Signal
     from PySide6.QtGui import QPixmap
     from PySide6.QtWidgets import (
         QApplication,
@@ -42,7 +42,7 @@ try:
     )
 except ImportError:
     try:
-        from PyQt5.QtCore import Qt
+        from PyQt5.QtCore import QObject, QThread, Qt, pyqtSignal as Signal
         from PyQt5.QtGui import QPixmap
         from PyQt5.QtWidgets import (
             QApplication,
@@ -81,6 +81,37 @@ STEP_TITLES = {
     7: "Time-to-Event Model",
     8: "CJS Model",
 }
+
+
+class ActionCancelled(Exception):
+    """Raised when a background GUI action is cancelled by the user."""
+
+
+class AsyncActionWorker(QObject):
+    finished = Signal()
+    cancelled = Signal(str)
+    failed = Signal(str, str)
+
+    def __init__(self, fn, cancel_check=None):
+        super().__init__()
+        self._fn = fn
+        self._cancel_check = cancel_check
+
+    def _is_cancel_requested(self) -> bool:
+        return bool(self._cancel_check and self._cancel_check())
+
+    def run(self):
+        try:
+            if self._is_cancel_requested():
+                raise ActionCancelled("Cancelled before execution started.")
+            self._fn()
+            if self._is_cancel_requested():
+                raise ActionCancelled("Cancelled.")
+            self.finished.emit()
+        except ActionCancelled as exc:
+            self.cancelled.emit(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            self.failed.emit(str(exc), traceback.format_exc())
 
 STEP_HELP = {
     0: (
@@ -193,6 +224,10 @@ class WorkflowWindow(QMainWindow):
         self.project: Optional[radio_project] = None
         self.tte_obj = None
         self.cjs_obj = None
+        self._active_thread: Optional[QThread] = None
+        self._active_worker: Optional[AsyncActionWorker] = None
+        self._cancel_requested = False
+        self._active_action_label: Optional[str] = None
 
         self.setWindowTitle("PyMAST Full GUI Workflow")
         self.resize(1300, 900)
@@ -211,6 +246,15 @@ class WorkflowWindow(QMainWindow):
         self.log_output.setReadOnly(True)
         self.log_output.setPlaceholderText("Workflow output and errors will appear here.")
         root_layout.addWidget(self.log_output, stretch=2)
+
+        log_controls = QHBoxLayout()
+        log_controls.addStretch(1)
+        self.cancel_action_btn = QPushButton("Cancel Running Action")
+        self.cancel_action_btn.setEnabled(False)
+        self.cancel_action_btn.clicked.connect(self.cancel_active_action)
+        self._tip(self.cancel_action_btn, "Request cancellation for the currently running background action.")
+        log_controls.addWidget(self.cancel_action_btn)
+        root_layout.addLayout(log_controls)
 
         self.setCentralWidget(root)
 
@@ -421,7 +465,7 @@ class WorkflowWindow(QMainWindow):
         self._tip(self.import_rec_id, "Receiver ID to import. Must exist in your receiver metadata table.")
         self.import_rec_type = QComboBox()
         self.import_rec_type.addItems([
-            "srx1200", "srx800", "srx600", "orion", "ares", "VR2", "vr2", "PIT", "PIT_Multiple"
+            "srx1200", "srx800", "srx600", "orion", "ares", "vr2", "pit", "pit_multiple"
         ])
         self.import_file_dir, file_dir_row = self._line_with_browse(dir_mode=True)
         self._tip(self.import_file_dir, "Directory containing raw receiver files to import for this receiver.")
@@ -850,6 +894,17 @@ class WorkflowWindow(QMainWindow):
         value = text.strip()
         return value if value else None
 
+    def _normalize_rec_type(self, rec_type: str) -> str:
+        normalized = rec_type.strip().lower()
+        aliases = {
+            'vr2': 'vr2',
+            'pit': 'pit',
+            'pit_multiple': 'pit_multiple',
+            'pit-multiple': 'pit_multiple',
+            'pit multiple': 'pit_multiple',
+        }
+        return aliases.get(normalized, normalized)
+
     def show_step_help(self, step: int) -> None:
         help_text = STEP_HELP.get(step, "No help available for this section yet.")
         title = STEP_TITLES.get(step, "Section Help")
@@ -888,6 +943,79 @@ class WorkflowWindow(QMainWindow):
             self.log(f"✗ {label} failed: {exc}")
             self.log(traceback.format_exc())
             QMessageBox.critical(self, "PyMAST GUI Error", f"{label} failed:\n{exc}")
+
+    def _set_busy(self, busy: bool) -> None:
+        self.stack.setEnabled(not busy)
+        self.cancel_action_btn.setEnabled(busy)
+
+    def _is_cancel_requested(self) -> bool:
+        return self._cancel_requested
+
+    def _check_cancel_requested(self) -> None:
+        if self._cancel_requested:
+            raise ActionCancelled("Cancelled by user request.")
+
+    def cancel_active_action(self) -> None:
+        if self._active_thread is None or not self._active_thread.isRunning():
+            self.log("No active background action to cancel.")
+            return
+
+        self._cancel_requested = True
+        self._active_thread.requestInterruption()
+        label = self._active_action_label or "Current action"
+        self.log(f"Cancellation requested for: {label}")
+        self.log("The action will stop at the next safe cancellation checkpoint.")
+
+    def _run_action_async(self, label: str, fn, success_message: Optional[str] = None) -> None:
+        if self._active_thread is not None and self._active_thread.isRunning():
+            QMessageBox.warning(self, "PyMAST GUI Busy", "Another operation is currently running. Please wait.")
+            return
+
+        self.log(f"\n=== {label} ===")
+        self.log("Running in background thread...")
+        self._cancel_requested = False
+        self._active_action_label = label
+        self._set_busy(True)
+
+        thread = QThread(self)
+        worker = AsyncActionWorker(fn, cancel_check=self._is_cancel_requested)
+        worker.moveToThread(thread)
+
+        def _cleanup() -> None:
+            thread.quit()
+            thread.wait()
+            worker.deleteLater()
+            thread.deleteLater()
+            self._active_worker = None
+            self._active_thread = None
+            self._active_action_label = None
+            self._cancel_requested = False
+            self._set_busy(False)
+
+        def _on_success() -> None:
+            if success_message:
+                self.log(success_message)
+            self.log(f"✓ {label} complete")
+            _cleanup()
+
+        def _on_error(err: str, tb: str) -> None:
+            self.log(f"✗ {label} failed: {err}")
+            self.log(tb)
+            QMessageBox.critical(self, "PyMAST GUI Error", f"{label} failed:\n{err}")
+            _cleanup()
+
+        def _on_cancelled(msg: str) -> None:
+            self.log(f"⊘ {label} cancelled: {msg}")
+            _cleanup()
+
+        thread.started.connect(worker.run)
+        worker.finished.connect(_on_success)
+        worker.failed.connect(_on_error)
+        worker.cancelled.connect(_on_cancelled)
+
+        self._active_thread = thread
+        self._active_worker = worker
+        thread.start()
 
     def initialize_project_from_form(self) -> None:
         def _impl() -> None:
@@ -933,30 +1061,32 @@ class WorkflowWindow(QMainWindow):
         self._run_action("Initialize / Reload Project", _impl)
 
     def run_import(self) -> None:
+        proj = self._required_project()
+        ant_map = self._parse_literal(self.import_ant_map.toPlainText(), "Antenna map", dict, allow_empty=True)
+        if ant_map is None:
+            ant_map = None
+
+        rec_id = self.import_rec_id.text().strip()
+        rec_type = self._normalize_rec_type(self.import_rec_type.currentText())
+        file_dir = self.import_file_dir.text().strip()
+        db_dir = self.import_db_dir.text().strip() or proj.db
+        scan_time = float(self.import_scan_time.value())
+        channels = int(self.import_channels.value())
+        ka_format = bool(self.import_ka_format.isChecked())
+
         def _impl() -> None:
-            proj = self._required_project()
-            ant_map = self._parse_literal(self.import_ant_map.toPlainText(), "Antenna map", dict, allow_empty=True)
-            if ant_map is None:
-                ant_map = None
-
-            rec_id = self.import_rec_id.text().strip()
-            rec_type = self.import_rec_type.currentText().strip()
-            file_dir = self.import_file_dir.text().strip()
-            db_dir = self.import_db_dir.text().strip() or proj.db
-
             proj.telem_data_import(
                 rec_id=rec_id,
                 rec_type=rec_type,
                 file_dir=file_dir,
                 db_dir=db_dir,
-                scan_time=float(self.import_scan_time.value()),
-                channels=int(self.import_channels.value()),
+                scan_time=scan_time,
+                channels=channels,
                 ant_to_rec_dict=ant_map,
-                ka_format=bool(self.import_ka_format.isChecked()),
+                ka_format=ka_format,
             )
-            self.log(f"Imported receiver {rec_id} from {file_dir}")
 
-        self._run_action("Run Import", _impl)
+        self._run_action_async("Run Import", _impl, success_message=f"Imported receiver {rec_id} from {file_dir}")
 
     def undo_import(self) -> None:
         self._run_action("Undo Import", lambda: self._required_project().undo_import(self.import_rec_id.text().strip()))
@@ -976,6 +1106,7 @@ class WorkflowWindow(QMainWindow):
 
             self.log(f"Training {len(fishes)} fish at {rec_id}...")
             for fish in fishes:
+                self._check_cancel_requested()
                 proj.train(fish, rec_id)
                 QApplication.processEvents()
 
@@ -1027,30 +1158,33 @@ class WorkflowWindow(QMainWindow):
         )
 
     def run_bouts(self) -> None:
-        def _impl() -> None:
-            proj = self._required_project()
-            if self.bout_all_receivers.isChecked():
-                rec_ids = list(proj.receivers.index)
-            else:
-                rec_id = self.bout_rec_id.text().strip()
-                if not rec_id:
-                    raise ValueError("Receiver ID is required when not running all receivers.")
-                rec_ids = [rec_id]
+        proj = self._required_project()
+        if self.bout_all_receivers.isChecked():
+            rec_ids = list(proj.receivers.index)
+        else:
+            rec_id = self.bout_rec_id.text().strip()
+            if not rec_id:
+                raise ValueError("Receiver ID is required when not running all receivers.")
+            rec_ids = [rec_id]
 
+        eps_multiplier = int(self.bout_eps.value())
+        lag_window = int(self.bout_lag.value())
+        visualize = bool(self.bout_visualize.isChecked())
+
+        def _impl() -> None:
             for rec_id in rec_ids:
-                self.log(f"Running bout detection for {rec_id}...")
+                self._check_cancel_requested()
                 b = bout(
                     radio_project=proj,
                     rec_id=rec_id,
-                    eps_multiplier=int(self.bout_eps.value()),
-                    lag_window=int(self.bout_lag.value()),
+                    eps_multiplier=eps_multiplier,
+                    lag_window=lag_window,
                 )
                 b.presence()
-                if self.bout_visualize.isChecked():
+                if visualize:
                     b.visualize_bout_lengths()
-                QApplication.processEvents()
 
-        self._run_action("Run Bout Detection", _impl)
+        self._run_action_async("Run Bout Detection", _impl, success_message=f"Processed bout detection for {len(rec_ids)} receiver(s).")
 
     def undo_bouts(self) -> None:
         def _impl() -> None:
@@ -1078,112 +1212,144 @@ class WorkflowWindow(QMainWindow):
         return nodes, edges
 
     def run_overlap_unsupervised(self) -> None:
+        proj = self._required_project()
+        nodes, edges = self._resolve_nodes_edges()
+        method = self.overlap_method.currentText()
+        p_value_threshold = float(self.overlap_p.value())
+        effect_size_threshold = float(self.overlap_effect.value())
+        power_threshold = float(self.overlap_power.value())
+        min_detections = int(self.overlap_min_det.value())
+        bout_expansion = int(self.overlap_expand.value())
+
+        conf_raw = self.overlap_conf.text().strip()
+        confidence = float(conf_raw) if conf_raw else None
+
         def _impl() -> None:
-            proj = self._required_project()
-            nodes, edges = self._resolve_nodes_edges()
             overlap_obj = overlap_reduction(nodes=nodes, edges=edges, radio_project=proj)
-
-            conf_raw = self.overlap_conf.text().strip()
-            confidence = float(conf_raw) if conf_raw else None
-
             overlap_obj.unsupervised_removal(
-                method=self.overlap_method.currentText(),
-                p_value_threshold=float(self.overlap_p.value()),
-                effect_size_threshold=float(self.overlap_effect.value()),
-                power_threshold=float(self.overlap_power.value()),
-                min_detections=int(self.overlap_min_det.value()),
-                bout_expansion=int(self.overlap_expand.value()),
+                method=method,
+                p_value_threshold=p_value_threshold,
+                effect_size_threshold=effect_size_threshold,
+                power_threshold=power_threshold,
+                min_detections=min_detections,
+                bout_expansion=bout_expansion,
                 confidence_threshold=confidence,
             )
 
-        self._run_action("Run Unsupervised Overlap", _impl)
+        self._run_action_async("Run Unsupervised Overlap", _impl, success_message=f"Overlap removal completed for {len(nodes)} node(s).")
 
     def run_overlap_nested(self) -> None:
+        proj = self._required_project()
+        nodes, edges = self._resolve_nodes_edges()
+
         def _impl() -> None:
-            proj = self._required_project()
-            nodes, edges = self._resolve_nodes_edges()
             overlap_obj = overlap_reduction(nodes=nodes, edges=edges, radio_project=proj)
             overlap_obj.nested_doll()
 
-        self._run_action("Run Nested Doll", _impl)
+        self._run_action_async("Run Nested Doll", _impl, success_message=f"Nested doll overlap completed for {len(edges)} edge(s).")
 
     def undo_overlap(self) -> None:
         self._run_action("Undo Overlap", lambda: self._required_project().undo_overlap())
 
     def run_recaptures(self) -> None:
-        def _impl() -> None:
-            proj = self._required_project()
-            proj.make_recaptures_table(
-                export=bool(self.recap_export.isChecked()),
-                pit_study=bool(self.recap_pit_study.isChecked()),
-            )
+        proj = self._required_project()
+        export = bool(self.recap_export.isChecked())
+        pit_study = bool(self.recap_pit_study.isChecked())
 
-        self._run_action("Create Recaptures Table", _impl)
+        def _impl() -> None:
+            proj.make_recaptures_table(export=export, pit_study=pit_study)
+
+        self._run_action_async("Create Recaptures Table", _impl, success_message="Recaptures table generation completed.")
 
     def undo_recaptures(self) -> None:
         self._run_action("Undo Recaptures", lambda: self._required_project().undo_recaptures())
 
     def run_tte(self) -> None:
+        proj = self._required_project()
+        node_to_state = self._parse_literal(self.tte_node_map.toPlainText(), "receiver_to_state", dict)
+
+        adjacency = None
+        if self.tte_adjacency.text().strip():
+            adjacency = self._parse_literal(self.tte_adjacency.text(), "adjacency_filter", list)
+
+        unknown_state = None
+        if self.tte_unknown_state.text().strip():
+            unknown_state = int(self.tte_unknown_state.text().strip())
+
+        initial_state_release = bool(self.tte_initial_release.isChecked())
+        last_presence_time0 = bool(self.tte_last_presence.isChecked())
+        hit_ratio_filter = bool(self.tte_hit_ratio_filter.isChecked())
+        cap_loc = self._none_if_empty(self.tte_cap_loc.text())
+        rel_loc = self._none_if_empty(self.tte_rel_loc.text())
+        species = self._none_if_empty(self.tte_species.text())
+        rel_date = self._none_if_empty(self.tte_rel_date.text())
+        recap_date = self._none_if_empty(self.tte_recap_date.text())
+        bucket_length_min = int(self.tte_bucket_min.value())
+
         def _impl() -> None:
-            proj = self._required_project()
-            node_to_state = self._parse_literal(self.tte_node_map.toPlainText(), "receiver_to_state", dict)
-
-            adjacency = None
-            if self.tte_adjacency.text().strip():
-                adjacency = self._parse_literal(self.tte_adjacency.text(), "adjacency_filter", list)
-
-            unknown_state = None
-            if self.tte_unknown_state.text().strip():
-                unknown_state = int(self.tte_unknown_state.text().strip())
-
             tte = formatter.time_to_event(
                 receiver_to_state=node_to_state,
                 project=proj,
-                initial_state_release=bool(self.tte_initial_release.isChecked()),
-                last_presence_time0=bool(self.tte_last_presence.isChecked()),
-                hit_ratio_filter=bool(self.tte_hit_ratio_filter.isChecked()),
-                cap_loc=self._none_if_empty(self.tte_cap_loc.text()),
-                rel_loc=self._none_if_empty(self.tte_rel_loc.text()),
-                species=self._none_if_empty(self.tte_species.text()),
-                rel_date=self._none_if_empty(self.tte_rel_date.text()),
-                recap_date=self._none_if_empty(self.tte_recap_date.text()),
+                initial_state_release=initial_state_release,
+                last_presence_time0=last_presence_time0,
+                hit_ratio_filter=hit_ratio_filter,
+                cap_loc=cap_loc,
+                rel_loc=rel_loc,
+                species=species,
+                rel_date=rel_date,
+                recap_date=recap_date,
             )
             tte.data_prep(
                 project=proj,
                 unknown_state=unknown_state,
-                bucket_length_min=int(self.tte_bucket_min.value()),
+                bucket_length_min=bucket_length_min,
                 adjacency_filter=adjacency,
             )
             tte.summary()
             self.tte_obj = tte
 
-        self._run_action("Run TTE Data Prep", _impl)
+        self._run_action_async("Run TTE Data Prep", _impl, success_message="TTE data preparation completed.")
 
     def run_cjs(self) -> None:
+        proj = self._required_project()
+        receiver_to_recap = self._parse_literal(self.cjs_map.toPlainText(), "receiver_to_recap", dict)
+
+        output_ws = self.cjs_output_ws.text().strip() or proj.output_dir
+        os.makedirs(output_ws, exist_ok=True)
+        model_name = self.cjs_model_name.text().strip()
+        if not model_name:
+            raise ValueError("model_name is required.")
+
+        species = self._none_if_empty(self.cjs_species.text())
+        rel_loc = self._none_if_empty(self.cjs_rel_loc.text())
+        cap_loc = self._none_if_empty(self.cjs_cap_loc.text())
+        initial_recap_release = bool(self.cjs_initial_release.isChecked())
+        csv_path = os.path.join(output_ws, f"{model_name}.csv")
+        inp_path = os.path.join(output_ws, f"{model_name}.inp")
+
         def _impl() -> None:
-            proj = self._required_project()
-            receiver_to_recap = self._parse_literal(self.cjs_map.toPlainText(), "receiver_to_recap", dict)
-
-            output_ws = self.cjs_output_ws.text().strip() or proj.output_dir
-            os.makedirs(output_ws, exist_ok=True)
-            model_name = self.cjs_model_name.text().strip()
-            if not model_name:
-                raise ValueError("model_name is required.")
-
             cjs = formatter.cjs_data_prep(
                 receiver_to_recap=receiver_to_recap,
                 project=proj,
-                species=self._none_if_empty(self.cjs_species.text()),
-                rel_loc=self._none_if_empty(self.cjs_rel_loc.text()),
-                cap_loc=self._none_if_empty(self.cjs_cap_loc.text()),
-                initial_recap_release=bool(self.cjs_initial_release.isChecked()),
+                species=species,
+                rel_loc=rel_loc,
+                cap_loc=cap_loc,
+                initial_recap_release=initial_recap_release,
             )
             cjs.input_file(model_name, output_ws)
-            cjs.inp.to_csv(os.path.join(output_ws, f"{model_name}.csv"), index=False)
-            self.cjs_obj = cjs
-            self.log(f"CJS outputs written to {output_ws}")
 
-        self._run_action("Run CJS Export", _impl)
+            if hasattr(cjs, 'cross'):
+                cjs.cross.to_csv(csv_path)
+            else:
+                raise RuntimeError("CJS export failed: cross-tab output is unavailable.")
+
+            with open(inp_path, 'w', encoding='utf-8') as f:
+                f.write(str(cjs.inp))
+
+            self.cjs_obj = cjs
+
+        success_msg = f"CJS outputs written to {output_ws}\n  CSV: {csv_path}\n  INP: {inp_path}"
+        self._run_action_async("Run CJS Export", _impl, success_message=success_msg)
 
 
 def _find_repo_root() -> Path:

@@ -52,7 +52,7 @@ echo INSTALLATION OPTIONS:
 echo.
 echo [A] PIP INSTALL ^(Recommended for most users^):
 echo   1. Install Python from https://www.python.org
-echo   2. Run: pip install pymast
+echo   2. Run: pip install "pymast[gui]"
 echo   3. Double-click this batch file
 echo.
 echo [B] ANACONDA INSTALL ^(Pro users / custom conda setup^):

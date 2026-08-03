@@ -4,7 +4,7 @@ Welcome to PyMAST (Movement Analysis Software for Telemetry)! This guide will he
 
 ## 📋 Prerequisites
 
-- Python 3.8 or higher
+- Python 3.9 or higher
 - Basic understanding of radio telemetry concepts
 - Receiver data files (Lotek, Orion, or VR2 format)
 - Tag deployment metadata
@@ -78,8 +78,10 @@ receivers = pd.read_csv(os.path.join(project_dir, 'tblMasterReceiver.csv'))
 proj = radio_project(
     project_dir=project_dir,
     db_name=db_name,
-    rec_list=receivers,
-    tag_list=tags
+    detection_count=5,
+    duration=1,
+    tag_data=tags,
+    receiver_data=receivers
 )
 ```
 
@@ -88,18 +90,15 @@ proj = radio_project(
 ```python
 import glob
 
-# Import all receiver files
-for file in glob.glob(os.path.join(project_dir, 'raw_data', '*.csv')):
-    # Get receiver ID from filename or metadata
-    rec_id = os.path.basename(file).split('_')[0]  # Adjust as needed
-    
-    proj.import_data(
-        file_name=file,
-        receiver_make='srx1200',  # Options: 'ares', 'orion', 'srx1200', 'srx800', 'srx600', 'vr2'
-        rec_id=rec_id,
-        scan_time=2.5,  # Scan duration in seconds
-        channels=1
-    )
+# Import all files from a receiver directory
+proj.telem_data_import(
+    rec_id='REC001',
+    rec_type='srx1200',  # Options: srx600, srx800, srx1200, orion, ares, vr2, pit
+    file_dir=os.path.join(project_dir, 'raw_data'),
+    db_dir=proj.db,
+    scan_time=2.5,
+    channels=1
+)
 ```
 
 ### Step 5: Process and Analyze
@@ -117,7 +116,7 @@ for rec_id in receivers['rec_id']:
         rec_id=rec_id,
         eps_multiplier=5  # 5x pulse rate for temporal clustering
     )
-    bout_obj.cluster()
+    bout_obj.presence()
 
 # Resolve overlapping detections
 overlap_obj = overlap_reduction(
@@ -125,7 +124,7 @@ overlap_obj = overlap_reduction(
     edges=[],  # Add receiver connections if known
     radio_project=proj
 )
-overlap_obj.unsupervised()
+overlap_obj.unsupervised_removal(method='posterior')
 
 # Visualize results
 overlap_obj.visualize_overlaps()
@@ -138,15 +137,13 @@ from pymast.formatter import time_to_event
 
 # Create time-to-event format for survival analysis
 tte = time_to_event(
-    db_dir=proj.db,
-    nodes=list(receivers['rec_id']),
-    train=False,  # Set True if you have training data
-    use_adj_filter=True  # Remove impossible movements
+    receiver_to_state={'REC001': 1},
+    project=proj
 )
 
-# Export to CSV for R/MARK
-tte_data = tte.get_data()
-tte_data.to_csv(os.path.join(project_dir, 'time_to_event.csv'), index=False)
+# Build transition records and export
+tte.data_prep(proj)
+tte.master_state_table.to_csv(os.path.join(project_dir, 'time_to_event.csv'), index=False)
 ```
 
 ## 🔍 Quality Control

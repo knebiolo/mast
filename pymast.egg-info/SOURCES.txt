@@ -5,6 +5,7 @@ setup.py
 pymast/__init__.py
 pymast/fish_history.py
 pymast/formatter.py
+pymast/gui_launcher.py
 pymast/logger.py
 pymast/naive_bayes.py
 pymast/overlap_removal.py
@@ -21,6 +22,8 @@ tests/test_basic.py
 tests/test_csv_pit.py
 tests/test_formatter_tte.py
 tests/test_initial_state_release.py
+tests/test_installation_smoke.py
+tests/test_module_smoke_coverage.py
 tests/test_overlap_hdf5_integration.py
 tests/test_overlap_loading.py
 tests/test_overlap_small.py

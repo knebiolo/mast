@@ -59,7 +59,9 @@ print("Step 1 Completed, Data Class Finished")
 
 # Step 2: Create input file for MARK
 cjs.input_file(model_name, output_ws)
-cjs.inp.to_csv(os.path.join(output_ws, model_name + '.csv'), index = False)
+cjs.cross.to_csv(os.path.join(output_ws, model_name + '.csv'))
+with open(os.path.join(output_ws, model_name + '.inp'), 'w', encoding='utf-8') as f:
+    f.write(str(cjs.inp))
 
 print("Step 2 Completed, MARK Input file created")
 print("Data formatting complete, proceed to MARK for live recapture modeling (CJS)")

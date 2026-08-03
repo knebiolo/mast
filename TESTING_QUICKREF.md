@@ -121,7 +121,7 @@ pytest -v
 
 ### GitHub Actions
 - Runs automatically on push/PR
-- Tests Python 3.8-3.12 on Windows/Mac/Linux
+- Tests Python 3.9-3.12 on Windows/Mac/Linux
 - Daily scheduled runs at 2 AM UTC
 - Coverage reports uploaded to Codecov
 
