@@ -625,8 +625,29 @@ class time_to_event():
         
         self.recap_data.set_index('freq_code', inplace = True)
         
+        # project.tags can legitimately contain multiple rows per freq_code
+        # (e.g. a fish captured/released more than once). Merging against it
+        # as-is would silently duplicate every recapture row for those fish,
+        # inflating downstream transition/duration counts. De-duplicate to one
+        # row per freq_code (keeping the most recent release record) before
+        # merging.
+        tags_for_merge = project.tags
+        if tags_for_merge.index.duplicated().any():
+            dup_count = int(tags_for_merge.index.duplicated().sum())
+            dup_fish = int(tags_for_merge.index[tags_for_merge.index.duplicated(keep=False)].nunique())
+            print(f"[TTE] WARNING: {dup_count} duplicate freq_code row(s) across "
+                  f"{dup_fish} fish in tags table; keeping the most recent "
+                  f"release record per fish before merging to avoid inflating counts.")
+            tags_for_merge = tags_for_merge.copy()
+            tags_for_merge['_rel_date_sort'] = pd.to_datetime(tags_for_merge['rel_date'], errors='coerce')
+            tags_for_merge = (tags_for_merge
+                              .sort_values('_rel_date_sort')
+                              .groupby(level=0)
+                              .tail(1)
+                              .drop(columns='_rel_date_sort'))
+        
         self.recap_data = pd.merge(self.recap_data,
-                                   project.tags, 
+                                   tags_for_merge, 
                                    how = 'left',
                                    left_index = True,
                                    right_index = True)
