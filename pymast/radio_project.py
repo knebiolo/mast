@@ -2017,14 +2017,8 @@ class radio_project():
                     if col in pit_data.columns:
                         pit_data[col] = pit_data[col].astype(dt)
         
-                # Show record counts BEFORE prompting
+                # Show record counts
                 print(f"[recaptures] {rec}: compiled {len(pit_data)} PIT rows (overlapping={pit_data['overlapping'].sum()}, bouts={pit_data['bout_no'].max()})", flush=True)
-                
-                # Confirm with user before appending PIT data into 'recaptures'
-                confirm = str(self._prompt("Import PIT data? (yes/no): ", default="no")).strip().lower()
-                if confirm != 'yes':
-                    logger.info("PIT data import canceled by user")
-                    return
         
                 # Convert 'det_hist' to string to avoid serialization issues
                 if 'det_hist' in pit_data.columns:
