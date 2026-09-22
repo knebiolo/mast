@@ -3,21 +3,33 @@
 from __future__ import annotations
 
 import ast
+import datetime
+import faulthandler
+import io
 import json
 import os
 import sys
 import traceback
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import matplotlib
+import matplotlib.pyplot as plt
+import networkx as nx
+import numpy as np
 import pandas as pd
 
 from pymast import formatter
 from pymast.overlap_removal import bout, overlap_reduction
 from pymast.radio_project import radio_project
 
+_FAULT_LOG_HANDLE = None
+
+matplotlib.use('Agg')
+
 try:
-    from PySide6.QtCore import QObject, QThread, Qt, Signal
+    from PySide6.QtCore import QObject, QThread, Qt, QTimer, Signal
     from PySide6.QtGui import QPixmap
     from PySide6.QtWidgets import (
         QApplication,
@@ -37,6 +49,7 @@ try:
         QPushButton,
         QScrollArea,
         QSpinBox,
+        QSplitter,
         QStackedWidget,
         QTableWidget,
         QTableWidgetItem,
@@ -45,7 +58,7 @@ try:
     )
 except ImportError:
     try:
-        from PyQt5.QtCore import QObject, QThread, Qt, pyqtSignal as Signal
+        from PyQt5.QtCore import QObject, QThread, Qt, QTimer, pyqtSignal as Signal
         from PyQt5.QtGui import QPixmap
         from PyQt5.QtWidgets import (
             QApplication,
@@ -65,6 +78,7 @@ except ImportError:
             QPushButton,
             QScrollArea,
             QSpinBox,
+            QSplitter,
             QStackedWidget,
             QTableWidget,
             QTableWidgetItem,
@@ -87,6 +101,14 @@ STEP_TITLES = {
     8: "CJS Model",
 }
 
+TRAINING_PLOT_PARAMETERS = [
+    "Hit Ratio Distribution",
+    "Consecutive Hit Length",
+    "Signal Power Distribution",
+    "Noise Ratio Distribution",
+    "Lag Differences",
+]
+
 
 class ActionCancelled(Exception):
     """Raised when a background GUI action is cancelled by the user."""
@@ -96,6 +118,7 @@ class AsyncActionWorker(QObject):
     finished = Signal()
     cancelled = Signal(str)
     failed = Signal(str, str)
+    output = Signal(str)
 
     def __init__(self, fn, cancel_check=None):
         super().__init__()
@@ -106,16 +129,27 @@ class AsyncActionWorker(QObject):
         return bool(self._cancel_check and self._cancel_check())
 
     def run(self):
+        capture = io.StringIO()
         try:
             if self._is_cancel_requested():
                 raise ActionCancelled("Cancelled before execution started.")
-            self._fn()
+            with redirect_stdout(capture), redirect_stderr(capture):
+                self._fn()
             if self._is_cancel_requested():
                 raise ActionCancelled("Cancelled.")
+            output_text = capture.getvalue().strip()
+            if output_text:
+                self.output.emit(output_text)
             self.finished.emit()
         except ActionCancelled as exc:
+            output_text = capture.getvalue().strip()
+            if output_text:
+                self.output.emit(output_text)
             self.cancelled.emit(str(exc))
         except Exception as exc:  # noqa: BLE001
+            output_text = capture.getvalue().strip()
+            if output_text:
+                self.output.emit(output_text)
             self.failed.emit(str(exc), traceback.format_exc())
 
 STEP_HELP = {
@@ -240,21 +274,48 @@ class WorkflowWindow(QMainWindow):
 
         root = QWidget()
         root_layout = QVBoxLayout(root)
+        root_layout.setContentsMargins(8, 8, 8, 8)
+        root_layout.setSpacing(8)
 
-        self.stack = QStackedWidget()
-        root_layout.addWidget(self.stack, stretch=4)
+        main_splitter = QSplitter(Qt.Horizontal)
+        main_splitter.setChildrenCollapsible(False)
+        main_splitter.setHandleWidth(10)
+        main_splitter.setOpaqueResize(True)
+        root_layout.addWidget(main_splitter, stretch=1)
 
-        log_label = QLabel("Workflow Log")
-        log_label.setStyleSheet("font-weight: 600;")
-        root_layout.addWidget(log_label)
+        left_splitter = QSplitter(Qt.Vertical)
+        left_splitter.setChildrenCollapsible(False)
+        left_splitter.setHandleWidth(10)
+        left_splitter.setOpaqueResize(True)
+        right_splitter = QSplitter(Qt.Vertical)
+        right_splitter.setChildrenCollapsible(False)
+        right_splitter.setHandleWidth(10)
+        right_splitter.setOpaqueResize(True)
 
-        self.log_output = QPlainTextEdit()
-        self.log_output.setReadOnly(True)
-        self.log_output.setPlaceholderText("Workflow output and errors will appear here.")
-        root_layout.addWidget(self.log_output, stretch=2)
+        workflow_panel = QWidget()
+        workflow_layout = QVBoxLayout(workflow_panel)
+        workflow_layout.setContentsMargins(0, 0, 0, 0)
+        workflow_layout.setSpacing(6)
 
-        log_controls = QHBoxLayout()
-        log_controls.addStretch(1)
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(0, 0, 0, 0)
+        header_row.setSpacing(8)
+        if self.logo_path.exists():
+            self.header_logo_label = QLabel()
+            self.header_logo_label.setPixmap(self._icon_logo_pixmap(width=44))
+            header_row.addWidget(self.header_logo_label)
+
+        self.header_step_title = QLabel("Home")
+        self.header_step_title.setStyleSheet("font-size: 18px; font-weight: 700;")
+        header_row.addWidget(self.header_step_title)
+
+        self.header_help_btn = QPushButton("?")
+        self.header_help_btn.setFixedWidth(28)
+        self._tip(self.header_help_btn, "Open detailed help for the current section.")
+        self.header_help_btn.clicked.connect(self._show_current_step_help)
+        header_row.addWidget(self.header_help_btn)
+        header_row.addStretch(1)
+
         self.cancel_action_btn = QPushButton("Cancel Running Action")
         self.cancel_action_btn.setEnabled(False)
         self.cancel_action_btn.clicked.connect(self.cancel_active_action)
@@ -267,13 +328,49 @@ class WorkflowWindow(QMainWindow):
         self.load_session_btn.setEnabled(False)
         self.load_session_btn.clicked.connect(self.load_gui_session)
         self._tip(self.load_session_btn, "Reload previously saved GUI form values for the current project database.")
-        log_controls.addWidget(self.save_session_btn)
-        log_controls.addWidget(self.load_session_btn)
-        log_controls.addWidget(self.cancel_action_btn)
-        root_layout.addLayout(log_controls)
+        header_row.addWidget(self.save_session_btn)
+        header_row.addWidget(self.load_session_btn)
+        header_row.addWidget(self.cancel_action_btn)
+        workflow_layout.addLayout(header_row)
 
+        self.stack = QStackedWidget()
+        workflow_layout.addWidget(self.stack, stretch=1)
+
+        log_group = QGroupBox("Workflow Log")
+        log_layout = QVBoxLayout(log_group)
+        log_layout.setContentsMargins(6, 18, 6, 6)
+        log_layout.setSpacing(4)
+        self.log_output = QPlainTextEdit()
+        self.log_output.setReadOnly(True)
+        self.log_output.setPlaceholderText("Workflow output and errors will appear here.")
+        log_layout.addWidget(self.log_output, stretch=1)
+
+        self.plot_viewer_group = self._build_plot_viewer_group()
         self.data_viewer_group = self._build_data_viewer_group()
-        root_layout.addWidget(self.data_viewer_group, stretch=3)
+
+        left_splitter.addWidget(workflow_panel)
+        left_splitter.addWidget(log_group)
+        left_splitter.setStretchFactor(0, 1)
+        left_splitter.setStretchFactor(1, 1)
+
+        right_splitter.addWidget(self.plot_viewer_group)
+        right_splitter.addWidget(self.data_viewer_group)
+        right_splitter.setStretchFactor(0, 1)
+        right_splitter.setStretchFactor(1, 1)
+        right_splitter.setCollapsible(0, True)  # plot panel is collapsible
+
+        self._left_splitter = left_splitter
+        self._right_splitter = right_splitter
+
+        # Keep the two vertical splitters in sync so dividers snap to the same row.
+        left_splitter.splitterMoved.connect(lambda pos, idx: self._right_splitter.setSizes(self._left_splitter.sizes()))
+        right_splitter.splitterMoved.connect(lambda pos, idx: self._left_splitter.setSizes(self._right_splitter.sizes()))
+
+        main_splitter.addWidget(left_splitter)
+        main_splitter.addWidget(right_splitter)
+        main_splitter.setStretchFactor(0, 2)
+        main_splitter.setStretchFactor(1, 3)
+        main_splitter.setSizes([700, 1000])
 
         self.setCentralWidget(root)
 
@@ -285,6 +382,61 @@ class WorkflowWindow(QMainWindow):
             page = self._build_step_page(step)
             self.step_pages[step] = page
             self.stack.addWidget(page)
+        self._update_step_header()
+        self._update_plot_controls_for_step(self._current_step_index())
+
+    def _build_plot_viewer_group(self) -> QGroupBox:
+        group = QGroupBox("Plot Viewer")
+        layout = QVBoxLayout(group)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(6)
+
+        controls_row = QHBoxLayout()
+        controls_row.setContentsMargins(0, 0, 0, 0)
+        self.plot_selector_label = QLabel("Parameter:")
+        self.plot_selector_combo = QComboBox()
+        self.plot_selector_combo.currentIndexChanged.connect(self._on_plot_selection_changed)
+        self._tip(self.plot_selector_combo, "Select which training parameter to view")
+        
+        # Initialize dropdown with training/classification parameters.
+        self.plot_parameter_names = list(TRAINING_PLOT_PARAMETERS)
+        self.plot_selector_combo.blockSignals(True)
+        self.plot_selector_combo.clear()
+        for param_name in self.plot_parameter_names:
+            self.plot_selector_combo.addItem(param_name)
+        self.plot_selector_combo.blockSignals(False)
+        
+        controls_row.addWidget(self.plot_selector_label)
+        controls_row.addWidget(self.plot_selector_combo)
+        controls_row.addStretch(1)
+        layout.addLayout(controls_row)
+
+        self.plot_scroll = QScrollArea()
+        self.plot_scroll.setWidgetResizable(True)
+        self.plot_container = QWidget()
+        self.plot_container_layout = QVBoxLayout(self.plot_container)
+        self.plot_container_layout.setContentsMargins(4, 4, 4, 4)
+        self.plot_container_layout.setSpacing(8)
+
+        self.plot_viewer_label = QLabel("Plot output preview area.\nGenerated figures can be shown here.")
+        self.plot_viewer_label.setAlignment(Qt.AlignCenter)
+        self.plot_viewer_label.setStyleSheet("color: #999; font-size: 11px;")
+        self.plot_container_layout.addWidget(self.plot_viewer_label)
+        self.plot_image_label = QLabel()
+        self.plot_image_label.setAlignment(Qt.AlignCenter)
+        self.plot_image_label.hide()
+        self.plot_container_layout.addWidget(self.plot_image_label)
+        self.plot_container_layout.addStretch(1)
+
+        self.plot_scroll.setWidget(self.plot_container)
+        layout.addWidget(self.plot_scroll, stretch=1)
+        
+        self._plot_figures: Dict[str, Any] = {}
+        self._plot_pixmaps: Dict[str, QPixmap] = {}
+        self._trained_table_cache: Dict[str, pd.DataFrame] = {}
+        self._active_plot_context: Optional[Tuple[str, str]] = None
+        
+        return group
 
     def _build_data_viewer_group(self) -> QGroupBox:
         group = QGroupBox("Project Data Viewer")
@@ -292,10 +444,12 @@ class WorkflowWindow(QMainWindow):
 
         controls = QHBoxLayout()
         shortcut_row = QHBoxLayout()
+        filter_row = QHBoxLayout()
 
         key_label = QLabel("HDF Key")
         self.viewer_key_combo = QComboBox()
         self.viewer_key_combo.setMinimumWidth(180)
+        self.viewer_key_combo.currentTextChanged.connect(self._on_viewer_key_changed)
         self._tip(self.viewer_key_combo, "Select an HDF table/group to preview.")
 
         refresh_keys_btn = QPushButton("Refresh Keys")
@@ -328,9 +482,9 @@ class WorkflowWindow(QMainWindow):
         filter_rec_btn.clicked.connect(self.filter_viewer_to_current_receiver)
         self._tip(filter_rec_btn, "Apply a quick where-clause filter using the receiver ID from the active workflow step when available.")
 
-        clear_filter_btn = QPushButton("Clear Filter")
+        clear_filter_btn = QPushButton("Clear Filters")
         clear_filter_btn.clicked.connect(self.clear_viewer_filter)
-        self._tip(clear_filter_btn, "Clear the current where-clause filter.")
+        self._tip(clear_filter_btn, "Clear all manual filters and where clause.")
 
         qc_summary_btn = QPushButton("Load Step QC")
         qc_summary_btn.clicked.connect(self.load_step_qc_summary)
@@ -345,6 +499,11 @@ class WorkflowWindow(QMainWindow):
         controls.addWidget(self.viewer_offset_spin)
         controls.addWidget(self.viewer_where_edit, stretch=1)
         controls.addWidget(refresh_view_btn)
+
+        # Filter row for dynamic filter dropdowns
+        self.viewer_filter_dropdowns: Dict[str, QComboBox] = {}
+        filter_row.addWidget(QLabel("Filters:"))
+        filter_row.addStretch(1)
 
         shortcut_row.addWidget(step_view_btn)
         shortcut_row.addWidget(filter_rec_btn)
@@ -373,6 +532,7 @@ class WorkflowWindow(QMainWindow):
 
         layout.addLayout(controls)
         layout.addLayout(shortcut_row)
+        layout.addLayout(filter_row)
         layout.addWidget(self.viewer_status_label)
         layout.addWidget(self.viewer_summary)
         layout.addWidget(self.viewer_qc_summary)
@@ -429,10 +589,10 @@ class WorkflowWindow(QMainWindow):
         grid_layout.addWidget(setup_btn, 0, 0)
 
         for i, step in enumerate(range(1, 9), start=1):
-            btn = QPushButton(f"{step}")
-            btn.setMinimumHeight(60)
+            btn = QPushButton(STEP_TITLES[step])
+            btn.setMinimumHeight(72)
             btn.setMinimumWidth(80)
-            btn.setStyleSheet("font-size: 13px; font-weight: 700;")
+            btn.setStyleSheet("font-size: 10px; font-weight: 700;")
             btn.setToolTip(STEP_TITLES[step])
             btn.clicked.connect(lambda checked=False, s=step: self.goto_step(s))
             row = (i) // 3
@@ -442,7 +602,7 @@ class WorkflowWindow(QMainWindow):
         grid.setLayout(grid_layout)
         right_layout.addWidget(grid)
 
-        info_text = QLabel("Click a step number to configure and run workflow stages.")
+        info_text = QLabel("Click a workflow tile to configure and run that stage.")
         info_text.setStyleSheet("font-size: 10px; color: #666;")
         info_text.setWordWrap(True)
         right_layout.addWidget(info_text)
@@ -459,37 +619,12 @@ class WorkflowWindow(QMainWindow):
     def _build_step_page(self, step: int) -> QWidget:
         page = QWidget()
         outer = QVBoxLayout(page)
-
-        if self.logo_path.exists():
-            logo_label = QLabel()
-            logo_label.setPixmap(self._icon_logo_pixmap(width=220))
-            logo_label.setAlignment(Qt.AlignCenter)
-            outer.addWidget(logo_label)
-
-        title_row = QHBoxLayout()
-        title_row.addStretch(1)
-
-        if step == 0:
-            title_text = "Project Setup"
-        else:
-            title_text = f"Step {step:02d}: {STEP_TITLES[step]}"
-
-        title = QLabel(title_text)
-        title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet("font-size: 22px; font-weight: 700;")
-        title_row.addWidget(title)
-
-        help_btn = QPushButton("?")
-        help_btn.setFixedWidth(30)
-        help_btn.setToolTip("Open detailed help for this section")
-        help_btn.clicked.connect(lambda checked=False, s=step: self.show_step_help(s))
-        title_row.addWidget(help_btn)
-        title_row.addStretch(1)
-
-        outer.addLayout(title_row)
+        outer.setContentsMargins(0, 0, 0, 4)
+        outer.setSpacing(4)
 
         content = QWidget()
         content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(4, 4, 4, 0)
 
         if step == 0:
             self._build_step0(content_layout)
@@ -510,8 +645,12 @@ class WorkflowWindow(QMainWindow):
         elif step == 8:
             self._build_step8(content_layout)
 
+        # Absorb extra vertical space so form widgets don't stretch to fill the scroll area.
+        content_layout.addStretch(1)
+
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setFrameStyle(0)  # remove border so inner groupbox aligns with log panel
         scroll.setWidget(content)
         outer.addWidget(scroll)
 
@@ -534,10 +673,28 @@ class WorkflowWindow(QMainWindow):
         g_project = QGroupBox("Project Setup")
         f_project = QFormLayout(g_project)
 
-        self.project_dir_edit, project_dir_row = self._line_with_browse(dir_mode=True)
+        # Project directory — browse triggers a database scan.
+        self.project_dir_edit = QLineEdit()
         self._tip(self.project_dir_edit, "Root project folder. Should contain setup CSV files and will hold Data/, Output/, and the HDF5 database.")
-        self.db_name_edit = QLineEdit("my_telemetry_study")
-        self._tip(self.db_name_edit, "Database base name (no .h5 needed). Example: my_telemetry_study")
+        self.project_dir_edit.editingFinished.connect(self._scan_project_dir_for_databases)
+        project_dir_browse_btn = QPushButton("Browse")
+        self._tip(project_dir_browse_btn, "Browse to the project folder. Existing .h5 databases in that folder will be listed automatically.")
+        project_dir_browse_btn.clicked.connect(self._browse_project_dir)
+        project_dir_row = QWidget()
+        _pdl = QHBoxLayout(project_dir_row)
+        _pdl.setContentsMargins(0, 0, 0, 0)
+        _pdl.addWidget(self.project_dir_edit)
+        _pdl.addWidget(project_dir_browse_btn)
+
+        # Database selector — populated from directory scan; editable for new names.
+        self.db_name_combo = QComboBox()
+        self.db_name_combo.setEditable(True)
+        self.db_name_combo.lineEdit().setPlaceholderText("Select existing or enter new database name")
+        self._tip(self.db_name_combo, "Pick an existing .h5 database found in the project folder, or type a new name (no .h5 extension needed).")
+        self.db_status_label = QLabel("Browse to a project directory to scan for databases.")
+        self.db_status_label.setStyleSheet("color: #666; font-style: italic; font-size: 11px;")
+        self._tip(self.db_status_label, "Shows how many .h5 databases were found in the selected directory.")
+
         self.det_count_spin = QSpinBox()
         self.det_count_spin.setRange(1, 100)
         self.det_count_spin.setValue(5)
@@ -554,9 +711,11 @@ class WorkflowWindow(QMainWindow):
         self._tip(self.tag_csv_edit, "Path to tblMasterTag.csv with tag metadata (freq_code, pulse_rate, tag_type, rel_date, etc.).")
         self._tip(self.receiver_csv_edit, "Path to tblMasterReceiver.csv with receiver metadata (rec_id, rec_type, node, etc.).")
         self._tip(self.nodes_csv_edit, "Path to tblNodes.csv with spatial node coordinates and node IDs.")
+        self.nodes_csv_edit.editingFinished.connect(self._auto_preview_receiver_network_from_setup)
 
         f_project.addRow("Project Directory", project_dir_row)
-        f_project.addRow("Database Name", self.db_name_edit)
+        f_project.addRow("Database", self.db_name_combo)
+        f_project.addRow("", self.db_status_label)
         f_project.addRow("Detection Count", self.det_count_spin)
         f_project.addRow("Duration", self.duration_spin)
         f_project.addRow("Tag Metadata CSV", tag_row)
@@ -565,7 +724,7 @@ class WorkflowWindow(QMainWindow):
 
         init_btn = QPushButton("Initialize / Reload Project")
         init_btn.clicked.connect(self.initialize_project_from_form)
-        self._tip(init_btn, "Loads metadata CSVs and initializes/reloads the project database object.")
+        self._tip(init_btn, "Loads metadata CSVs and initializes/reloads the project database object. Creates a new database if the name doesn't exist yet.")
         f_project.addRow(init_btn)
 
         parent_layout.addWidget(g_project)
@@ -574,12 +733,16 @@ class WorkflowWindow(QMainWindow):
         g_import = QGroupBox("Data Import Parameters")
         f_import = QFormLayout(g_import)
 
-        self.import_rec_id = QLineEdit("REC001")
-        self._tip(self.import_rec_id, "Receiver ID to import. Must exist in your receiver metadata table.")
+        self.import_rec_id = QComboBox()
+        self.import_rec_id.setMinimumWidth(180)
+        self.import_rec_id.setEditable(False)
+        self._tip(self.import_rec_id, "Receiver ID to import. Populated from the receiver metadata table after project initialization.")
         self.import_rec_type = QComboBox()
         self.import_rec_type.addItems([
             "srx1200", "srx800", "srx600", "orion", "ares", "vr2", "pit", "pit_multiple"
         ])
+        self.import_rec_id.currentTextChanged.connect(self._sync_import_rec_type_from_receiver)
+        self._refresh_import_receiver_ids()
         self.import_file_dir, file_dir_row = self._line_with_browse(dir_mode=True)
         self._tip(self.import_file_dir, "Directory containing raw receiver files to import for this receiver.")
         self.import_db_dir = QLineEdit()
@@ -624,11 +787,17 @@ class WorkflowWindow(QMainWindow):
     def _build_step2(self, parent_layout: QVBoxLayout) -> None:
         group = QGroupBox("Training Parameters")
         form = QFormLayout(group)
-
-        self.train_rec_id = QLineEdit("REC001")
-        self._tip(self.train_rec_id, "Receiver ID to train against.")
-        self.train_rec_type = QLineEdit("srx1200")
+ 
+        self.train_rec_id = QComboBox()
+        self.train_rec_id.setMinimumWidth(180)
+        self.train_rec_id.setEditable(False)
+        self._tip(self.train_rec_id, "Receiver ID to train against. Populated from the receiver metadata table after project initialization.")
+        self.train_rec_type = QComboBox()
+        self.train_rec_type.setMinimumWidth(180)
+        self.train_rec_type.setEditable(False)
         self._tip(self.train_rec_type, "Receiver type label used for training summary output.")
+        self.train_rec_id.currentTextChanged.connect(self._sync_train_rec_type_from_receiver)
+        self._refresh_train_receiver_ids()
         self.train_all_fish = QCheckBox("Train All Fish Detected At Receiver")
         self.train_all_fish.setChecked(True)
         self._tip(self.train_all_fish, "If checked, auto-fetch fish IDs detected at this receiver.")
@@ -638,7 +807,7 @@ class WorkflowWindow(QMainWindow):
         self.train_summary = QCheckBox("Run Training Summary")
         self.train_summary.setChecked(True)
         self._tip(self.train_summary, "Generate classifier training summary statistics/plots.")
-
+ 
         form.addRow("Receiver ID", self.train_rec_id)
         form.addRow("Receiver Type", self.train_rec_type)
         form.addRow("", self.train_all_fish)
@@ -966,20 +1135,366 @@ class WorkflowWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(self, "Select File", str(self.repo_root), "CSV Files (*.csv);;All Files (*.*)")
         if path:
             target.setText(path)
+            if target is self.nodes_csv_edit:
+                self._auto_preview_receiver_network_from_setup()
 
     def _browse_dir(self, target: QLineEdit) -> None:
         path = QFileDialog.getExistingDirectory(self, "Select Directory", str(self.repo_root))
         if path:
             target.setText(path)
 
+    def _browse_project_dir(self) -> None:
+        start = self.project_dir_edit.text().strip() or str(self.repo_root)
+        path = QFileDialog.getExistingDirectory(self, "Select Project Directory", start)
+        if path:
+            self.project_dir_edit.setText(path)
+            self._scan_project_dir_for_databases()
+
+    def _scan_project_dir_for_databases(self) -> None:
+        """Scan the project directory for .h5 files and populate the database combo."""
+        project_dir = self.project_dir_edit.text().strip()
+        if not project_dir:
+            return
+        p = Path(project_dir)
+        if not p.is_dir():
+            self.db_status_label.setText("Directory not found.")
+            self.db_status_label.setStyleSheet("color: #cc0000; font-style: italic; font-size: 11px;")
+            return
+
+        h5_files = sorted(list(p.glob("*.h5")) + list(p.glob("*.hdf5")))
+        current_text = self.db_name_combo.currentText().strip()
+        self.db_name_combo.blockSignals(True)
+        self.db_name_combo.clear()
+
+        if h5_files:
+            for f in h5_files:
+                self.db_name_combo.addItem(f.stem)
+            idx = self.db_name_combo.findText(current_text)
+            self.db_name_combo.setCurrentIndex(idx if idx >= 0 else 0)
+            n = len(h5_files)
+            self.db_status_label.setText(f"{n} database{'s' if n != 1 else ''} found — select one or type a new name.")
+            self.db_status_label.setStyleSheet("color: #336699; font-style: italic; font-size: 11px;")
+        else:
+            self.db_name_combo.lineEdit().setPlaceholderText("No databases found — enter a new name")
+            self.db_status_label.setText("No existing databases found. Enter a new name above.")
+            self.db_status_label.setStyleSheet("color: #666; font-style: italic; font-size: 11px;")
+
+        self.db_name_combo.blockSignals(False)
+        self._autofill_csv_from_dir(p)
+        self._auto_preview_receiver_network_from_setup()
+
+    def _autofill_csv_from_dir(self, p: Path) -> None:
+        """Fill empty CSV path fields if standard files exist in the given directory."""
+        for filename, widget in [
+            ("tblMasterTag.csv", self.tag_csv_edit),
+            ("tblMasterReceiver.csv", self.receiver_csv_edit),
+            ("tblNodes.csv", self.nodes_csv_edit),
+        ]:
+            if not widget.text().strip():
+                candidate = p / filename
+                if candidate.exists():
+                    widget.setText(str(candidate))
+
+    def _browse_existing_hdf_for_setup(self) -> None:
+        start_dir = self.project_dir_edit.text().strip() or str(self.repo_root)
+        hdf_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Existing HDF5 Database",
+            start_dir,
+            "HDF5 Files (*.h5 *.hdf5);;All Files (*.*)",
+        )
+        if not hdf_path:
+            return
+
+        selected = Path(hdf_path)
+        self.project_dir_edit.setText(str(selected.parent))
+        self._trained_table_cache.clear()
+        self._plot_pixmaps.clear()
+        self._plot_figures.clear()
+        self._active_plot_context = None
+        # Rescan so the combo is populated, then select the chosen file.
+        self._scan_project_dir_for_databases()
+        idx = self.db_name_combo.findText(selected.stem)
+        if idx >= 0:
+            self.db_name_combo.setCurrentIndex(idx)
+        else:
+            self.db_name_combo.setCurrentText(selected.stem)
+        if hasattr(self, "import_db_dir"):
+            self.import_db_dir.setText(str(selected))
+        self.log(f"Selected existing database: {selected}")
+        self._auto_preview_receiver_network_from_setup()
+
+    def _find_column_name(self, frame: pd.DataFrame, candidates: List[str]) -> Optional[str]:
+        by_lower = {str(col).lower(): str(col) for col in frame.columns}
+        for candidate in candidates:
+            found = by_lower.get(candidate.lower())
+            if found is not None:
+                return found
+        return None
+
+    def _extract_node_edges_from_frame(self, frame: pd.DataFrame) -> List[Tuple[str, str]]:
+        pairs = [
+            ("parent", "child"),
+            ("source", "target"),
+            ("from", "to"),
+            ("from_node", "to_node"),
+            ("node_from", "node_to"),
+            ("node1", "node2"),
+            ("upstream", "downstream"),
+        ]
+        for left_name, right_name in pairs:
+            left_col = self._find_column_name(frame, [left_name])
+            right_col = self._find_column_name(frame, [right_name])
+            if left_col is None or right_col is None:
+                continue
+            edges: List[Tuple[str, str]] = []
+            for _, row in frame[[left_col, right_col]].dropna().iterrows():
+                left_val = str(row[left_col]).strip()
+                right_val = str(row[right_col]).strip()
+                if left_val and right_val and left_val != right_val:
+                    edges.append((left_val, right_val))
+            if edges:
+                return edges
+        return []
+
+    def _collect_setup_network_edges(
+        self,
+        nodes_df: pd.DataFrame,
+        receivers_df: Optional[pd.DataFrame],
+    ) -> List[Tuple[str, str]]:
+        # 1) Prefer explicit edge columns directly on nodes metadata.
+        edges = self._extract_node_edges_from_frame(nodes_df)
+        if edges:
+            return edges
+
+        # 2) Try optional /project_setup/lines table from HDF if available.
+        db_path = self._resolve_project_db_path()
+        if db_path is not None and db_path.exists():
+            try:
+                with pd.HDFStore(str(db_path), mode="r") as store:
+                    if "/project_setup/lines" in store.keys():
+                        lines_df = store.select("/project_setup/lines")
+                        edges = self._extract_node_edges_from_frame(lines_df)
+                        if edges:
+                            return edges
+            except Exception:  # noqa: BLE001
+                pass
+
+        # 3) Try receiver-level relationships and map rec_id -> node.
+        if receivers_df is not None and not receivers_df.empty:
+            rec_id_col = self._find_column_name(receivers_df, ["rec_id"])
+            rec_node_col = self._find_column_name(receivers_df, ["node"])
+            if rec_id_col is not None and rec_node_col is not None:
+                rec_map = (
+                    receivers_df[[rec_id_col, rec_node_col]]
+                    .dropna()
+                    .assign(**{rec_id_col: lambda x: x[rec_id_col].astype(str), rec_node_col: lambda x: x[rec_node_col].astype(str)})
+                )
+                rec_to_node = dict(zip(rec_map[rec_id_col], rec_map[rec_node_col]))
+
+                rec_edges = self._extract_node_edges_from_frame(receivers_df)
+                node_edges: List[Tuple[str, str]] = []
+                for left_rec, right_rec in rec_edges:
+                    left_node = rec_to_node.get(left_rec)
+                    right_node = rec_to_node.get(right_rec)
+                    if left_node and right_node and left_node != right_node:
+                        node_edges.append((left_node, right_node))
+                if node_edges:
+                    return node_edges
+
+        return []
+
+    def _auto_preview_receiver_network_from_setup(self) -> None:
+        if self._current_step_index() != 0:
+            return
+        nodes_path = self.nodes_csv_edit.text().strip()
+        if not nodes_path:
+            return
+        if not os.path.exists(nodes_path):
+            self.log(f"Nodes CSV not found for network preview: {nodes_path}")
+            return
+
+        try:
+            self.preview_receiver_network_from_setup()
+        except Exception as exc:  # noqa: BLE001
+            self.log(f"Setup network preview skipped: {exc}")
+
+    def preview_receiver_network_from_setup(self) -> None:
+        nodes_df: Optional[pd.DataFrame] = None
+        receivers_df: Optional[pd.DataFrame] = None
+
+        if self.project is not None and isinstance(getattr(self.project, "nodes", None), pd.DataFrame):
+            nodes_df = self.project.nodes.copy()
+        else:
+            nodes_path = self.nodes_csv_edit.text().strip()
+            if not nodes_path:
+                raise ValueError("Nodes CSV path is required to preview receiver network.")
+            if not os.path.exists(nodes_path):
+                raise FileNotFoundError(f"Nodes CSV not found: {nodes_path}")
+            nodes_df = pd.read_csv(nodes_path)
+
+        if self.project is not None and isinstance(getattr(self.project, "receivers", None), pd.DataFrame):
+            receivers_df = self.project.receivers.reset_index()
+        else:
+            receivers_path = self.receiver_csv_edit.text().strip()
+            if receivers_path and os.path.exists(receivers_path):
+                receivers_df = pd.read_csv(receivers_path)
+
+        node_col = self._find_column_name(nodes_df, ["node"])
+        x_col = self._find_column_name(nodes_df, ["X", "x"])
+        y_col = self._find_column_name(nodes_df, ["Y", "y"])
+        if node_col is None or x_col is None or y_col is None:
+            raise ValueError(
+                "Nodes CSV must include columns: node, X, Y (case-insensitive for X/Y)."
+            )
+
+        working = nodes_df[[node_col, x_col, y_col]].copy()
+        working.columns = ["node", "X", "Y"]
+        working["node"] = working["node"].astype(str)
+        working["X"] = pd.to_numeric(working["X"], errors="coerce")
+        working["Y"] = pd.to_numeric(working["Y"], errors="coerce")
+        working = working.dropna(subset=["X", "Y"])
+        if working.empty:
+            raise ValueError("Nodes CSV does not contain any valid numeric X/Y coordinates.")
+
+        receiver_labels: Dict[str, List[str]] = {}
+        if receivers_df is not None and not receivers_df.empty:
+            rec_id_col = self._find_column_name(receivers_df, ["rec_id"])
+            rec_node_col = self._find_column_name(receivers_df, ["node"])
+            if rec_id_col is not None and rec_node_col is not None:
+                rec_work = receivers_df[[rec_id_col, rec_node_col]].copy().dropna()
+                rec_work.columns = ["rec_id", "node"]
+                rec_work["rec_id"] = rec_work["rec_id"].astype(str)
+                rec_work["node"] = rec_work["node"].astype(str)
+                grouped = rec_work.groupby("node")["rec_id"].apply(list)
+                receiver_labels = {str(node): values for node, values in grouped.items()}
+
+        graph = nx.Graph()
+        node_ids: List[str] = []
+        for _, row in working.iterrows():
+            node = str(row["node"])
+            graph.add_node(node)
+            node_ids.append(node)
+
+        explicit_edges = self._collect_setup_network_edges(nodes_df, receivers_df)
+        filtered_edges = [(a, b) for a, b in explicit_edges if a in graph.nodes and b in graph.nodes and a != b]
+        graph.add_edges_from(filtered_edges)
+
+        # Relationship view: circular topology layout for readable node connectivity.
+        draw_pos = nx.circular_layout(graph) if graph.number_of_nodes() > 0 else {}
+
+        fig, ax = plt.subplots(figsize=(8, 6))
+        try:
+            nx.draw_networkx_edges(graph, draw_pos, ax=ax, width=1.5, alpha=0.8, edge_color="#4d4d4d")
+            nx.draw_networkx_nodes(
+                graph,
+                draw_pos,
+                ax=ax,
+                node_color="#2a9d8f",
+                edgecolors="black",
+                linewidths=0.6,
+                node_size=220,
+            )
+
+            for node, (x_val, y_val) in draw_pos.items():
+                label = node
+                receivers_at_node = receiver_labels.get(node)
+                if receivers_at_node:
+                    receiver_count = len(receivers_at_node)
+                    if receiver_count <= 3:
+                        label = f"{node}\n" + ", ".join(receivers_at_node)
+                    else:
+                        label = f"{node}\n({receiver_count} receivers)"
+                ax.annotate(
+                    label,
+                    (x_val, y_val),
+                    textcoords="offset points",
+                    xytext=(6, 6),
+                    fontsize=8,
+                    bbox={"boxstyle": "round,pad=0.15", "facecolor": "white", "alpha": 0.75, "edgecolor": "none"},
+                )
+
+            ax.set_title("Receiver Network Graph", fontsize=12, fontweight="bold")
+            ax.set_xlabel("")
+            ax.set_ylabel("")
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.grid(True, alpha=0.25, linestyle="--")
+            ax.set_aspect("equal", adjustable="datalim")
+            fig.tight_layout()
+
+            self._display_plot(fig)
+            if graph.number_of_edges() == 0:
+                self.log(
+                    "Rendered receiver network graph with nodes only (no explicit edges found in nodes/lines metadata)."
+                )
+            else:
+                self.log(f"Rendered receiver network graph with {graph.number_of_nodes()} node(s) and {graph.number_of_edges()} edge(s).")
+        finally:
+            plt.close(fig)
+
     def goto_home(self) -> None:
         self.stack.setCurrentWidget(self.home_page)
+        self._update_step_header()
+        self._update_plot_controls_for_step(self._current_step_index())
 
     def goto_step(self, step: int) -> None:
         page = self.step_pages.get(step)
         if page is not None:
             self.stack.setCurrentWidget(page)
+            self.refresh_data_viewer_keys()
             self._set_viewer_key_for_step(step)
+            self._update_step_header()
+            self._update_plot_controls_for_step(step)
+            if step == 0:
+                self._auto_preview_receiver_network_from_setup()
+
+    def _update_plot_controls_for_step(self, step: int) -> None:
+        enabled = step in {2, 3}
+
+        self.plot_selector_combo.blockSignals(True)
+        self.plot_selector_combo.clear()
+        if enabled:
+            self.plot_selector_combo.addItems(TRAINING_PLOT_PARAMETERS)
+            self.plot_selector_combo.setEnabled(True)
+            self.plot_selector_label.setText("Parameter:")
+            self.plot_viewer_label.setText("Select a training/classification parameter to preview.")
+            # Expand the plot panel when the step supports it.
+            total = self._right_splitter.height()
+            sizes = self._right_splitter.sizes()
+            if sizes[0] == 0:
+                half = total // 2
+                self._right_splitter.setSizes([half, total - half])
+        else:
+            self.plot_selector_combo.addItem("No plots for this workflow step")
+            self.plot_selector_combo.setEnabled(False)
+            self.plot_selector_label.setText("Plot:")
+            self.plot_viewer_label.setText(
+                "This workflow step does not provide a parameter histogram view.\n"
+                "Use Training or Classification to view these plots."
+            )
+            # Collapse the plot panel for steps that don't use it.
+            total = self._right_splitter.height()
+            self._right_splitter.setSizes([0, total])
+        self.plot_selector_combo.blockSignals(False)
+
+    def _show_current_step_help(self) -> None:
+        if self.stack.currentWidget() is self.home_page:
+            return
+        self.show_step_help(self._current_step_index())
+
+    def _update_step_header(self) -> None:
+        if self.stack.currentWidget() is self.home_page:
+            self.header_step_title.setText("Home")
+            self.header_help_btn.setEnabled(False)
+            return
+        step = self._current_step_index()
+        if step == 0:
+            title = "Project Setup"
+        else:
+            title = f"Step {step:02d}: {STEP_TITLES[step]}"
+        self.header_step_title.setText(title)
+        self.header_help_btn.setEnabled(True)
 
     def log(self, message: str) -> None:
         self.log_output.appendPlainText(message)
@@ -1047,7 +1562,73 @@ class WorkflowWindow(QMainWindow):
         if isinstance(widget, QLineEdit):
             value = widget.text().strip()
             return value or None
+        if isinstance(widget, QComboBox):
+            value = widget.currentText().strip()
+            return value or None
         return None
+
+    def _project_receiver_ids(self) -> List[str]:
+        proj = self.project
+        if proj is None or not hasattr(proj, "receivers"):
+            return []
+        receivers = proj.receivers
+        if isinstance(receivers, pd.DataFrame):
+            ids = [str(idx).strip() for idx in receivers.index.tolist()]
+            return [receiver_id for receiver_id in ids if receiver_id]
+        return []
+
+    def _sync_import_rec_type_from_receiver(self, rec_id: str) -> None:
+        rec = rec_id.strip()
+        if not rec or self.project is None or not hasattr(self.project, "receivers"):
+            return
+        receivers = self.project.receivers
+        if not isinstance(receivers, pd.DataFrame):
+            return
+        if rec not in receivers.index or "rec_type" not in receivers.columns:
+            return
+        rec_type = str(receivers.loc[rec, "rec_type"]).strip().lower()
+        if not rec_type:
+            return
+        idx = self.import_rec_type.findText(rec_type)
+        if idx >= 0:
+            self.import_rec_type.setCurrentIndex(idx)
+
+    def _refresh_import_receiver_ids(self, preferred_rec_id: Optional[str] = None) -> None:
+        receiver_ids = self._project_receiver_ids()
+        current = preferred_rec_id or self.import_rec_id.currentText().strip()
+        self.import_rec_id.clear()
+        self.import_rec_id.addItems(receiver_ids)
+        self.import_rec_id.setEnabled(bool(receiver_ids))
+        if receiver_ids:
+            idx = self.import_rec_id.findText(current)
+            self.import_rec_id.setCurrentIndex(idx if idx >= 0 else 0)
+            self._sync_import_rec_type_from_receiver(self.import_rec_id.currentText())
+ 
+    def _sync_train_rec_type_from_receiver(self, rec_id: str) -> None:
+        rec = rec_id.strip()
+        if not rec or self.project is None or not hasattr(self.project, "receivers"):
+            return
+        receivers = self.project.receivers
+        if not isinstance(receivers, pd.DataFrame):
+            return
+        if rec not in receivers.index or "rec_type" not in receivers.columns:
+            return
+        rec_type = str(receivers.loc[rec, "rec_type"]).strip().lower()
+        if not rec_type:
+            return
+        self.train_rec_type.clear()
+        self.train_rec_type.addItem(rec_type)
+ 
+    def _refresh_train_receiver_ids(self, preferred_rec_id: Optional[str] = None) -> None:
+        receiver_ids = self._project_receiver_ids()
+        current = preferred_rec_id or self.train_rec_id.currentText().strip()
+        self.train_rec_id.clear()
+        self.train_rec_id.addItems(receiver_ids)
+        self.train_rec_id.setEnabled(bool(receiver_ids))
+        if receiver_ids:
+            idx = self.train_rec_id.findText(current)
+            self.train_rec_id.setCurrentIndex(idx if idx >= 0 else 0)
+            self._sync_train_rec_type_from_receiver(self.train_rec_id.currentText())
 
     def _supported_state_widgets(self) -> Dict[str, QWidget]:
         supported = {}
@@ -1112,6 +1693,11 @@ class WorkflowWindow(QMainWindow):
                 idx = widget.findText(str(value))
                 if idx >= 0:
                     widget.setCurrentIndex(idx)
+                elif widget.isEditable():
+                    # Editable combos (e.g. db_name_combo) may not yet contain
+                    # this value as an item (list not scanned/populated), so
+                    # fall back to setting the edit text directly.
+                    widget.setCurrentText(str(value))
 
         step = state.get("current_step")
         if isinstance(step, int) and step in self.step_pages:
@@ -1132,12 +1718,40 @@ class WorkflowWindow(QMainWindow):
         if not session_path.exists():
             self.log(f"No saved GUI session found at: {session_path}")
             return
-
+ 
+        self._refresh_import_receiver_ids()
+        self._refresh_train_receiver_ids()
         state = json.loads(session_path.read_text(encoding="utf-8"))
         self._apply_gui_session_state(state)
+        self._sync_import_rec_type_from_receiver(self.import_rec_id.currentText())
+        self._sync_train_rec_type_from_receiver(self.train_rec_id.currentText())
         self.refresh_data_viewer_keys()
         self._set_viewer_key_for_step(self._current_step_index())
         self.log(f"Loaded GUI session: {session_path}")
+
+    def _get_available_viewer_keys_for_step(self, step: int) -> Optional[List[str]]:
+        """
+        Get available HDF keys for the current step.
+        
+        Returns None to show all keys (on home page),
+        or a list of specific keys for that step (workflow pages).
+        """
+        # On home page, show all keys
+        if step < 0 or step == 0:
+            return None
+        
+        # Map each step to its allowed viewer key(s)
+        step_key_mapping = {
+            1: ["/project_setup/receivers", "/raw_data"],
+            2: ["/trained"],
+            3: ["/classified"],
+            4: ["/presence"],
+            5: ["/overlapping"],
+            6: ["/recaptures"],
+            7: ["/recaptures"],
+            8: ["/recaptures"],
+        }
+        return step_key_mapping.get(step)
 
     def refresh_data_viewer_keys(self) -> None:
         db_path = self._resolve_project_db_path()
@@ -1153,7 +1767,18 @@ class WorkflowWindow(QMainWindow):
 
         current_key = self.viewer_key_combo.currentText()
         with pd.HDFStore(str(db_path), mode="r") as store:
-            keys = sorted(store.keys())
+            all_keys = sorted(store.keys())
+
+        # Filter keys based on current step
+        step = self._current_step_index()
+        allowed_keys = self._get_available_viewer_keys_for_step(step)
+        
+        if allowed_keys is not None:
+            # On a workflow step: show only allowed keys
+            keys = [k for k in all_keys if k in allowed_keys]
+        else:
+            # On home page: show all keys
+            keys = all_keys
 
         self.viewer_key_combo.clear()
         self.viewer_key_combo.addItems(keys)
@@ -1162,7 +1787,11 @@ class WorkflowWindow(QMainWindow):
             if idx >= 0:
                 self.viewer_key_combo.setCurrentIndex(idx)
 
-        self.viewer_status_label.setText(f"Loaded {len(keys)} HDF key(s) from {db_path.name}")
+        key_count = len(keys)
+        if allowed_keys is not None:
+            self.viewer_status_label.setText(f"Loaded {key_count} HDF key(s) for this step from {db_path.name}")
+        else:
+            self.viewer_status_label.setText(f"Loaded {key_count} HDF key(s) from {db_path.name}")
         self._set_viewer_key_for_step(self._current_step_index())
 
     def _summarize_loaded_preview(self, preview: pd.DataFrame, selected_key: str, total_rows: Optional[int]) -> None:
@@ -1365,7 +1994,9 @@ class WorkflowWindow(QMainWindow):
         self.log(f"Loaded data preview for {selected_key} ({len(preview)} row(s)).")
 
     def load_current_step_view(self) -> None:
+        self.refresh_data_viewer_keys()
         self._set_viewer_key_for_step(self._current_step_index())
+        self._populate_viewer_filters()
         self.refresh_data_viewer()
 
     def filter_viewer_to_current_receiver(self) -> None:
@@ -1379,7 +2010,123 @@ class WorkflowWindow(QMainWindow):
 
     def clear_viewer_filter(self) -> None:
         self.viewer_where_edit.clear()
-        self.log("Cleared viewer filter.")
+        # Clear all filter dropdowns
+        for combo in self.viewer_filter_dropdowns.values():
+            combo.setCurrentIndex(0)
+        self.log("Cleared all viewer filters.")
+
+    def _on_viewer_key_changed(self) -> None:
+        """Populate filter dropdowns when the HDF key changes."""
+        self._populate_viewer_filters()
+
+    def _populate_viewer_filters(self) -> None:
+        """Populate filter dropdowns with unique values from the selected HDF table."""
+        db_path = self._resolve_project_db_path()
+        if db_path is None or not db_path.exists():
+            return
+        
+        selected_key = self.viewer_key_combo.currentText().strip()
+        if not selected_key:
+            # Clear all filter combos if no key is selected
+            for combo in self.viewer_filter_dropdowns.values():
+                combo.clear()
+                combo.addItem("(All)")
+            return
+
+        try:
+            with pd.HDFStore(str(db_path), mode="r") as store:
+                # Get a small sample to identify available columns
+                sample = self._select_hdf_rows(store, selected_key, start=0, stop=min(1000, 10000))
+            
+            # Define filter columns to look for
+            filter_cols = ["rec_id", "rec_type", "freq_code", "tag_id", "fish_id"]
+            available_cols = [col for col in filter_cols if col in sample.columns]
+            
+            # Clear existing filter dropdowns and create new ones as needed
+            # Remove old dropdowns that are no longer relevant
+            old_combos = list(self.viewer_filter_dropdowns.keys())
+            for old_col in old_combos:
+                if old_col not in available_cols:
+                    combo = self.viewer_filter_dropdowns.pop(old_col)
+                    # Find and remove from layout
+                    for i in range(self.data_viewer_group.layout().count()):
+                        widget = self.data_viewer_group.layout().itemAt(i).widget()
+                        if widget is combo or (hasattr(widget, 'layout') and combo in widget.children()):
+                            break
+            
+            # Populate filter dropdowns
+            filter_row = None
+            for i in range(self.data_viewer_group.layout().count()):
+                layout_item = self.data_viewer_group.layout().itemAt(i)
+                if isinstance(layout_item, QHBoxLayout.__class__):
+                    # Check if this is the filter row by looking for "Filters:" label
+                    if layout_item.count() > 0:
+                        widget = layout_item.itemAt(0).widget()
+                        if isinstance(widget, QLabel) and widget.text() == "Filters:":
+                            filter_row = layout_item
+                            break
+            
+            if filter_row is None:
+                return
+
+            # Populate dropdowns for available columns
+            for col in available_cols:
+                if col not in self.viewer_filter_dropdowns:
+                    # Create new dropdown
+                    combo = QComboBox()
+                    combo.setMaximumWidth(120)
+                    self.viewer_filter_dropdowns[col] = combo
+                    
+                    # Connect to filter update
+                    combo.currentTextChanged.connect(self._apply_filter_from_dropdowns)
+                    
+                    # Add label + combo to filter row
+                    filter_row.addWidget(QLabel(f"{col}:"))
+                    filter_row.addWidget(combo)
+                
+                combo = self.viewer_filter_dropdowns[col]
+                combo.blockSignals(True)
+                combo.clear()
+                combo.addItem("(All)")
+                
+                # Get unique values from the full table for this column
+                try:
+                    with pd.HDFStore(str(db_path), mode="r") as store:
+                        full_data = self._select_hdf_rows(store, selected_key, start=0, stop=min(10000, 50000))
+                    
+                    unique_vals = sorted(full_data[col].dropna().unique())
+                    for val in unique_vals:
+                        combo.addItem(str(val))
+                except Exception:
+                    pass
+                
+                combo.blockSignals(False)
+
+        except Exception as e:
+            self.log(f"Could not populate filters: {e}")
+
+    def _apply_filter_from_dropdowns(self) -> None:
+        """Apply filters from the dropdown selections to the where clause."""
+        where_clause = self._build_filter_where_clause()
+        if where_clause:
+            self.viewer_where_edit.setText(where_clause)
+        else:
+            self.viewer_where_edit.clear()
+
+    def _build_filter_where_clause(self) -> str:
+        """Build a where clause from selected filter dropdowns."""
+        conditions = []
+        for col, combo in self.viewer_filter_dropdowns.items():
+            selected = combo.currentText().strip()
+            if selected and selected != "(All)":
+                # Check if the value is numeric
+                try:
+                    float(selected)
+                    conditions.append(f"{col} == {selected}")
+                except ValueError:
+                    conditions.append(f"{col} == '{selected}'")
+        
+        return " & ".join(f"({c})" for c in conditions) if conditions else ""
 
     def _required_project(self) -> radio_project:
         if self.project is None:
@@ -1426,6 +2173,219 @@ class WorkflowWindow(QMainWindow):
             widget.setStatusTip(text)
         except AttributeError:
             pass
+ 
+    def _clear_plot_viewer(self) -> None:
+        self.plot_image_label.clear()
+        self.plot_image_label.hide()
+        self.plot_viewer_label.show()
+        self._plot_figures.clear()
+        self._plot_pixmaps.clear()
+        self._active_plot_context = None
+ 
+    def _on_plot_selection_changed(self, index: int) -> None:
+        if index < 0:
+            return
+        if not self.plot_selector_combo.isEnabled():
+            return
+        label = self.plot_selector_combo.currentText()
+        if not label:
+            return
+
+        db_path = self._resolve_project_db_path()
+        rec_type = self.train_rec_type.currentText().strip().lower()
+        context_key = (str(db_path) if db_path else "", rec_type)
+        if self._active_plot_context != context_key:
+            self._plot_figures.clear()
+            self._plot_pixmaps.clear()
+            self._active_plot_context = context_key
+        
+        try:
+            if label in self._plot_pixmaps:
+                self._show_plot_pixmap(self._plot_pixmaps[label])
+                return
+
+            fig = self._generate_parameter_plot(label)
+            if fig:
+                self._plot_figures[label] = fig
+                pixmap = self._render_figure_to_pixmap(fig)
+                if pixmap is not None:
+                    self._plot_pixmaps[label] = pixmap
+                    self._show_plot_pixmap(pixmap)
+                plt.close(fig)
+        except Exception as e:
+            self.log(f"Error displaying plot '{label}': {e}")
+ 
+    def _generate_parameter_plot(self, param_name: str):
+        """Generate a single parameter histogram on-demand from trained data."""
+        try:
+            db_path = self._resolve_project_db_path()
+            if db_path is None or not db_path.exists():
+                self.log("Select an existing project database (.h5) or initialize a project before plotting.")
+                return None
+
+            rec_type = self.train_rec_type.currentText().strip()
+
+            trained_full = self._get_trained_data_for_db(db_path)
+            if trained_full is None:
+                return None
+
+            trained_dat = trained_full.copy()
+
+            if rec_type and "rec_type" in trained_dat.columns:
+                trained_dat = trained_dat[trained_dat.rec_type.astype(str).str.lower() == rec_type.lower()]
+            elif not rec_type and "rec_type" in trained_dat.columns and not trained_dat.empty:
+                # Keep the dropdown in sync when plotting from a loaded DB without project initialization.
+                fallback_rec_type = str(trained_dat["rec_type"].dropna().iloc[0]).strip()
+                if fallback_rec_type:
+                    if self.train_rec_type.findText(fallback_rec_type) < 0:
+                        self.train_rec_type.addItem(fallback_rec_type)
+                    self.train_rec_type.setCurrentText(fallback_rec_type)
+            
+            if trained_dat.empty:
+                if rec_type:
+                    self.log(f"No trained data available for receiver type '{rec_type}'.")
+                else:
+                    self.log("No trained data available in /trained.")
+                return None
+            
+            trues = trained_dat[trained_dat['detection'] == 1]
+            falses = trained_dat[trained_dat['detection'] == 0]
+            
+            # Define the 5 parameters
+            parameters = {
+                'Hit Ratio Distribution': {
+                    'column': 'hit_ratio',
+                    'bins': np.arange(0, 1.05, 0.05),
+                    'xlabel': 'Hit Ratio'
+                },
+                'Consecutive Hit Length': {
+                    'column': 'cons_length',
+                    'bins': np.arange(0, 12, 1),
+                    'xlabel': 'Consecutive Hit Length'
+                },
+                'Signal Power Distribution': {
+                    'column': 'power',
+                    'bins': np.arange(0, 110, 10),
+                    'xlabel': 'Signal Power'
+                },
+                'Noise Ratio Distribution': {
+                    'column': 'noise_ratio',
+                    'bins': np.arange(0, 1.1, 0.1),
+                    'xlabel': 'Noise Ratio'
+                },
+                'Lag Differences': {
+                    'column': 'lag_diff',
+                    'bins': np.arange(0, 150, 15),
+                    'xlabel': 'Lag Differences'
+                },
+            }
+            
+            if param_name not in parameters:
+                self.log(f"Unknown parameter: {param_name}")
+                return None
+            
+            param = parameters[param_name]
+            fig, axes = plt.subplots(1, 2, figsize=(10, 4.5), sharey=True)
+            ax_false, ax_true = axes
+            
+            if param['column'] in trues.columns and param['column'] in falses.columns:
+                ax_false.hist(
+                    falses[param['column']].values,
+                    bins=param['bins'],
+                    alpha=0.8,
+                    color='red',
+                    edgecolor='black',
+                    linewidth=1,
+                )
+                ax_true.hist(
+                    trues[param['column']].values,
+                    bins=param['bins'],
+                    alpha=0.8,
+                    color='green',
+                    edgecolor='black',
+                    linewidth=1,
+                )
+
+                ax_false.set_title('False Positive', fontsize=11, fontweight='bold')
+                ax_true.set_title('True Detection', fontsize=11, fontweight='bold')
+                ax_false.set_xlabel(param['xlabel'], fontsize=10)
+                ax_true.set_xlabel(param['xlabel'], fontsize=10)
+                ax_false.set_ylabel('Count', fontsize=10)
+                ax_false.grid(True, alpha=0.3)
+                ax_true.grid(True, alpha=0.3)
+
+                fig.suptitle(f"{param_name} ({rec_type})", fontsize=12, fontweight='bold')
+                fig.tight_layout()
+                
+                return fig
+            else:
+                self.log(f"Column '{param['column']}' not found in trained data.")
+                return None
+        
+        except Exception as e:
+            self.log(f"Error generating plot for {param_name}: {e}")
+            return None
+
+    def _get_trained_data_for_db(self, db_path: Path) -> Optional[pd.DataFrame]:
+        key = str(db_path)
+        cached = self._trained_table_cache.get(key)
+        if cached is not None:
+            return cached
+
+        try:
+            trained = pd.read_hdf(str(db_path), key='trained')
+        except (KeyError, FileNotFoundError, OSError, ValueError) as exc:
+            self.log(f"Could not load trained data from {db_path}: {exc}")
+            return None
+
+        self._trained_table_cache[key] = trained
+        return trained
+
+    def _render_figure_to_pixmap(self, fig) -> Optional[QPixmap]:
+        buf = io.BytesIO()
+        try:
+            fig.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+            buf.seek(0)
+            pixmap = QPixmap()
+            if not pixmap.loadFromData(buf.getvalue()):
+                self.log("Failed to load image data from figure.")
+                return None
+            return pixmap
+        finally:
+            buf.close()
+
+    def _show_plot_pixmap(self, pixmap: QPixmap) -> None:
+        self.plot_viewer_label.hide()
+        self.plot_image_label.setPixmap(pixmap.scaledToWidth(500, Qt.SmoothTransformation))
+        self.plot_image_label.show()
+
+    def _display_plot(self, fig) -> None:
+        try:
+            pixmap = self._render_figure_to_pixmap(fig)
+            if pixmap is None:
+                return
+            self._show_plot_pixmap(pixmap)
+        except Exception as e:
+            self.log(f"Error rendering plot to display: {e}")
+ 
+    def _add_figure_to_viewer(self, fig, label: str = None) -> None:
+        """Cache a figure that was just generated (e.g., during training)."""
+        if label is None:
+            label = f"Plot {len(self._plot_figures) + 1}"
+        # Only cache it; don't add to dropdown (dropdown already has all 5 parameters)
+        self._plot_figures[label] = fig
+        plt.close(fig)
+ 
+    def _capture_and_display_plots(self, fn, *args, **kwargs) -> None:
+        self._clear_plot_viewer()
+        plt.ioff()
+        try:
+            # Just run the training function (which generates reporting plots)
+            result = fn(*args, **kwargs)
+            # GUI plots will be generated on-demand when user selects them from dropdown
+        finally:
+            plt.close('all')
+
 
     def _full_logo_pixmap(self, width: int = 560) -> QPixmap:
         pix = QPixmap(str(self.logo_path))
@@ -1519,6 +2479,7 @@ class WorkflowWindow(QMainWindow):
             _cleanup()
 
         thread.started.connect(worker.run)
+        worker.output.connect(self.log)
         worker.finished.connect(_on_success)
         worker.failed.connect(_on_error)
         worker.cancelled.connect(_on_cancelled)
@@ -1533,7 +2494,7 @@ class WorkflowWindow(QMainWindow):
             if not project_dir:
                 raise ValueError("Project directory is required.")
 
-            db_name = self.db_name_edit.text().strip()
+            db_name = self.db_name_combo.currentText().strip()
             if not db_name:
                 raise ValueError("Database name is required.")
             if db_name.lower().endswith(".h5"):
@@ -1565,10 +2526,13 @@ class WorkflowWindow(QMainWindow):
             db_path = os.path.join(project_dir, f"{db_name}.h5")
             self.import_db_dir.setText(db_path)
             self.cjs_output_ws.setText(os.path.join(project_dir, "Output"))
+            self._refresh_import_receiver_ids()
+            self._refresh_train_receiver_ids()
             self._update_session_state_path()
             self.refresh_data_viewer_keys()
             self.log(f"Project DB: {db_path}")
             self.log(f"Loaded tags={len(tag_data)}, receivers={len(receiver_data)}, nodes={len(nodes_data)}")
+            self._auto_preview_receiver_network_from_setup()
 
             if self._session_state_path is not None and self._session_state_path.exists():
                 self.load_gui_session()
@@ -1581,7 +2545,9 @@ class WorkflowWindow(QMainWindow):
         if ant_map is None:
             ant_map = None
 
-        rec_id = self.import_rec_id.text().strip()
+        rec_id = self.import_rec_id.currentText().strip()
+        if not rec_id:
+            raise ValueError("Receiver ID is required. Initialize the project to load receiver IDs.")
         rec_type = self._normalize_rec_type(self.import_rec_type.currentText())
         file_dir = self.import_file_dir.text().strip()
         db_dir = self.import_db_dir.text().strip() or proj.db
@@ -1604,34 +2570,53 @@ class WorkflowWindow(QMainWindow):
         self._run_action_async("Run Import", _impl, success_message=f"Imported receiver {rec_id} from {file_dir}")
 
     def undo_import(self) -> None:
-        self._run_action("Undo Import", lambda: self._required_project().undo_import(self.import_rec_id.text().strip()))
+        rec_id = self.import_rec_id.currentText().strip()
+        if not rec_id:
+            raise ValueError("Receiver ID is required. Initialize the project to load receiver IDs.")
+        self._run_action("Undo Import", lambda: self._required_project().undo_import(rec_id))
 
     def run_training(self) -> None:
         def _impl() -> None:
             proj = self._required_project()
-            rec_id = self.train_rec_id.text().strip()
-
+            rec_id = self.train_rec_id.currentText().strip()
+            if not rec_id:
+                raise ValueError("Receiver ID is required. Initialize the project to load receiver IDs.")
+ 
             if self.train_all_fish.isChecked():
                 fishes = proj.get_fish(rec_id=rec_id)
+                if isinstance(fishes, (list, tuple)):
+                    fishes = list(fishes)
+                else:
+                    if isinstance(fishes, np.ndarray):
+                        fishes = fishes.tolist()
+                    else:
+                        fishes = list(fishes) if fishes is not None else []
             else:
                 fishes = [x.strip() for x in self.train_fish_codes.text().split(",") if x.strip()]
-
-            if not fishes:
+ 
+            if len(fishes) == 0:
                 raise ValueError("No fish found to train.")
-
+ 
             self.log(f"Training {len(fishes)} fish at {rec_id}...")
             for fish in fishes:
                 self._check_cancel_requested()
                 proj.train(fish, rec_id)
                 QApplication.processEvents()
-
+ 
             if self.train_summary.isChecked():
-                proj.training_summary(self.train_rec_type.text().strip(), site=[rec_id])
-
+                self._capture_and_display_plots(
+                    proj.training_summary,
+                    self.train_rec_type.currentText().strip(),
+                    site=[rec_id]
+                )
+ 
         self._run_action("Run Training", _impl)
 
     def undo_training(self) -> None:
-        self._run_action("Undo Training", lambda: self._required_project().undo_training(self.train_rec_id.text().strip()))
+        rec_id = self.train_rec_id.currentText().strip()
+        if not rec_id:
+            raise ValueError("Receiver ID is required. Initialize the project to load receiver IDs.")
+        self._run_action("Undo Training", lambda: self._required_project().undo_training(rec_id))
 
     def run_classification(self) -> None:
         def _impl() -> None:
@@ -1866,6 +2851,20 @@ class WorkflowWindow(QMainWindow):
         success_msg = f"CJS outputs written to {output_ws}\n  CSV: {csv_path}\n  INP: {inp_path}"
         self._run_action_async("Run CJS Export", _impl, success_message=success_msg)
 
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        # Defer so Qt finishes the initial layout before we force equal halves.
+        QTimer.singleShot(0, self._equalize_splitters)
+
+    def _equalize_splitters(self) -> None:
+        for sp in (self._left_splitter, self._right_splitter):
+            total = sp.height()
+            half = total // 2
+            sp.setSizes([half, half])
+        # Start with the plot panel collapsed.
+        total = self._right_splitter.height()
+        self._right_splitter.setSizes([0, total])
+
     def closeEvent(self, event) -> None:  # noqa: N802
         try:
             if self._resolve_project_db_path() is not None:
@@ -1880,9 +2879,44 @@ def _find_repo_root() -> Path:
     return module_dir.parent
 
 
+def _install_unhandled_exception_logging(repo_root: Path) -> None:
+    crash_log = repo_root / "logs" / "gui_crash.log"
+    prior_hook = sys.excepthook
+
+    def _hook(exc_type, exc_value, exc_traceback):
+        stamp = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+        formatted = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+        try:
+            crash_log.parent.mkdir(parents=True, exist_ok=True)
+            with crash_log.open("a", encoding="utf-8") as handle:
+                handle.write(f"\n[{stamp}] Unhandled GUI exception\n")
+                handle.write(formatted)
+                handle.write("\n")
+        except Exception:  # noqa: BLE001
+            pass
+
+        print(formatted, file=sys.stderr)
+        prior_hook(exc_type, exc_value, exc_traceback)
+
+    sys.excepthook = _hook
+
+
+def _install_fault_handler_logging(repo_root: Path) -> None:
+    global _FAULT_LOG_HANDLE
+    fault_log = repo_root / "logs" / "gui_fault.log"
+    fault_log.parent.mkdir(parents=True, exist_ok=True)
+    _FAULT_LOG_HANDLE = fault_log.open("a", encoding="utf-8")
+    stamp = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    _FAULT_LOG_HANDLE.write(f"\n[{stamp}] GUI process started\n")
+    _FAULT_LOG_HANDLE.flush()
+    faulthandler.enable(_FAULT_LOG_HANDLE, all_threads=True)
+
+
 def main() -> None:
-    app = QApplication(sys.argv)
     repo_root = _find_repo_root()
+    _install_fault_handler_logging(repo_root)
+    _install_unhandled_exception_logging(repo_root)
+    app = QApplication(sys.argv)
 
     window = WorkflowWindow(repo_root)
     window.show()
