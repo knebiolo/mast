@@ -1762,6 +1762,16 @@ def PIT(file_name,
                 telem_dat["antenna_clean"] = pd.to_numeric(telem_dat["antenna_clean"], errors='coerce').astype("Int64")
                 telem_dat["rec_id"] = telem_dat["antenna_clean"].map(ant_to_rec_dict)
                 # Drop rows where antenna values don't match known receivers
+                mapped_counts = telem_dat["rec_id"].notna().sum()
+                if mapped_counts == 0 and len(telem_dat) > 0:
+                    raise ValueError(
+                        f"ant_to_rec_dict {ant_to_rec_dict} did not match any values in "
+                        f"antenna column '{antenna_col}' (sample values: "
+                        f"{telem_dat[antenna_col].astype(str).unique()[:10].tolist()}). "
+                        "This receiver's file may need a single-antenna import "
+                        "(ant_to_rec_dict=None) instead, or the dict is stale from a "
+                        "previous multi-antenna import."
+                    )
                 telem_dat = telem_dat.dropna(subset=["rec_id"])
             else:
                 raise ValueError("Multi-antenna mode requires antenna column, but none found")
@@ -1881,6 +1891,15 @@ def PIT(file_name,
                 print('Detected antenna values (sample):', unique_antennas)
                 mapped_counts = telem_dat['rec_id'].notna().sum()
                 print(f'Mapped {mapped_counts} / {len(telem_dat)} rows to receivers via ant_to_rec_dict')
+
+                if mapped_counts == 0 and len(telem_dat) > 0:
+                    raise ValueError(
+                        f"ant_to_rec_dict {ant_to_rec_dict} did not match any values in "
+                        f"antenna/reader column '{antenna_col}' (sample values: "
+                        f"{unique_antennas.tolist()}). This receiver's file may need a "
+                        "single-antenna import (ant_to_rec_dict=None) instead, or the "
+                        "dict is stale from a previous multi-antenna import."
+                    )
 
                 # drop detections that do not map to a known receiver
                 telem_dat = telem_dat.dropna(subset=['rec_id'])
