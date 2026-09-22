@@ -757,7 +757,14 @@ class WorkflowWindow(QMainWindow):
         self._tip(self.import_channels, "Number of channels configured on the receiver.")
         self.import_ant_map = QPlainTextEdit("{'A0': 'REC001'}")
         self.import_ant_map.setFixedHeight(70)
-        self._tip(self.import_ant_map, "Python dict literal mapping antenna IDs to receiver IDs. Example: {'A0': 'REC001'}")
+        self._tip(
+            self.import_ant_map,
+            "Dict literal ONLY (no 'name =' assignment) mapping antenna IDs to "
+            "receiver IDs, e.g. {'A0': 'REC001'} or {1: 'R0001', 2: 'R0002'}. "
+            "Leave empty for single-antenna receivers. Remember to clear this "
+            "field when switching from a multi-antenna import to a "
+            "single-antenna one, or vice versa.",
+        )
         self.import_ka_format = QCheckBox("Use KA Format")
         self._tip(self.import_ka_format, "Enable Kleinschmidt Associates-specific formatting rules when supported.")
 
@@ -771,7 +778,7 @@ class WorkflowWindow(QMainWindow):
         f_import.addRow("", self.import_ka_format)
 
         run_import_btn = QPushButton("Run Import")
-        run_import_btn.clicked.connect(self.run_import)
+        run_import_btn.clicked.connect(lambda: self._safe_call(self.run_import))
         self._tip(run_import_btn, "Import raw files into /raw_data for this receiver.")
         undo_import_btn = QPushButton("Undo Import")
         undo_import_btn.clicked.connect(self.undo_import)
@@ -907,7 +914,7 @@ class WorkflowWindow(QMainWindow):
         form.addRow("", self.bout_visualize)
 
         run_btn = QPushButton("Run Bout Detection")
-        run_btn.clicked.connect(self.run_bouts)
+        run_btn.clicked.connect(lambda: self._safe_call(self.run_bouts))
         self._tip(run_btn, "Cluster detections into bouts and write /presence table.")
         undo_btn = QPushButton("Undo Bouts")
         undo_btn.clicked.connect(self.undo_bouts)
@@ -973,10 +980,10 @@ class WorkflowWindow(QMainWindow):
         form.addRow("confidence_threshold", self.overlap_conf)
 
         run_btn = QPushButton("Run Unsupervised Overlap")
-        run_btn.clicked.connect(self.run_overlap_unsupervised)
+        run_btn.clicked.connect(lambda: self._safe_call(self.run_overlap_unsupervised))
         self._tip(run_btn, "Run overlap_reduction.unsupervised_removal with the configured parameters.")
         nested_btn = QPushButton("Run Nested Doll")
-        nested_btn.clicked.connect(self.run_overlap_nested)
+        nested_btn.clicked.connect(lambda: self._safe_call(self.run_overlap_nested))
         self._tip(nested_btn, "Run hierarchical nested-doll overlap logic using your nodes/edges.")
         undo_btn = QPushButton("Undo Overlap")
         undo_btn.clicked.connect(self.undo_overlap)
@@ -1004,7 +1011,7 @@ class WorkflowWindow(QMainWindow):
         form.addRow("", self.recap_pit_study)
 
         run_btn = QPushButton("Create Recaptures Table")
-        run_btn.clicked.connect(self.run_recaptures)
+        run_btn.clicked.connect(lambda: self._safe_call(self.run_recaptures))
         self._tip(run_btn, "Build/refresh recaptures table from classified, bout, and overlap outputs.")
         undo_btn = QPushButton("Undo Recaptures")
         undo_btn.clicked.connect(self.undo_recaptures)
@@ -1070,7 +1077,7 @@ class WorkflowWindow(QMainWindow):
         form.addRow("adjacency_filter", self.tte_adjacency)
 
         run_btn = QPushButton("Run TTE Data Prep")
-        run_btn.clicked.connect(self.run_tte)
+        run_btn.clicked.connect(lambda: self._safe_call(self.run_tte))
         self._tip(run_btn, "Create TTE object, run data_prep, and generate summary outputs.")
         form.addRow(run_btn)
 
@@ -1105,7 +1112,7 @@ class WorkflowWindow(QMainWindow):
         form.addRow("output_ws", output_row)
 
         run_btn = QPushButton("Run CJS Export")
-        run_btn.clicked.connect(self.run_cjs)
+        run_btn.clicked.connect(lambda: self._safe_call(self.run_cjs))
         self._tip(run_btn, "Build CJS encounter histories and write output files.")
         form.addRow(run_btn)
 
@@ -2403,6 +2410,23 @@ class WorkflowWindow(QMainWindow):
         h = int(pix.height() * 0.30)
         icon = pix.copy(x, y, w, h)
         return icon.scaledToWidth(width, Qt.SmoothTransformation)
+
+    def _safe_call(self, fn) -> None:
+        """Invoke a button-slot method, catching any exception raised during
+        its synchronous setup (e.g. parsing form fields) before it can reach
+        an async dispatch. Without this, such an exception escapes the Qt
+        slot unhandled: it only reaches the global crash log/stderr, with no
+        dialog and no entry in the GUI's own log panel, so a bad input
+        (e.g. a malformed dict literal) makes the button appear to do
+        nothing at all.
+        """
+        label = getattr(fn, "__name__", "Action")
+        try:
+            fn()
+        except Exception as exc:  # noqa: BLE001
+            self.log(f"✗ {label} failed: {exc}")
+            self.log(traceback.format_exc())
+            QMessageBox.critical(self, "PyMAST GUI Error", f"{label} failed:\n{exc}")
 
     def _run_action(self, label: str, fn) -> None:
         self.log(f"\n=== {label} ===")
