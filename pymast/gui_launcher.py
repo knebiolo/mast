@@ -2898,11 +2898,6 @@ class WorkflowWindow(QMainWindow):
         super().closeEvent(event)
 
 
-def _find_repo_root() -> Path:
-    module_dir = Path(__file__).resolve().parent
-    return module_dir.parent
-
-
 def _install_unhandled_exception_logging(repo_root: Path) -> None:
     crash_log = repo_root / "logs" / "gui_crash.log"
     prior_hook = sys.excepthook
@@ -2934,6 +2929,36 @@ def _install_fault_handler_logging(repo_root: Path) -> None:
     _FAULT_LOG_HANDLE.write(f"\n[{stamp}] GUI process started\n")
     _FAULT_LOG_HANDLE.flush()
     faulthandler.enable(_FAULT_LOG_HANDLE, all_threads=True)
+
+
+def _find_repo_root() -> Path:
+    """Resolve the directory used for logs, session files, and file-dialog defaults.
+
+    When pymast is a git clone or an editable install, ``__file__`` lives at
+    ``<repo>/pymast/gui_launcher.py``, so the repo root is its parent's parent.
+    For a standard (non-editable) ``pip install``, the package is copied into
+    ``site-packages/pymast``, and that same computation would incorrectly
+    resolve to the ``site-packages`` directory itself -- a location that may
+    not be writable and isn't where a user would expect logs to appear.
+    Detect that case and fall back to the current working directory (typically
+    wherever the launcher .bat file/shortcut lives), or the user's home
+    directory as a last resort.
+    """
+    module_dir = Path(__file__).resolve().parent
+    candidate = module_dir.parent
+    if (candidate / "pymast" / "__init__.py").exists():
+        return candidate
+
+    cwd = Path.cwd()
+    try:
+        (cwd / "logs").mkdir(parents=True, exist_ok=True)
+        return cwd
+    except OSError:
+        pass
+
+    fallback = Path.home() / ".pymast"
+    fallback.mkdir(parents=True, exist_ok=True)
+    return fallback
 
 
 def main() -> None:
