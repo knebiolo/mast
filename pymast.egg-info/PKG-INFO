@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: pymast
-Version: 1.0.5
+Version: 1.1.1
 Summary: Movement Analysis Software for Telemetry (MAST) - False positive removal and movement analysis for radio telemetry data
 Author: Theodore Castro-Santos
 Author-email: "Kevin P. Nebiolo" <kevin.nebiolo@kleinschmidtgroup.com>
@@ -42,6 +42,8 @@ Provides-Extra: performance
 Requires-Dist: dask>=2021.3.0; extra == "performance"
 Requires-Dist: distributed>=2021.3.0; extra == "performance"
 Requires-Dist: numba>=0.53.0; extra == "performance"
+Provides-Extra: gui
+Requires-Dist: PySide6>=6.5.0; extra == "gui"
 Dynamic: license-file
 
 # PyMAST - Movement Analysis Software for Telemetry
@@ -85,6 +87,16 @@ Dynamic: license-file
 **Standard installation:**
 ```bash
 pip install pymast
+```
+
+**Recommended first step on Windows (improves wheel resolution):**
+```bash
+python -m pip install --upgrade pip setuptools wheel
+```
+
+**GUI dependencies (optional):**
+```bash
+pip install "pymast[gui]"
 ```
 
 **For Spyder/Anaconda users:**
@@ -372,16 +384,10 @@ Identify discrete presence events at receivers.
 import pymast
 
 node = 'N01'
-bout = pymast.bout(project, node, lag_window=2, time_limit=21600)
+bout_obj = pymast.bout(project, node, eps_multiplier=5, lag_window=2)
 
-# Fit processes to find optimal threshold
-threshold = bout.fit_processes()
-
-# Calculate presences using fitted threshold
-bout.presence(threshold)
-
-# Or use a manual threshold (seconds)
-# bout.presence(120)
+# Write DBSCAN presence records
+bout_obj.presence()
 
 # Undo if needed
 # project.undo_bouts(node)
@@ -511,7 +517,7 @@ fh.fish_plot('164.123 45')
 | Lotek        | SRX1200         | `srx1200`  | Standard format                 |
 | SigmaEight   | Orion           | `orion`    | Supports multi-channel/antenna  |
 | SigmaEight   | Ares            | `ares`     | Multiple firmware versions      |
-| Vemco        | VR2             | `VR2`      | Standard format                 |
+| Vemco        | VR2             | `vr2`      | Standard format                 |
 
 ---
 

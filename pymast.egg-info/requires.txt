@@ -17,6 +17,9 @@ flake8
 sphinx
 sphinx-rtd-theme
 
+[gui]
+PySide6>=6.5.0
+
 [performance]
 dask>=2021.3.0
 distributed>=2021.3.0

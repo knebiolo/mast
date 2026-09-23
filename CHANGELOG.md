@@ -12,6 +12,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.1] - 2026-09-23
+
+### Fixed
+- **GUI fails to launch for standard `pip install` users**: `_find_repo_root()`
+  assumed the package always lives at `<repo>/pymast/` (true for a git clone
+  or editable install), but a standard (non-editable) `pip install` copies the
+  package into `site-packages/pymast`, causing logs and file-dialog defaults
+  to incorrectly resolve to the `site-packages` directory itself. Writing to
+  that location can raise a `PermissionError` before the GUI window even
+  appears, depending on where Python is installed. Now falls back to the
+  current working directory (typically wherever `RUN_PYMAST_GUI.bat` lives)
+  or the user's home directory.
+
+---
+
 ## [1.1.0] - 2026-09-22
 
 ### Added

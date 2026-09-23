@@ -21,6 +21,7 @@ pymast.egg-info/top_level.txt
 tests/test_basic.py
 tests/test_csv_pit.py
 tests/test_formatter_tte.py
+tests/test_gui_contracts.py
 tests/test_initial_state_release.py
 tests/test_installation_smoke.py
 tests/test_module_smoke_coverage.py
