@@ -21,6 +21,27 @@ echo.
 set "LAUNCHED="
 set "CUSTOM_CONDA=C:\Users\Kevin.Nebiolo\Desktop\conda_envs\pymast\python.exe"
 
+REM Preferred path: the Python location recorded by INSTALL_PYMAST.bat, if
+REM it was run. This is a fixed, deterministic path - no guessing required.
+set "PYTHON_RECORD=%LOCALAPPDATA%\PyMAST\python_path.txt"
+if exist "%PYTHON_RECORD%" (
+    set "RECORDED_PYTHON="
+    set /p RECORDED_PYTHON=<"%PYTHON_RECORD%"
+    if defined RECORDED_PYTHON (
+        if exist "!RECORDED_PYTHON!" (
+            echo [Installer record] Using Python installed by INSTALL_PYMAST.bat...
+            "!RECORDED_PYTHON!" -m pymast.gui_launcher >>"%LAUNCH_LOG%" 2>&1
+            if "!ERRORLEVEL!"=="0" (
+                set "LAUNCHED=1"
+                goto :success
+            )
+            echo    Recorded Python failed to launch PyMAST ^(see log^). Falling back...
+        ) else (
+            echo    Recorded Python no longer exists: !RECORDED_PYTHON!
+        )
+    )
+)
+
 REM Preferred path: known local conda environment for this workstation.
 if exist "!CUSTOM_CONDA!" (
     echo [Preferred] Using custom conda environment...
@@ -95,6 +116,8 @@ echo [5/6] Trying base Anaconda/Miniconda environment...
 for %%B in (
     "%USERPROFILE%\anaconda3\python.exe"
     "%USERPROFILE%\miniconda3\python.exe"
+    "%LOCALAPPDATA%\anaconda3\python.exe"
+    "%LOCALAPPDATA%\miniconda3\python.exe"
     "%ProgramData%\Anaconda3\python.exe"
     "%ProgramData%\miniconda3\python.exe"
     "%LOCALAPPDATA%\Continuum\anaconda3\python.exe"
@@ -131,17 +154,22 @@ echo PyMAST GUI failed to launch.
 echo.
 echo INSTALLATION OPTIONS:
 echo.
-echo [A] PIP INSTALL ^(Recommended for most users^):
+echo [A] EASIEST: Run the installer ^(Recommended^):
+echo   1. Double-click INSTALL_PYMAST.bat ^(in this same folder^)
+echo   2. Once it finishes, double-click this batch file again
+echo.
+echo [B] MANUAL PIP INSTALL:
 echo   1. Install Python from https://www.python.org
+echo      ^(check "Add python.exe to PATH" during setup^)
 echo   2. Run: pip install "pymast[gui]"
 echo   3. Double-click this batch file
 echo.
-echo [B] ANACONDA INSTALL ^(Pro users / custom conda setup^):
+echo [C] MANUAL ANACONDA INSTALL ^(Pro users / custom conda setup^):
 echo   1. Install Anaconda from https://www.anaconda.com/download
 echo   2. Run: conda env create -f environment.yml
 echo   3. Double-click this batch file
 echo.
-echo [C] MANUAL LAUNCH ^(Troubleshooting^):
+echo [D] MANUAL LAUNCH ^(Troubleshooting^):
 echo   1. Open Command Prompt or PowerShell
 echo   2. Run: python -m pymast.gui_launcher
 echo.
