@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned
+- R package wrapper
+
+---
+
+## [1.1.0] - 2026-09-22
+
 ### Added
 - **GUI Launcher (RUN_PYMAST_GUI.bat)**: Robust Windows batch launcher with multi-method fallback
   - Attempts 4 launch methods in order: system python (pip users) → custom conda env → conda registry → Anaconda default path
@@ -14,10 +21,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Works seamlessly with both pip install and conda install users
   - Clear installation/troubleshooting guidance on launch failure
   - No manual repo path configuration needed
+- **Interactive UI (`pymast.gui_launcher`)**: PySide6 desktop GUI covering the full workflow
+  (project setup, import, classification, bouts, overlap resolution, recaptures, CJS/TTE
+  export), with session save/restore and an in-app data viewer.
 
-### Planned for v1.1.0
-- Interactive UI
-- R package wrapper
+### Fixed
+- **Silent PIT import failures**: `parsers.PIT()` now raises a descriptive `ValueError`
+  instead of silently returning zero rows when a multi-antenna `ant_to_rec_dict` doesn't
+  match any rows for the target receiver.
+- **Swallowed GUI validation errors**: GUI actions that parse/validate input before
+  dispatching to a background thread (Import, Bouts, Overlap, Recaptures, TTE, CJS) now
+  surface errors via a dialog and the GUI log instead of only writing to `logs/gui_crash.log`.
+- **Row-duplication in Time-to-Event models**: `formatter.time_to_event` now de-duplicates
+  `project.tags` (keeping the most recent release record per `freq_code`) before merging
+  against recaptures data. Master tag tables containing multiple capture/release rows for
+  the same physical tag (e.g. recaptured fish) were previously causing every detection row
+  for those fish to be duplicated, inflating downstream transition/duration counts.
+- **GUI hang in `make_recaptures_table`**: removed a blocking `input()`-based confirmation
+  prompt in the PIT-study recaptures path. It had no way to be answered from a GUI
+  background thread and would hang indefinitely with no error surfaced; it also aborted
+  processing of all remaining receivers if answered "no" instead of skipping just one.
 
 ---
 
