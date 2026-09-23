@@ -12,6 +12,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.2] - 2026-09-23
+
+### Fixed
+- **Home page workflow tile labels were clipped/unreadable**: multi-word step
+  button labels (e.g. "Import Data", "Time-to-Event Model") overflowed the
+  tile width since `QPushButton` does not word-wrap its text. Each word now
+  renders on its own line.
+- **Setup tile label wasn't bold**: it previously used a lighter font weight
+  (600) than the other workflow tiles (700); now matches with a bold weight.
+
+---
+
 ## [1.1.1] - 2026-09-23
 
 ### Fixed

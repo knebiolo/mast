@@ -584,12 +584,12 @@ class WorkflowWindow(QMainWindow):
         setup_btn = QPushButton("Setup")
         setup_btn.setMinimumHeight(60)
         setup_btn.setMinimumWidth(80)
-        setup_btn.setStyleSheet("font-size: 11px; font-weight: 600;")
+        setup_btn.setStyleSheet("font-size: 11px; font-weight: bold;")
         setup_btn.clicked.connect(lambda checked=False: self.goto_step(0))
         grid_layout.addWidget(setup_btn, 0, 0)
 
         for i, step in enumerate(range(1, 9), start=1):
-            btn = QPushButton(STEP_TITLES[step])
+            btn = QPushButton(STEP_TITLES[step].replace(" ", "\n"))
             btn.setMinimumHeight(72)
             btn.setMinimumWidth(80)
             btn.setStyleSheet("font-size: 10px; font-weight: 700;")
