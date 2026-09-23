@@ -41,7 +41,7 @@ if exist "!CUSTOM_CONDA!" (
 )
 
 REM Try 1: System python (pip install users)
-echo [1/4] Trying system python...
+echo [1/6] Trying system python...
 python -m pymast.gui_launcher >>"%LAUNCH_LOG%" 2>&1
 if "!ERRORLEVEL!"=="0" (
     set "LAUNCHED=1"
@@ -49,7 +49,7 @@ if "!ERRORLEVEL!"=="0" (
 )
 
 REM Try 2: Custom conda environment on Desktop
-echo [2/4] Trying custom conda environment...
+echo [2/6] Trying custom conda environment...
 if exist "!CUSTOM_CONDA!" (
     "!CUSTOM_CONDA!" -m pymast.gui_launcher >>"%LAUNCH_LOG%" 2>&1
     if "!ERRORLEVEL!"=="0" (
@@ -61,8 +61,8 @@ if not exist "!CUSTOM_CONDA!" (
     echo    Custom conda interpreter not found at: !CUSTOM_CONDA!
 )
 
-REM Try 3: Default Anaconda environment
-echo [3/4] Trying conda environment...
+REM Try 3: Default Anaconda environment (dedicated 'pymast' env, if one exists)
+echo [3/6] Trying conda environment (pymast env)...
 where conda >nul 2>&1
 if "!ERRORLEVEL!"=="0" (
     conda run -n pymast python -m pymast.gui_launcher >>"%LAUNCH_LOG%" 2>&1
@@ -74,8 +74,8 @@ if "!ERRORLEVEL!"=="0" (
     echo    conda command not found on PATH.
 )
 
-REM Try 4: Standard Anaconda installation path
-echo [4/4] Trying default Anaconda installation...
+REM Try 4: Standard Anaconda installation path (dedicated 'pymast' env, if one exists)
+echo [4/6] Trying default Anaconda installation (pymast env)...
 set "DEFAULT_CONDA=%USERPROFILE%\anaconda3\envs\pymast\python.exe"
 if exist "!DEFAULT_CONDA!" (
     "!DEFAULT_CONDA!" -m pymast.gui_launcher >>"%LAUNCH_LOG%" 2>&1
@@ -86,6 +86,43 @@ if exist "!DEFAULT_CONDA!" (
 )
 if not exist "!DEFAULT_CONDA!" (
     echo    Default conda interpreter not found at: !DEFAULT_CONDA!
+)
+
+REM Try 5: Base Anaconda/Miniconda environment (most common case for users who
+REM installed PyMAST with "pip install pymast[gui]" from Anaconda Prompt without
+REM creating a dedicated environment - PyMAST ends up in the 'base' environment).
+echo [5/6] Trying base Anaconda/Miniconda environment...
+for %%B in (
+    "%USERPROFILE%\anaconda3\python.exe"
+    "%USERPROFILE%\miniconda3\python.exe"
+    "%ProgramData%\Anaconda3\python.exe"
+    "%ProgramData%\miniconda3\python.exe"
+    "%LOCALAPPDATA%\Continuum\anaconda3\python.exe"
+) do (
+    if not defined LAUNCHED (
+        if exist %%B (
+            echo    Trying %%~B...
+            %%B -m pymast.gui_launcher >>"%LAUNCH_LOG%" 2>&1
+            if "!ERRORLEVEL!"=="0" (
+                set "LAUNCHED=1"
+                goto :success
+            )
+        )
+    )
+)
+
+REM Try 6: 'conda run' against the base environment (covers non-default install
+REM locations, as long as conda itself happens to be on PATH).
+echo [6/6] Trying 'conda run' against the base environment...
+where conda >nul 2>&1
+if "!ERRORLEVEL!"=="0" (
+    conda run -n base python -m pymast.gui_launcher >>"%LAUNCH_LOG%" 2>&1
+    if "!ERRORLEVEL!"=="0" (
+        set "LAUNCHED=1"
+        goto :success
+    )
+) else (
+    echo    conda command not found on PATH.
 )
 
 REM All methods failed
