@@ -265,22 +265,15 @@ class bout():
             # Filter out noise points (label = -1, though shouldn't happen with min_samples=1)
             fish_dat = fish_dat[fish_dat.bout_no != -1]
             
-            # Assign to each detection
-            for idx, row in fish_dat.iterrows():
-                presence_list.append({
-                    'freq_code': row['freq_code'],
-                    'epoch': row['epoch'],
-                    'time_stamp': row['time_stamp'],
-                    'power': row['power'],
-                    'rec_id': row['rec_id'],
-                    'bout_no': row['bout_no'],
-                    'class': 'study',
-                    'det_lag': 0  # Not meaningful for DBSCAN, kept for compatibility
-                })
+            # Assign to each detection (vectorised; one row per detection, same columns as before)
+            fish_dat = fish_dat[['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id', 'bout_no']].copy()
+            fish_dat['class'] = 'study'
+            fish_dat['det_lag'] = 0  # Not meaningful for DBSCAN, kept for compatibility
+            presence_list.append(fish_dat)
         
         # Store results
         if presence_list:
-            self.presence_df = pd.DataFrame(presence_list)
+            self.presence_df = pd.concat(presence_list, ignore_index=True)
             print(f"[bout] Detected {self.presence_df.bout_no.nunique()} bouts across {len(self.fishes)} fish")
         else:
             self.presence_df = pd.DataFrame()
