@@ -30,7 +30,7 @@ Standardized Output Schema
 --------------------------
 All parsers produce these columns:
 - `time_stamp` : datetime64 - Detection timestamp
-- `epoch` : float32 - Seconds since 1970-01-01
+- `epoch` : int64 - Seconds since 1970-01-01
 - `freq_code` : object - Frequency + code (e.g., "166.380 7")
 - `power` : float32 - Signal power (dB or raw)
 - `rec_id` : object - Receiver identifier
@@ -399,8 +399,8 @@ def orion_import(file_name,
                     site = ant_to_rec_dict[i]
                     
                     # get telemetryt data associated with this site
-                    telem_dat_sub = telem_dat[telem_dat.Ant == 1]
-                    _write_orion_subset(telem_dat_sub, site, 'float32')
+                    telem_dat_sub = telem_dat[telem_dat.Ant == i]
+                    _write_orion_subset(telem_dat_sub, site, 'int64')
     else:
         raise ValueError("Invalid import parameters, no data returned")
         sys.exit()
@@ -1205,7 +1205,7 @@ def srx800(file_name,
                                                   'scan_time':'float32',
                                                   'channels':'int32',
                                                   'rec_type':'object',
-                                                  'epoch':'float32',
+                                                  'epoch':'int64',
                                                   'noise_ratio':'float32',
                                                   'rec_id':'object'})
                 
@@ -1500,7 +1500,7 @@ def srx600(file_name,
                                                       'scan_time':'float32',
                                                       'channels':'int32',
                                                       'rec_type':'object',
-                                                      'epoch':'float32',
+                                                      'epoch':'int64',
                                                       'noise_ratio':'float32',
                                                       'rec_id':'object'})
                 
@@ -1567,7 +1567,7 @@ def srx600(file_name,
                                                       'scan_time':'float32',
                                                       'channels':'int32',
                                                       'rec_type':'object',
-                                                      'epoch':'float32',
+                                                      'epoch':'int64',
                                                       'noise_ratio':'float32',
                                                       'rec_id':'object'})
 
