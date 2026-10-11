@@ -746,7 +746,7 @@ class radio_project():
         train_dat.drop_duplicates(subset='time_stamp', keep='first', inplace=True)
         
         # Object variables
-        if self.receivers.index.dtype != 'object':
+        if pd.api.types.is_integer_dtype(self.receivers.index.dtype):   # numeric receiver ids (string ids are 'object' or 'str')
             rec_id = np.int64(rec_id)
         rec_type = self.receivers.at[rec_id, 'rec_type']
     
