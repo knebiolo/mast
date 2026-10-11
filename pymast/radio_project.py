@@ -262,11 +262,16 @@ class radio_project():
     def initialize_hdf5(self):
         '''Initialize an HDF5 database for a simulation'''
         
-        hdf5 = h5py.File(self.db, 'a')
-        
-        # Create groups for organization (optional)
-        if 'project_setup' not in hdf5:
-            hdf5.create_group("project_setup")
+        # Create the group structure first and close the file again: pandas (PyTables) must not write
+        # to a file that h5py still has open (HDF5 1.14 refuses the second handle).
+        with h5py.File(self.db, 'a') as hdf5:
+            new_project = 'project_setup' not in hdf5
+            for group in ("project_setup", "raw_data", "trained", "classified",
+                          "presence", "overlapping", "recaptures"):
+                if group not in hdf5:
+                    hdf5.create_group(group)
+
+        if new_project:
             self.tags.to_hdf(self.db, key='/project_setup/tags', mode='a')
             self.receivers.to_hdf(self.db, key='/project_setup/receivers', mode='a')
             self.nodes.to_hdf(self.db, key='/project_setup/nodes', mode='a')
@@ -380,25 +385,6 @@ class radio_project():
                 print("Receivers table not found in database, creating it now.")
                 self.receivers.to_hdf(self.db, key='/project_setup/receivers', mode='a')
 
-        if 'raw_data' not in hdf5:
-            hdf5.create_group("raw_data")  
-            
-        if 'trained' not in hdf5:
-            hdf5.create_group("trained")
-            
-        if 'classified' not in hdf5:
-            hdf5.create_group("classified")
-            
-        if 'presence' not in hdf5:
-            hdf5.create_group("presence")
-            
-        if 'overlapping' not in hdf5:
-            hdf5.create_group('overlapping')
-            
-        if 'recaptures' not in hdf5:
-            hdf5.create_group('recaptures')
-            
-        hdf5.close()
 
     def _prompt(self, prompt_text, default="no"):
         """Centralized prompt helper — returns default ONLY when non_interactive is True.

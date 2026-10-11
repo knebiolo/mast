@@ -612,7 +612,7 @@ def srx1200(file_name,
                     line_list.append(line)
                     eof = counter
 
-        # add count array to dictionary with field name 'idx' as key
+    # add count array to dictionary with field name 'idx' as key
         header_dat['idx'] = line_counter
         # add data line array to dictionary with field name 'line' as key
         header_dat['line'] = line_list
@@ -631,7 +631,7 @@ def srx1200(file_name,
         scan_time_number = 0
         new_split = None
         for row in header_df.iterrows():
-            if 'SCAN SETTINGS' in row[1][0]:
+            if 'SCAN SETTINGS' in row[1].iloc[0]:
                 next_row = header_df.loc[row[0]+1]
                 scanTimeStr = next_row.loc['line'][-7:-1]
                 scanTimeSplit = scanTimeStr.split(':')
@@ -643,22 +643,22 @@ def srx1200(file_name,
                     scan_times[scan_time_number] = scan_time
                     scan_time_number = scan_time_number + 1
                     
-            if 'Environment History:' in row[1][0]:
+            if 'Environment History:' in row[1].iloc[0]:
                 next_row = header_df.loc[row[0]+1]
                 change_str = next_row.loc['line']
                 setups[setup_no] = change_str[8:-1]
                 setup_no = setup_no + 1
             
-            if 'Master Firmware:' in row[1][0]:
-                firmwarestr = row[1][0]
+            if 'Master Firmware:' in row[1].iloc[0]:
+                firmwarestr = row[1].iloc[0]
                 firmware_split = firmwarestr.split(' ')
                 firmware = str(firmware_split[-1]).lstrip().rstrip()
                 
-            if 'Active scan_table:' in row[1][0]:
+            if 'Active scan_table:' in row[1].iloc[0]:
                 idx0 = row[0] + 2
                 row_count = 1
                 next_row = header_df.loc[row[0] + 1]
-                while next_row[0] != '\n':
+                while next_row.iloc[0] != '\n':
                     row_count = row_count + 1
                     next_row = header_df.loc[row[0] + row_count]
                     
@@ -688,7 +688,7 @@ def srx1200(file_name,
             idx1 = scan_table_setups[setup][1]
             channel_dat = header_df.iloc[idx0:idx1]
             for row in channel_dat.iterrows():
-                dat = row[1][0]
+                dat = row[1].iloc[0]
                 channel = str(dat[0:4]).lstrip()
                 frequency = dat[10:17]
                 channel_dict[idx] = [setup, channel, frequency]
@@ -962,6 +962,12 @@ def srx800(file_name,
                 line_list.append(line)
                 eof = counter
 
+    if 'dataRow' not in locals():
+        raise ValueError(
+            f"No '** Data Segment **' marker found in {file_name}: this Lotek export layout is not supported "
+            "by this parser (for example a 'Code_log data' listing). Convert the file or add a parser for it."
+        )
+    
     # add count array to dictionary with field name 'idx' as key
     header_dat['idx'] = line_counter
     # add data line array to dictionary with field name 'line' as key
@@ -984,18 +990,18 @@ def srx800(file_name,
     scan_table_number = 0
     scan_time_number = 0
     for row in headerDF.iterrows():
-        if 'Environment History:' in row[1][0]:
+        if 'Environment History:' in row[1].iloc[0]:
             next_row = headerDF.loc[row[0]+1]
             change_str = next_row.loc['line']
             setups[setup_no] = change_str[8:-1]
             setup_no = setup_no + 1
         
-        if 'Master Firmware:' in row[1][0]:
-            firmwarestr = row[1][0]
+        if 'Master Firmware:' in row[1].iloc[0]:
+            firmwarestr = row[1].iloc[0]
             firmware_split = firmwarestr.split(' ')
             firmware = str(firmware_split[-1]).lstrip().rstrip()
             
-        if 'SCAN SETTINGS:' in row[1][0]:
+        if 'SCAN SETTINGS:' in row[1].iloc[0]:
             next_row = headerDF.loc[row[0]+1]
             scanTimeStr = next_row.loc['line'][-7:-1]
             scanTimeSplit = scanTimeStr.split(':')
@@ -1003,18 +1009,18 @@ def srx800(file_name,
             scan_times[scan_time_number] = scan_time
             scan_time_number = scan_time_number + 1  
             
-        if 'scan time' in row[1][0]:
+        if 'scan time' in row[1].iloc[0]:
             scanTimeStr = row[1]['line'][-7:-1]
             scanTimeSplit = scanTimeStr.split(':')
             scan_time = float(scanTimeSplit[1])
             scan_times[scan_time_number] = scan_time
             scan_time_number = scan_time_number + 1             
             
-        if 'Active scan_table:' in row[1][0]:
+        if 'Active scan_table:' in row[1].iloc[0]:
             idx0 = row[0] + 2
             row_count = 1
             next_row = headerDF.loc[row[0] + 1]
-            while next_row[0] != '\n':
+            while next_row.iloc[0] != '\n':
                 row_count = row_count + 1
                 next_row = headerDF.loc[row[0] + row_count]
                 
@@ -1051,7 +1057,7 @@ def srx800(file_name,
         idx1 = scan_table_setups[setup][1]
         channel_dat = headerDF.iloc[idx0:idx1]
         for row in channel_dat.iterrows():
-            dat = row[1][0]
+            dat = row[1].iloc[0]
             channel = str(dat[0:4]).lstrip()
             frequency = dat[10:17]
             channel_dict[idx] = [setup, channel, frequency]
@@ -1135,6 +1141,8 @@ def srx800(file_name,
     get_scan_time = np.vectorize(scan_time_class, excluded = [1])
     
     if len(telem_dat) > 0:
+        if ant_to_rec_dict is None:      # single receiver: every antenna in the file belongs to rec_id
+            ant_to_rec_dict = {ant: rec_id for ant in telem_dat.Antenna.unique()}
         for ant in ant_to_rec_dict:
             site = ant_to_rec_dict[ant]
             telem_dat_sub = telem_dat[telem_dat.Antenna == ant]
@@ -1331,6 +1339,12 @@ def srx600(file_name,
                 # append line of data to the data array
                 line_list.append(line)
     
+    if 'dataRow' not in locals():
+        raise ValueError(
+            f"No '** Data Segment **' marker found in {file_name}: this Lotek export layout is not supported "
+            "by this parser (for example a 'Code_log data' listing). Convert the file or add a parser for it."
+        )
+    
     # add count array to dictionary with field name 'idx' as key
     header_dat['idx'] = line_counter
     
@@ -1346,7 +1360,7 @@ def srx600(file_name,
 
     # gotta love multiple header types 
     for row in headerDF.iterrows():
-        if row[1][0] == 'Environment History:':
+        if row[1].iloc[0] == 'Environment History:':
             header_type = 'alternate'
             break
     del row
@@ -1354,9 +1368,9 @@ def srx600(file_name,
     # find scan time
     # for every header data row
     for row in headerDF.iterrows():   
-        if 'scan time' in row[1][0] or 'Scan Time' in row[1][0]:
+        if 'scan time' in row[1].iloc[0] or 'Scan Time' in row[1].iloc[0]:
             # get the number value from the row
-            scanTimeStr = row[1][0][-7:-1]
+            scanTimeStr = row[1].iloc[0][-7:-1]
             # split the string
             scanTimeSplit = scanTimeStr.split(':')
             # convert the scan time string to float
@@ -1380,11 +1394,11 @@ def srx600(file_name,
     
     for row in rows:
         # if the first 18 characters say Active scan_table
-        if 'Active scan_table:' in row[1][0]:
+        if 'Active scan_table:' in row[1].iloc[0]:
             # channel dictionary data starts two rows from here
             idx0 = counter + 2
             # while the next row isn't empty
-            while next(rows)[1][0] != '\n':
+            while next(rows)[1].iloc[0] != '\n':
                 # increase the counter
                 counter = counter + 1
             # get index of last data row
@@ -1398,7 +1412,7 @@ def srx600(file_name,
     channelDat = headerDF.iloc[idx0:idx1]
     for row in channelDat.iterrows():
         # extract that channel ID from the data row and append to array
-        dat = row[1][0]
+        dat = row[1].iloc[0]
         channel = int(dat[0:4])
         frequency = dat[10:17]
         channelDict[channel] = frequency
@@ -1425,6 +1439,8 @@ def srx600(file_name,
         telem_dat.dropna(inplace = True)
         
         if len(telem_dat) > 0:
+            if ant_to_rec_dict is None:      # single receiver: every antenna in the file belongs to rec_id
+                ant_to_rec_dict = {ant: rec_id for ant in telem_dat.Antenna.unique()}
             for ant in ant_to_rec_dict:
                 site = ant_to_rec_dict[ant]
                 telem_dat_sub = telem_dat[telem_dat.Antenna == ant]
@@ -1500,6 +1516,8 @@ def srx600(file_name,
         telem_dat.dropna(inplace = True)
         
         if len(telem_dat) > 0:
+            if ant_to_rec_dict is None:      # single receiver: every antenna in the file belongs to rec_id
+                ant_to_rec_dict = {ant: rec_id for ant in telem_dat.Antenna.unique()}
             for ant in ant_to_rec_dict:
                 site = ant_to_rec_dict[ant]
                 telem_dat_sub = telem_dat[telem_dat.Antenna == ant]
