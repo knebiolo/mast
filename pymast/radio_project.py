@@ -1731,8 +1731,7 @@ class radio_project():
                     rec_dat = dd.read_hdf(self.db, key='classified')
                     rec_dat = rec_dat[rec_dat['rec_id'] == rec].compute()
                 else:
-                    rec_dat = pd.read_hdf(self.db, key='classified')
-                    rec_dat = rec_dat[rec_dat['rec_id'] == rec]
+                    rec_dat = pd.read_hdf(self.db, key='classified', where=f'rec_id == "{rec}"')   # filter while reading, not after
                 
                 # Convert 'timestamp' column to datetime
                 rec_dat['time_stamp'] = pd.to_datetime(rec_dat['time_stamp'])
@@ -1762,8 +1761,7 @@ class radio_project():
                         presence_data = dd.read_hdf(self.db, key='presence')
                         presence_data = presence_data[presence_data['rec_id'] == rec]
                     else:
-                        presence_data = pd.read_hdf(self.db, key='presence')
-                        presence_data = presence_data[presence_data['rec_id'] == rec]
+                        presence_data = pd.read_hdf(self.db, key='presence', where=f'rec_id == "{rec}"')
                     presence_exists = True
                 except (KeyError, FileNotFoundError, ValueError):
                     presence_exists = False
@@ -1787,8 +1785,7 @@ class radio_project():
                         overlap_data = dd.read_hdf(self.db, key='overlapping')
                         overlap_data = overlap_data[overlap_data['rec_id'] == rec]
                     else:
-                        overlap_data = pd.read_hdf(self.db, key='overlapping')
-                        overlap_data = overlap_data[overlap_data['rec_id'] == rec]
+                        overlap_data = pd.read_hdf(self.db, key='overlapping', where=f'rec_id == "{rec}"')
                     overlap_exists = True
                 except (KeyError, FileNotFoundError, ValueError):
                     overlap_exists = False
@@ -1815,8 +1812,11 @@ class radio_project():
     
                 # Merge with presence data
                 if presence_exists:
-                    rec_dat = rec_dat.merge(presence_data, on=['freq_code', 'epoch', 'rec_id'], how='left')
-                    rec_dat['bout_no'] = rec_dat['bout_no'].fillna(0).astype(int)
+                    # Keep only detections that belong to a bout: bout numbers start at 0, so filling a missing
+                    # bout with 0 would silently attach bout-less detections (for example those dropped by a
+                    # minimum bout size) to a real bout.
+                    rec_dat = rec_dat.merge(presence_data, on=['freq_code', 'epoch', 'rec_id'], how='inner')
+                    rec_dat['bout_no'] = rec_dat['bout_no'].astype(int)
                 else:
                     rec_dat['bout_no'] = 0
     
