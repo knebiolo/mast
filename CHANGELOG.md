@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `bout(..., min_detections=1)`: drop bouts with fewer detections than this after clustering. The default keeps
+  every bout (unchanged behaviour); a value such as the project's `detection_count` requires a sustained presence.
+  It is applied after clustering because DBSCAN's `min_samples` cannot express this for receivers that scan several
+  frequencies (a Lotek SRX800 hears a tag at most about three times in a 15 s window).
+
+### Fixed
+- **pandas 3**: positional access on label-indexed Series (`row[1][0]`, `next_row[0]`) in the SRX600/SRX800/SRX1200
+  header parsers raised `KeyError: 0`; replaced with `.iloc[0]`. `train()` tested the receiver index with
+  `dtype != 'object'`, which is true for pandas 3's string dtype, so string receiver ids were treated as numeric.
+- **HDF5 1.14**: `initialize_hdf5` kept an h5py handle open while pandas wrote the setup tables to the same file
+  (lock error, then "truncated file"). The groups are now created and the file closed before pandas writes.
+- **SRX800/SRX600 importers** accept `ant_to_rec_dict=None` (every antenna belongs to `rec_id`), as `orion_import`
+  already did; previously `TypeError: 'NoneType' object is not iterable`.
+- **`epoch` dtype**: the SRX800/SRX600 importers cast `epoch` to `float32` (about two minutes of resolution at current
+  epoch values) while every other importer stores `int64`; appending to a project that already held Orion data failed
+  with "Cannot serialize the column [epoch]". Now `int64`.
+- **SRX800/SRX600** raise a clear `ValueError` when the `** Data Segment **` marker is missing (for example a
+  "Code_log data" listing) instead of `UnboundLocalError: dataRow`.
+- **`orion_import`** with `ant_to_rec_dict` filtered `Ant == 1` for every antenna instead of the loop variable.
+- **`make_recaptures_table`** read the whole `classified`, `presence` and `overlapping` tables once per receiver; it now
+  filters while reading (about 10x faster on a 20-million-row project). It also left-merged bouts and filled missing
+  bout numbers with 0, but bout numbers start at 0, so detections without a bout were attached to a real bout; it now
+  keeps only detections that belong to a bout.
+
+### Changed
+- `bout._detect_bouts` builds the presence table with DataFrames instead of one Python dict per detection (iterrows
+  over millions of detections was the bottleneck); output columns and values are unchanged.
+
 ### Planned
 - R package wrapper
 
