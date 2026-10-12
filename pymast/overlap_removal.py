@@ -183,7 +183,7 @@ class bout():
     overlap_reduction : Resolves overlapping detections between bouts
     formatter.time_to_event : Uses bout presence for TTE analysis
     """
-    def __init__(self, radio_project, rec_id, eps_multiplier=5, lag_window=9):
+    def __init__(self, radio_project, rec_id, eps_multiplier=5, lag_window=9, min_detections=1):
         """
         Initialize bout detection for a specific receiver.
         
@@ -194,12 +194,19 @@ class bout():
                                  Default 5 = ~40-50 sec for typical tags
             lag_window (int): Time window in seconds for lag calculations
                              Default 9 seconds (kept for compatibility, not used in DBSCAN)
+            min_detections (int): Smallest number of detections a bout must contain to be kept.
+                             Default 1 keeps every bout, including single heard pulses; use the
+                             project's detection_count (for example 5) to require a sustained presence.
+                             Applied after clustering, so it works for receivers that scan several
+                             frequencies (a Lotek SRX800 hears a tag at most about three times in a
+                             15 s window, which DBSCAN's min_samples cannot express).
         """
         from sklearn.cluster import DBSCAN
         
         self.db = radio_project.db
         self.rec_id = rec_id
         self.eps_multiplier = eps_multiplier
+        self.min_detections = min_detections
         self.lag_window = lag_window
         self.tags = radio_project.tags
         
@@ -264,6 +271,8 @@ class bout():
             
             # Filter out noise points (label = -1, though shouldn't happen with min_samples=1)
             fish_dat = fish_dat[fish_dat.bout_no != -1]
+            if self.min_detections > 1:     # keep only bouts with enough detections
+                fish_dat = fish_dat[fish_dat.groupby('bout_no').bout_no.transform('size') >= self.min_detections]
             
             # Assign to each detection (vectorised; one row per detection, same columns as before)
             fish_dat = fish_dat[['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id', 'bout_no']].copy()
