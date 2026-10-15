@@ -84,6 +84,15 @@ import os
 import pymast.predictors as predictors
 import sys
 
+def _epoch_seconds(time_stamp):
+    """Whole seconds since 1970-01-01 for a datetime Series, whatever its resolution.
+
+    Casting a datetime64 Series to int64 and dividing by 10**9 is only right for nanosecond resolution; pandas 3 parses strings to
+    microsecond or second resolution, which silently gave epochs that were 1000 or 10**9 times too small.
+    """
+    return ((time_stamp - pd.Timestamp("1970-01-01")) // pd.Timedelta(seconds=1)).astype("int64")
+
+
 def _append_raw_data(db_dir, telem_dat, data_columns=None):
     with pd.HDFStore(db_dir, mode='a') as store:
         append_kwargs = {
@@ -219,7 +228,7 @@ def ares(file_name,
         
     # now do this stuff to files regardless of type
     # compute epoch as integer seconds (int64) to avoid floating precision loss
-    telem_dat['epoch'] = (telem_dat.time_stamp.astype('int64') // 10**9).astype('int64')
+    telem_dat['epoch'] = _epoch_seconds(telem_dat.time_stamp)
     telem_dat['rec_type'] = np.repeat(rec_type,len(telem_dat))
     telem_dat['rec_id'] = np.repeat(rec_id,len(telem_dat))
     telem_dat['channels'] = np.repeat(channels,len(telem_dat))
@@ -378,7 +387,7 @@ def orion_import(file_name,
             print ("Invalid timestamps in raw data, cannot import")
         else:
             # create epoch as int64 seconds
-            telem_dat['epoch'] = (telem_dat.time_stamp.astype('int64') // 10**9).astype('int64')
+            telem_dat['epoch'] = _epoch_seconds(telem_dat.time_stamp)
             
             # drop unnecessary columns 
             telem_dat.drop (['Date','Time','Freq','Code','Site'],axis = 1, inplace = True)
@@ -472,7 +481,7 @@ def vr2_import(file_name,db_dir,study_tags, rec_id):
         telem_dat['transmitter'] = telem_dat['transmitter'].str.split("-", n = 2, expand = True)[2]
         telem_dat['transmitter'] = telem_dat.transmitter.astype(str)
         telem_dat.rename(columns = {'Receiver':'rec_id','transmitter':'freq_code'}, inplace = True)
-        telem_dat['epoch'] = (telem_dat.time_stamp.astype('int64') // 10**9).astype('int64')
+        telem_dat['epoch'] = _epoch_seconds(telem_dat.time_stamp)
         try:
             telem_dat.drop (['Date and Time (UTC)', 'Transmitter Name','Transmitter Serial','Sensor Value','Sensor Unit','Station Name','Latitude','Longitude','Transmitter Type','Sensor Precision'],axis = 1, inplace = True)
         except KeyError:
@@ -737,7 +746,7 @@ def srx1200(file_name,
         telem_dat['time_stamp'] = pd.to_datetime(telem_dat.time_stamp)
         
         # calculate Epoch as int64 seconds
-        telem_dat['epoch'] = (telem_dat.time_stamp.astype('int64') // 10**9).astype('int64')
+        telem_dat['epoch'] = _epoch_seconds(telem_dat.time_stamp)
         
         # format frequency code
         telem_dat['FreqNo'] = telem_dat['Freq [MHz]'].apply(lambda x: f"{x:.3f}" )
@@ -809,7 +818,7 @@ def srx1200(file_name,
         telem_dat['time_stamp'] = pd.to_datetime(telem_dat.time_stamp)
         
         # calculate Epoch
-        telem_dat['epoch'] = (telem_dat.time_stamp.astype('int64') // 10**9).astype('int64')
+        telem_dat['epoch'] = _epoch_seconds(telem_dat.time_stamp)
                 
         # format frequency code
         telem_dat['FreqNo'] = telem_dat['Freq [MHz]'].apply(lambda x: f"{x:.3f}" )
@@ -1463,7 +1472,7 @@ def srx600(file_name,
                 telem_dat_sub.drop(['day0','DayNumber'],axis = 1, inplace = True)
                 
                 # calculate unix epoch as int64 seconds
-                telem_dat_sub['epoch'] = (telem_dat_sub.time_stamp.astype('int64') // 10**9).astype('int64')
+                telem_dat_sub['epoch'] = _epoch_seconds(telem_dat_sub.time_stamp)
                 
                 # clean up some more
                 telem_dat_sub.drop (['Date','Time','Frequency','TagID','ChannelID','Antenna'],axis = 1, inplace = True)
@@ -1956,7 +1965,7 @@ def PIT(file_name,
         telem_dat['power'] = np.nan
 
     # compute epoch as int64 seconds and other derived fields
-    telem_dat['epoch'] = (pd.to_datetime(telem_dat['time_stamp']).astype('int64') // 10**9).astype('int64')
+    telem_dat['epoch'] = _epoch_seconds(pd.to_datetime(telem_dat['time_stamp']))
     telem_dat['channels'] = np.repeat(channels, len(telem_dat))
     telem_dat['scan_time'] = np.repeat(scan_time, len(telem_dat))
     telem_dat['rec_type'] = np.repeat(rec_type, len(telem_dat))

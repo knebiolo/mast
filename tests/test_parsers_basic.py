@@ -84,3 +84,26 @@ def test_orion_parser_with_type_header():
     assert record["channels"] == 1
     assert record["scan_time"] == pytest.approx(1.0)
     assert record["noise_ratio"] == pytest.approx(0.0)
+
+
+@pytest.mark.unit
+def test_orion_epoch_is_seconds_since_1970():
+    """Epoch must be whole seconds since 1970-01-01 whatever resolution pandas gives the parsed timestamps (pandas 3 gives microseconds)."""
+    temp_dir = Path(".pytest_cache")
+    temp_dir.mkdir(exist_ok=True)
+
+    file_path = temp_dir / "orion_epoch.txt"
+    db_path = temp_dir / "orion_epoch.h5"
+    if db_path.exists():
+        db_path.unlink()
+
+    colspecs = [(0, 12), (13, 23), (24, 30), (31, 35), (36, 45), (46, 54), (55, 60), (61, 65)]
+    data_line = _fixed_width_line(colspecs, ["2020-01-01", "00:00:01", "S1", "A1", "166.380", "TAG", "7", "50"])
+    _write_file(file_path, ["Date Time Site Ant Freq Type Code power", data_line])
+
+    parsers.orion_import(file_name=str(file_path), db_dir=str(db_path), rec_id="R_ORION", study_tags=["166.380 7"], scan_time=1.0, channels=1)
+
+    with pd.HDFStore(str(db_path), "r") as store:
+        raw = store.get("raw_data")
+
+    assert int(raw.iloc[0]["epoch"]) == 1577836801
