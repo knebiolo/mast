@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned
+- R package wrapper
+
+---
+
+## [1.2.0] - 2026-10-16
+
 ### Added
 - `bout(..., min_detections=1)`: drop bouts with fewer detections than this after clustering. The default keeps
   every bout (unchanged behaviour); a value such as the project's `detection_count` requires a sustained presence.
@@ -89,9 +96,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `bout`: gaps larger than eps start a new bout, in one vectorised pass (exactly what DBSCAN with `min_samples=1` returns in one dimension).
   The "Detected N bouts" message now counts bouts per tag.
 - `predictors.detection_history` is vectorised (no per-row string join or tile copies); identical output.
-
-### Planned
-- R package wrapper
 
 ---
 
