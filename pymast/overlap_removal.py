@@ -456,6 +456,61 @@ class bout():
         return bouts
 
 
+def _column_at(frame, column, indices):
+    """Values of `column` at the rows labelled `indices`; a positional array lookup when the index is 0..n-1 (the common case here)."""
+    index = frame.index
+    if isinstance(index, pd.RangeIndex) and index.start == 0 and index.step == 1:
+        return frame[column].to_numpy()[np.asarray(indices, dtype=np.int64)]
+    return frame.loc[indices, column].to_numpy()
+
+
+def _bout_summaries(fish_recaps, bout_table, expansion):
+    """Detections inside each bout window, with the window's mean posterior and median power.
+
+    For every bout (a row of `bout_table` with `min_epoch` and `max_epoch`, widened by `expansion` seconds each side) this returns the index
+    labels of the detections of one tag that fall inside the window, the mean `posterior_T` and the median `power`. The detections are sorted
+    once and each window is found by binary search, so the cost is linear in detections plus bouts; the original built a boolean mask over
+    all of the tag's detections for every bout, which is quadratic for a tag with many bouts.
+
+    Parameters
+    ----------
+    fish_recaps : pandas.DataFrame
+        Detections of one tag at one receiver, with `epoch` and optionally `posterior_T` and `power`; the index labels identify rows.
+    bout_table : pandas.DataFrame
+        Bouts of that tag, with `min_epoch` and `max_epoch`.
+    expansion : float
+        Seconds added either side of each bout (0 or None for none).
+
+    Returns
+    -------
+    list of dict
+        One per bout, in order, with keys `min_epoch`, `max_epoch` (expanded), `indices` (numpy array of index labels), `posterior`, `median_power`.
+    """
+    lo = bout_table['min_epoch'].to_numpy()
+    hi = bout_table['max_epoch'].to_numpy()
+    if expansion and expansion > 0:
+        lo, hi = lo - expansion, hi + expansion
+    n = len(bout_table)
+    if fish_recaps.empty:
+        return [{'min_epoch': lo[i], 'max_epoch': hi[i], 'indices': np.array([], dtype=fish_recaps.index.dtype), 'posterior': np.nan,
+                 'median_power': np.nan} for i in range(n)]
+    epoch = fish_recaps['epoch'].to_numpy()
+    order = np.argsort(epoch, kind='stable')
+    epoch = epoch[order]
+    labels = fish_recaps.index.to_numpy()[order]
+    posterior = fish_recaps['posterior_T'].to_numpy()[order] if 'posterior_T' in fish_recaps.columns else None
+    power = fish_recaps['power'].to_numpy()[order] if 'power' in fish_recaps.columns else None
+    first = np.searchsorted(epoch, lo, side='left')
+    last = np.searchsorted(epoch, hi, side='right')
+    out = []
+    for i in range(n):
+        a, b = first[i], max(last[i], first[i])
+        out.append({'min_epoch': lo[i], 'max_epoch': hi[i], 'indices': labels[a:b],
+                    'posterior': pd.Series(posterior[a:b]).mean(skipna=True) if posterior is not None else np.nan,
+                    'median_power': pd.Series(power[a:b]).median() if power is not None else np.nan})
+    return out
+
+
 class overlap_reduction:
     """
     Resolve overlapping detections using signal quality comparison.
@@ -720,8 +775,8 @@ class overlap_reduction:
         parent_mark_idx,
         child_mark_idx,
     ):
-        p_posteriors = parent_dat.loc[p_indices, 'posterior_T'].values if 'posterior_T' in parent_dat.columns else []
-        c_posteriors = child_dat.loc[c_indices, 'posterior_T'].values if 'posterior_T' in child_dat.columns else []
+        p_posteriors = _column_at(parent_dat, 'posterior_T', p_indices) if 'posterior_T' in parent_dat.columns else []
+        c_posteriors = _column_at(child_dat, 'posterior_T', c_indices) if 'posterior_T' in child_dat.columns else []
 
         if len(p_posteriors) == 0 or len(c_posteriors) == 0:
             decisions['keep_both'] += 1
@@ -1073,38 +1128,18 @@ class overlap_reduction:
                     raise RuntimeError(
                         f"Failed to read classified detections for rec_id '{node}': {exc}"
                     ) from exc
+            recaps = recaps.reset_index(drop=True)      # row labels are then positions, so index lists are cheap integer arrays
             node_recap_cache[node] = recaps  # Cache for later use
             
             node_bout_index[node] = {}
             node_bout_trees[node] = {}
             if bouts.empty or recaps.empty:
                 continue
-            # ensure epoch dtype numeric for comparisons
-            recaps_epoch = recaps['epoch']
             for fish_id, fish_bouts in bouts.groupby('freq_code'):
                 r_fish = recaps[recaps['freq_code'] == fish_id]
-                bout_list = []
-                intervals = []
-                for b_idx, bout_row in fish_bouts.reset_index(drop=True).iterrows():
-                    min_epoch = bout_row['min_epoch']
-                    max_epoch = bout_row['max_epoch']
-                    if bout_expansion and bout_expansion > 0:
-                        min_epoch = min_epoch - bout_expansion
-                        max_epoch = max_epoch + bout_expansion
-
-                    if not r_fish.empty:
-                        mask = (r_fish['epoch'] >= min_epoch) & (r_fish['epoch'] <= max_epoch)
-                        in_df = r_fish.loc[mask]
-                        indices = in_df.index.tolist()
-                        posterior = in_df['posterior_T'].mean(skipna=True) if 'posterior_T' in in_df.columns else np.nan
-                        median_power = in_df['power'].median() if 'power' in in_df.columns else np.nan
-                    else:
-                        indices = []
-                        posterior = np.nan
-                        median_power = np.nan
-
-                    bout_list.append({'min_epoch': min_epoch, 'max_epoch': max_epoch, 'indices': indices, 'posterior': posterior, 'median_power': median_power})
-                    intervals.append((min_epoch, max_epoch, b_idx))
+                fish_bouts = fish_bouts.reset_index(drop=True)
+                bout_list = _bout_summaries(r_fish, fish_bouts, bout_expansion)
+                intervals = [(info['min_epoch'], info['max_epoch'], b_idx) for b_idx, info in enumerate(bout_list)]
 
                 node_bout_index[node][fish_id] = bout_list
                 # build IntervalTree for this fish (only include intervals with numeric bounds)
@@ -1199,7 +1234,7 @@ class overlap_reduction:
                     p_power = p_info['median_power']
 
                     # skip bouts with insufficient detections
-                    if (not p_indices) or len(p_indices) < min_detections:
+                    if len(p_indices) == 0 or len(p_indices) < min_detections:
                         decisions['keep_both'] += 1
                         skip_reasons['parent_too_small'] += 1
                         continue
@@ -1248,7 +1283,7 @@ class overlap_reduction:
                         c_power = c_info['median_power']
 
                         # require minimum detections on both
-                        if (not c_indices) or len(c_indices) < min_detections:
+                        if len(c_indices) == 0 or len(c_indices) < min_detections:
                             decisions['keep_both'] += 1
                             skip_reasons['child_too_small'] += 1
                             continue
