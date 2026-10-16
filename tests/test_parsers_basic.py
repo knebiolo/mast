@@ -16,6 +16,12 @@ def _fixed_width_line(colspecs, values):
         buf[start:end] = list(text)
     return "".join(buf).rstrip()
 
+
+@pytest.mark.unit
+def test_ares_parser_basic(tmp_path):
+    file_path = tmp_path / "ares.csv"
+    db_path = tmp_path / "ares.h5"
+
     header = (
         "Date,Time,RxID,Freq,Antenna,Protocol,Code,Power,Squelch,Noise Level,"
         "Pulse Width 1,Pulse Width 2,Pulse Width 3,Pulse Interval 1,Pulse Interval 2,Pulse Interval 3"
