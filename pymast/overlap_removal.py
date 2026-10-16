@@ -212,10 +212,14 @@ class bout():
         
         # Load classified data for this receiver
         print(f"[bout] Loading classified data for {rec_id}")
-        rec_dat = pd.read_hdf(self.db, 'classified', where=f'rec_id == "{rec_id}"')
-        rec_dat = rec_dat[rec_dat.iter == rec_dat.iter.max()]
-        rec_dat = rec_dat[rec_dat.test == 1]
-        rec_dat = rec_dat[['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id']]
+        # Only the last classification round is used. Reading every round of every column first (the original) needs tens of gigabytes
+        # for a receiver with millions of detections after several rounds; the last round is found from the 'iter' column alone.
+        with pd.HDFStore(self.db, mode='r') as store:
+            rounds = store.select('classified', where=f'rec_id == "{rec_id}"', columns=['iter'])['iter']
+            last_round = rounds.max() if len(rounds) else None
+            rec_dat = (store.select('classified', where=f'(rec_id == "{rec_id}") & (iter == {int(last_round)}) & (test == 1)',
+                                    columns=['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id'])
+                       if last_round is not None else pd.DataFrame(columns=['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id']))
         rec_dat = rec_dat.astype({
             'freq_code': 'object',
             'epoch': 'int64',
