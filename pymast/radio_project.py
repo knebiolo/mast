@@ -1531,10 +1531,13 @@ class radio_project():
         release = self.tags['rel_date'] if 'rel_date' in self.tags.columns else None
         rows = []
         for rec in rec_ids:
-            with pd.HDFStore(self.db, mode='r') as store:
-                kept_all = store.select('classified', where=f'rec_id == "{rec}" & test == 1', columns=['iter', 'freq_code', 'time_stamp', 'cons_length'])
             noise = unused[unused.rec_id == rec].cons_length.to_numpy()
-            for it, kept in kept_all.groupby('iter'):
+            with pd.HDFStore(self.db, mode='r') as store:
+                rounds = sorted(store.select('classified', where=f'rec_id == "{rec}"', columns=['iter']).iter.unique())
+            for it in rounds:          # one round at a time: a large receiver across eight rounds does not fit in memory at once
+                with pd.HDFStore(self.db, mode='r') as store:
+                    kept = store.select('classified', where=f'rec_id == "{rec}" & iter == {int(it)} & test == 1',
+                                        columns=['freq_code', 'time_stamp', 'cons_length'])
                 row = {'iter': int(it), 'rec_id': rec, 'kept': len(kept), 'expected_false': ratio * len(noise),
                        'kept_before_release': (int((kept.time_stamp < kept.freq_code.map(release)).sum()) if release is not None else np.nan)}
                 row['expected_false_share'] = row['expected_false'] / len(kept) if len(kept) else np.nan
