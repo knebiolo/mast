@@ -147,6 +147,7 @@ class TestImportDispatchRegression:
         proj.study_tags = np.array(['A69-1601-12345'], dtype=object)
         proj.db = 'dummy.h5'
         proj.training_dir = 'dummy_training_dir'
+        proj._handle_duplicate_detections = lambda *_a, **_k: 0       # these tests check parser dispatch only; there is no database
         return proj
 
     def test_telem_data_import_passes_ka_format_through(self, monkeypatch):
