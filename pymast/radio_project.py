@@ -1529,23 +1529,30 @@ class radio_project():
         unused = trained[(trained.detection == 0) & trained.freq.isin(study_freqs)]
         unused = unused[[span.loc[f, 'min'] <= c <= span.loc[f, 'max'] for f, c in zip(unused.freq, unused.code)]]
         release = self.tags['rel_date'] if 'rel_date' in self.tags.columns else None
+        # one streaming pass over the classified table: tally, per receiver and round, what was kept
+        tally = {}
+        wanted = set(rec_ids)
+        with pd.HDFStore(self.db, mode='r') as store:
+            for chunk in store.select('classified', where='test == 1', columns=['iter', 'rec_id', 'freq_code', 'time_stamp', 'cons_length'],
+                                      chunksize=2_000_000):
+                chunk = chunk[chunk.rec_id.isin(wanted)]
+                if chunk.empty:
+                    continue
+                chunk = chunk.assign(ge3=chunk.cons_length >= 3, ge5=chunk.cons_length >= 5)
+                chunk['pre'] = (chunk.time_stamp < chunk.freq_code.map(release)) if release is not None else False
+                for (it, rec), g in chunk.groupby(['iter', 'rec_id']):
+                    t = tally.setdefault((int(it), rec), [0, 0, 0, 0])
+                    t[0] += len(g); t[1] += int(g.ge3.sum()); t[2] += int(g.ge5.sum()); t[3] += int(g.pre.sum())
         rows = []
-        for rec in rec_ids:
+        for (it, rec), (kept, ge3, ge5, pre) in sorted(tally.items(), key=lambda kv: (kv[0][1], kv[0][0])):
             noise = unused[unused.rec_id == rec].cons_length.to_numpy()
-            with pd.HDFStore(self.db, mode='r') as store:
-                rounds = sorted(store.select('classified', where=f'rec_id == "{rec}"', columns=['iter']).iter.unique())
-            for it in rounds:          # one round at a time: a large receiver across eight rounds does not fit in memory at once
-                with pd.HDFStore(self.db, mode='r') as store:
-                    kept = store.select('classified', where=f'rec_id == "{rec}" & iter == {int(it)} & test == 1',
-                                        columns=['freq_code', 'time_stamp', 'cons_length'])
-                row = {'iter': int(it), 'rec_id': rec, 'kept': len(kept), 'expected_false': ratio * len(noise),
-                       'kept_before_release': (int((kept.time_stamp < kept.freq_code.map(release)).sum()) if release is not None else np.nan)}
-                row['expected_false_share'] = row['expected_false'] / len(kept) if len(kept) else np.nan
-                for k in (3, 5):
-                    retained = int((kept.cons_length >= k).sum())
-                    row[f'retained_cons_ge_{k}'] = retained
-                    row[f'expected_false_share_cons_ge_{k}'] = ratio * float((noise >= k).sum()) / retained if retained else np.nan
-                rows.append(row)
+            row = {'iter': it, 'rec_id': rec, 'kept': kept, 'expected_false': ratio * len(noise),
+                   'kept_before_release': pre if release is not None else np.nan,
+                   'expected_false_share': ratio * len(noise) / kept if kept else np.nan}
+            for k, retained in ((3, ge3), (5, ge5)):
+                row[f'retained_cons_ge_{k}'] = retained
+                row[f'expected_false_share_cons_ge_{k}'] = ratio * float((noise >= k).sum()) / retained if retained else np.nan
+            rows.append(row)
         return pd.DataFrame(rows)
 
     def classification_summary(self,rec_id,reclass_iter = None): 
