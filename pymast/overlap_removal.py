@@ -212,14 +212,18 @@ class bout():
         
         # Load classified data for this receiver
         print(f"[bout] Loading classified data for {rec_id}")
-        # Only the last classification round is used. Reading every round of every column first (the original) needs tens of gigabytes
-        # for a receiver with millions of detections after several rounds; the last round is found from the 'iter' column alone.
+        # Only the last classification round is used. pandas reads whole rows from the file even when one column is asked for, so selecting
+        # the 'iter' column of a receiver's rows needs gigabytes after several rounds (about 27 GB for a 6-million-detection receiver
+        # after eight). Instead find the receiver's row coordinates, read the single 'iter' column, and read only the last round.
+        columns = ['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id']
         with pd.HDFStore(self.db, mode='r') as store:
-            rounds = store.select('classified', where=f'rec_id == "{rec_id}"', columns=['iter'])['iter']
-            last_round = rounds.max() if len(rounds) else None
-            rec_dat = (store.select('classified', where=f'(rec_id == "{rec_id}") & (iter == {int(last_round)}) & (test == 1)',
-                                    columns=['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id'])
-                       if last_round is not None else pd.DataFrame(columns=['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id']))
+            coordinates = store.select_as_coordinates('classified', where=f'rec_id == "{rec_id}"')
+            if len(coordinates):
+                last_round = int(store.select_column('classified', 'iter').iloc[coordinates].max())
+                rec_dat = store.select('classified', where=f'(rec_id == "{rec_id}") & (iter == {last_round}) & (test == 1)', columns=columns)
+            else:
+                rec_dat = pd.DataFrame(columns=columns)
+        rec_dat = rec_dat[columns]
         rec_dat = rec_dat.astype({
             'freq_code': 'object',
             'epoch': 'int64',
