@@ -410,7 +410,11 @@ class radio_project():
                           scan_time = 1, 
                           channels = 1, 
                           ant_to_rec_dict = None,
-                          ka_format = False):
+                          ka_format = False,
+                          layout = 'auto',
+                          scan_table = None,
+                          file_pattern = None,
+                          deduplicate = False):
         """
         Import raw telemetry data from receiver files into the project database.
         
@@ -433,6 +437,18 @@ class radio_project():
             Mapping of antenna IDs to receiver IDs
         ka_format : bool, optional
             Use Kleinschmidt Associates format (default: False)
+        layout : str, optional
+            For 'srx600' and 'srx800' receivers: 'auto' (default) identifies each file's layout from its first lines and uses the Lotek
+            "Code_log" or older SRX800 importers where the usual parsers cannot read it (files that are not recognised go to the usual
+            parser, as before); 'native' always uses the usual parser; 'codelog' or 'srx800_legacy' force one of the new importers.
+        scan_table : dict, optional
+            Channel -> frequency (MHz) for dump files that have no channel table of their own, for example {'1': '148.340', '2': '148.380'}.
+        file_pattern : str or list of str, optional
+            Only import files whose names match this glob pattern (or any of these patterns), for example '*.TXT'. Default: every file in the
+            directory, as before. Receivers write companion files (.hex, .cfg, .csv) next to the detections; a pattern keeps them out.
+        deduplicate : bool, optional
+            Overlapping downloads repeat detections. The number of repeated detections (same tag, second and power) is always logged as a
+            warning; with deduplicate=True the repeats are removed, keeping the first copy. Default False: results are unchanged.
         
         Raises
         ------
@@ -477,8 +493,13 @@ class radio_project():
         logger.info(f"Importing data for receiver {rec_id} (type: {rec_type})")
         logger.info(f"  Data directory: {file_dir}")
         
-        # list raw data files
-        tFiles = os.listdir(file_dir)
+        # list raw data files (not sub-folders, in a fixed order; optionally those matching file_pattern)
+        import fnmatch
+        patterns = [file_pattern] if isinstance(file_pattern, str) else (list(file_pattern) if file_pattern else None)
+        tFiles = sorted(f for f in os.listdir(file_dir) if not os.path.isdir(os.path.join(file_dir, f))
+                        and (patterns is None or any(fnmatch.fnmatch(f, pat) for pat in patterns)))
+        if layout not in ('auto', 'native', 'codelog', 'srx800_legacy'):
+            raise ValueError(f"layout must be 'auto', 'native', 'codelog' or 'srx800_legacy', not {layout!r}")
         
         if not tFiles:
             logger.warning(f"No files found in {file_dir}")
@@ -492,7 +513,21 @@ class radio_project():
             # get the complete file directory
             f_dir = os.path.join(file_dir,f)
             
-            if rec_type_norm == 'srx600' :
+            file_layout = 'native'
+            if rec_type_norm in ('srx600', 'srx800'):
+                file_layout = layout if layout != 'auto' else (parsers.detect_lotek_layout(f_dir) or 'native')
+                if file_layout == 'srx800':                # the layout the usual SRX800 parser reads
+                    file_layout = 'native'
+
+            if file_layout == 'codelog':
+                parsers.lotek_codelog(f_dir, db_dir, rec_id, self.study_tags, scan_time = scan_time, channels = channels,
+                                      ant_to_rec_dict = ant_to_rec_dict, scan_table = scan_table)
+
+            elif file_layout == 'srx800_legacy':
+                parsers.srx800_legacy(f_dir, db_dir, rec_id, self.study_tags, scan_time = scan_time, channels = channels,
+                                      ant_to_rec_dict = ant_to_rec_dict, scan_table = scan_table)
+
+            elif rec_type_norm == 'srx600' :
                 parsers.srx600(f_dir, db_dir, rec_id, self.study_tags, scan_time = scan_time, channels = channels, ant_to_rec_dict = ant_to_rec_dict)
             
             elif rec_type_norm == 'srx800':
@@ -525,6 +560,7 @@ class radio_project():
                 raise ValueError(f"No import routine available for receiver type: {rec_type}")
         
         logger.info(f"✓ Import complete for receiver {rec_id}: {len(tFiles)} file(s) processed")
+        self._handle_duplicate_detections(rec_id, deduplicate)
         
         # Calculate and display import statistics
         try:
@@ -619,6 +655,36 @@ class radio_project():
             print(f"Error calculating import statistics: {e}")
             logger.warning(f"Error calculating import statistics: {e}")
     
+    def _handle_duplicate_detections(self, rec_id, deduplicate):
+        """Report (always) and optionally remove detections repeated by overlapping downloads: same tag, second and power at one receiver."""
+        with pd.HDFStore(self.db, mode='r') as store:
+            if '/raw_data' not in store.keys():
+                return 0
+            raw = store.select('raw_data', where=f'rec_id == "{rec_id}"')
+        repeated = raw.duplicated(['freq_code', 'epoch', 'power'], keep='first')
+        n = int(repeated.sum())
+        if n == 0:
+            return 0
+        message = f"receiver {rec_id}: {n:,} of {len(raw):,} detections repeat an earlier one (same tag, second and power), probably from overlapping downloads"
+        if not deduplicate:
+            logger.warning(message + "; kept (pass deduplicate=True to remove them)")
+            warnings.warn(message + "; kept (pass deduplicate=True to remove them)", UserWarning)
+            return 0
+        logger.warning(message + "; removing")
+        kept = raw[~repeated.values]
+        with pd.HDFStore(self.db, mode='a') as store:
+            if '/raw_data_dedup_tmp' in store.keys():           # left behind by an interrupted earlier attempt
+                store.remove('raw_data_dedup_tmp')
+            store.append('raw_data_dedup_tmp', kept, format='table', data_columns=True, index=False,
+                         min_itemsize={'freq_code': 20, 'rec_type': 20, 'rec_id': 20})
+            if store.get_storer('raw_data_dedup_tmp').nrows < len(kept):
+                raise RuntimeError("could not stage the de-duplicated detections; the original detections were not touched")
+            store.remove('raw_data', where=f'rec_id == "{rec_id}"')
+            store.append('raw_data', store.select('raw_data_dedup_tmp'), format='table', data_columns=True, index=False,
+                         min_itemsize={'freq_code': 20, 'rec_type': 20, 'rec_id': 20})
+            store.remove('raw_data_dedup_tmp')
+        return n
+
     def get_fish(self, rec_id, train = True, reclass_iter = None):
         logger.info(f"Getting fish for receiver {rec_id}")
         logger.debug(f"  Mode: {'training' if train else 'classification'}, Iteration: {reclass_iter}")

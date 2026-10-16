@@ -81,8 +81,12 @@ import pandas as pd
 import numpy as np
 import datetime
 import os
+import re
+import logging
 import pymast.predictors as predictors
 import sys
+
+logger = logging.getLogger(__name__)
 
 def _epoch_seconds(time_stamp):
     """Whole seconds since 1970-01-01 for a datetime Series, whatever its resolution.
@@ -1243,6 +1247,190 @@ def srx800(file_name,
             
 
             print ('Data standardized and exported to hdf')
+
+# ---------------------------------------------------------------------------------------------------------------------------------------
+# Lotek text dumps that the SRX600 / SRX800 parsers above cannot read
+# ---------------------------------------------------------------------------------------------------------------------------------------
+_CODELOG_HEAD = re.compile(r"^\s*Code_log data:\s*$")
+_CODELOG_ROW = re.compile(r"^\s*(\d+)\s+(\d\d:\d\d:\d\d)\s+(\d+)\s+(\d+)\s+(\d+)\s+(-?\d+)\s+(\S+)\s+(\d+)\s+(\d+)\s+(\d\d:\d\d:\d\d)\s*$")
+_CODELOG_BATTERY = re.compile(r"^\s*(\d+)\s+(\d\d:\d\d:\d\d)\s+Battery (OK|Low)\s*$")
+_CODELOG_CONFIG = re.compile(r"^(changed:|Site number|Available memory|Codeset|Antenna\s+Gain|Master antenna|Scan |Active |Antennas =|Continuous record|"
+                             r"Noise blank|Upconverter|Filter:|Echo delay|DSP |CHANNEL|Environment history|Code_log data|\s+Start|\s*Date\s+Time|"
+                             r"\s*\d+\s+[\d.]+(\s+MHz)?\s*$)")
+_CODELOG_TABLE_ROW = re.compile(r"^\s*(\d+)\s+(\d+\.\d+)\s+MHz\s*$")
+_CODELOG_EMBEDDED = re.compile(r"\d{5} \d\d:\d\d:\d\d\s+\d+\s+\d+\s+\d+\s+-?\d+\s+N\.A\.")
+_LEGACY_HEAD = re.compile(r"^\s*DATE\s+TIME\s+CHA\s+PWR\s+ANT\s+CODE\s*$")
+_LEGACY_ROW = re.compile(r"^\s*(\d+)\s+(\d\d:\d\d:\d\d)\s+(\d+)\s+(-?\d+)\s+(\S+)\s+(\d+)\s*$")
+_LEGACY_TABLE_ROW = re.compile(r"^\s*(\d+)\s+(\d+\.\d+)\s*$")
+_EXCEL_EPOCH = datetime.datetime(1899, 12, 30)
+
+
+def detect_lotek_layout(file_name):
+    """Identify the text layout of a Lotek receiver file from its first lines.
+
+    Returns
+    -------
+    str or None
+        'codelog' (SRX600 and similar "Code_log data" dumps, Excel day numbers for dates, also dump fragments with no header),
+        'srx800_legacy' (older SRX800 export: columns DATE TIME CHA PWR ANT CODE, Excel day numbers), 'srx800' (the layout `srx800` reads),
+        or None when the file is not recognised.
+    """
+    with open(file_name, errors='replace') as handle:
+        head = ''.join(handle.readline() for _ in range(6))
+    lines = [x for x in head.splitlines() if x.strip()]
+    if not lines:
+        return None
+    if any(_CODELOG_ROW.match(x) or _CODELOG_BATTERY.match(x) for x in lines[:5]) or _CODELOG_EMBEDDED.search(head) or 'Environment history' in head \
+            or 'Code_log data' in head:
+        return 'codelog'
+    if lines[0].startswith('Environment History:'):
+        return 'srx800_legacy'
+    if lines[0].lstrip().startswith(('SRX800', 'Battery Status:', 'Filter Change:')):
+        return 'srx800'
+    return None
+
+
+def _read_scan_table(file_name, row_pattern):
+    """Channel -> frequency from every 'Active scan_table' block in the file. A channel that maps to two frequencies is an error."""
+    merged = {}
+
+    def merge(table):
+        for channel, freq in table.items():
+            if merged.setdefault(channel, freq) != freq:
+                raise ValueError(f"{file_name}: channel {channel} maps to both {merged[channel]} and {freq} MHz; the channel table is ambiguous")
+
+    current = None
+    with open(file_name, errors='replace') as handle:
+        for line in handle:
+            if 'Active scan_table' in line:
+                if current:
+                    merge(current)
+                current = {}
+            elif current is not None:
+                m = row_pattern.match(line)
+                if m:
+                    current[m.group(1)] = f"{float(m.group(2)):.3f}"
+                elif not line.lstrip().startswith('CHANNEL'):       # any other line ends the table
+                    merge(current)
+                    current = None
+    if current:
+        merge(current)
+    return merged
+
+
+def _lotek_text_detections(file_name, layout, scan_table=None):
+    """Detections of a Lotek text dump as a DataFrame, plus the lines that could not be read.
+
+    Returns (detections, damaged) where detections has columns time_stamp, power, freq_code and damaged is a list of (line_number, text).
+    Lines that belong to neither the data nor the configuration blocks (memory-dump damage, a record cut off at the end of the file) are
+    returned in `damaged` and never silently dropped; if more than 5 percent of a file (and more than 10 lines) is damaged a ValueError is
+    raised, because that is more than damage.
+    """
+    codelog = layout == 'codelog'
+    table_row = _CODELOG_TABLE_ROW if codelog else _LEGACY_TABLE_ROW
+    table = _read_scan_table(file_name, table_row)
+    if not table:
+        if scan_table is None:
+            raise ValueError(f"{file_name}: no channel table (Active scan_table) in the file, so channels cannot be mapped to frequencies. "
+                             "Pass scan_table={'1': '148.340', ...} (for example the table of another file from the same receiver)")
+        table = {str(k): f"{float(v):.3f}" for k, v in scan_table.items()}
+    with open(file_name, errors='replace') as handle:
+        lines = handle.read().splitlines()
+    has_header = any((_CODELOG_HEAD if codelog else _LEGACY_HEAD).match(x) for x in lines)
+    in_data = not has_header
+    rows, damaged = [], []
+    for n, line in enumerate(lines, 1):
+        stripped = line.strip()
+        if not in_data:
+            in_data = bool((_CODELOG_HEAD if codelog else _LEGACY_HEAD).match(line))
+            continue
+        if not stripped or stripped in ('End of Data', 'ID Only Records:'):
+            continue
+        if codelog:
+            if _CODELOG_BATTERY.match(line):
+                continue
+            m = _CODELOG_ROW.match(line)
+            if not m:
+                if not _CODELOG_CONFIG.match(line):
+                    damaged.append((n, line))
+                continue
+            day, clock, channel, code, _antenna, power = m.group(1), m.group(2), m.group(3), m.group(4), m.group(5), m.group(6)
+        else:
+            if line.startswith('End of'):
+                continue
+            m = _LEGACY_ROW.match(line)
+            if not m:
+                damaged.append((n, line))
+                continue
+            day, clock, channel, power, _antenna, code = m.groups()
+        if channel not in table:                  # a channel the receiver was not scanning: garbled record
+            damaged.append((n, line))
+            continue
+        rows.append((day, clock, table[channel], code, power))
+    if len(damaged) > max(10, 0.05 * max(len(lines), 1)):
+        raise ValueError(f"{file_name}: {len(damaged)} of {len(lines)} lines are unreadable; that is more than file damage (first: {damaged[0][1][:80]!r})")
+    if not rows:
+        return pd.DataFrame({'time_stamp': pd.to_datetime([]), 'power': [], 'freq_code': []}), damaged
+    raw = pd.DataFrame(rows, columns=['day', 'clock', 'freq', 'code', 'power'])
+    hms = raw.clock.str.split(':', expand=True).astype(int)
+    stamp = _EXCEL_EPOCH + pd.to_timedelta(raw.day.astype(int), unit='D') + pd.to_timedelta(hms[0] * 3600 + hms[1] * 60 + hms[2], unit='s')
+    return pd.DataFrame({'time_stamp': pd.to_datetime(stamp).astype('datetime64[ns]'), 'power': raw.power.astype(float),
+                         'freq_code': raw.freq + ' ' + raw.code.astype(int).astype(str)}), damaged
+
+
+def _import_lotek_text(file_name, db_dir, rec_id, study_tags, scan_time, channels, ant_to_rec_dict, layout, rec_type, scan_table):
+    if ant_to_rec_dict is not None:
+        raise NotImplementedError(f"{layout} files hold one antenna per receiver; ant_to_rec_dict is not supported for this layout")
+    detections, damaged = _lotek_text_detections(file_name, layout, scan_table=scan_table)
+    if damaged:
+        logger.warning(f"{file_name}: {len(damaged)} damaged line(s) skipped (kept in the /import_damaged_lines table)")
+        record = pd.DataFrame({'rec_id': rec_id, 'file': os.path.basename(file_name), 'line_no': [n for n, _ in damaged],
+                               'text': [repr(t)[:200] for _, t in damaged]})
+        with pd.HDFStore(db_dir, mode='a') as store:
+            store.append('import_damaged_lines', record, format='table', data_columns=True,
+                         min_itemsize={'rec_id': 20, 'file': 120, 'text': 210})
+    if detections.empty:
+        logger.warning(f"{file_name}: no detections")
+        return
+    detections['epoch'] = _epoch_seconds(detections.time_stamp).values
+    detections['noise_ratio'] = predictors.noise_ratio(5.0, detections.freq_code.values, detections.epoch.values, study_tags)
+    detections['scan_time'] = np.repeat(scan_time, len(detections))
+    detections['channels'] = np.repeat(channels, len(detections))
+    detections['rec_id'] = np.repeat(rec_id, len(detections))
+    detections['rec_type'] = np.repeat(rec_type, len(detections))
+    detections = detections.astype({'power': 'float32', 'freq_code': 'object', 'time_stamp': 'datetime64[ns]', 'scan_time': 'float32',
+                                    'channels': 'int32', 'rec_type': 'object', 'epoch': 'int64', 'noise_ratio': 'float32', 'rec_id': 'object'})
+    _append_raw_data(db_dir, detections[['power', 'time_stamp', 'epoch', 'freq_code', 'noise_ratio', 'scan_time', 'channels', 'rec_id', 'rec_type']],
+                     data_columns=True)
+
+
+def lotek_codelog(file_name, db_dir, rec_id, study_tags, scan_time=1., channels=1, ant_to_rec_dict=None, scan_table=None):
+    """Import a Lotek "Code_log data" text dump (SRX600 and similar) into the raw_data table.
+
+    These files list one record per row (start date and time as Excel day numbers, channel, code, antenna, power, events, stop date and
+    time), interleaved with battery lines and repeated configuration blocks. Channels are converted to frequencies with the file's own
+    `Active scan_table`; a dump fragment that has none can be given the table of another file from the same receiver through `scan_table`.
+    Damaged lines are skipped, reported in the log and kept in the `/import_damaged_lines` table.
+
+    Parameters
+    ----------
+    file_name, db_dir, rec_id, study_tags, scan_time, channels : as for the other importers.
+    ant_to_rec_dict : not supported (one antenna per receiver); raises NotImplementedError if given.
+    scan_table : dict, optional
+        Channel -> frequency (MHz) used when the file has no scan table of its own.
+    """
+    _import_lotek_text(file_name, db_dir, rec_id, study_tags, scan_time, channels, ant_to_rec_dict, 'codelog', 'srx600', scan_table)
+
+
+def srx800_legacy(file_name, db_dir, rec_id, study_tags, scan_time=1., channels=1, ant_to_rec_dict=None, scan_table=None):
+    """Import the older SRX800 text export (columns DATE TIME CHA PWR ANT CODE, Excel day numbers) into the raw_data table.
+
+    Same conventions as `lotek_codelog`: channels are converted with the file's `Active scan_table` (or `scan_table`), damaged lines are
+    reported and kept in `/import_damaged_lines`.
+    """
+    _import_lotek_text(file_name, db_dir, rec_id, study_tags, scan_time, channels, ant_to_rec_dict, 'srx800_legacy', 'srx800', scan_table)
+
+
 
 def srx600(file_name,
              db_dir,
