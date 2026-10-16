@@ -66,6 +66,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `classify()` ignored `threshold_ratio` (always 1.0). It is now honoured; the default is unchanged.
 - Clear errors for an empty or single-class training set, missing predictor columns and unknown receivers (a bare `ZeroDivisionError` before).
 
+### Added (importers)
+- `parsers.lotek_codelog` and `parsers.srx800_legacy`: import the Lotek "Code_log data" text dumps (SRX600 and similar) and the older SRX800
+  text export (columns DATE TIME CHA PWR ANT CODE), both with Excel day numbers for dates. Channels are converted to frequencies with the
+  file's own `Active scan_table`, or with `scan_table=` for a dump fragment that has none; a channel that maps to two frequencies is an error.
+  Damaged lines (memory-dump damage, a record cut off at the end of a file) are skipped, logged and kept in the `/import_damaged_lines`
+  table; if more than 5 percent of a file (and more than 10 lines) is damaged a `ValueError` is raised.
+- `parsers.detect_lotek_layout`; `telem_data_import(layout='auto')` uses it for `srx600`/`srx800` receivers and falls back to the usual
+  parser for files it does not recognise, so existing imports are unchanged.
+- `telem_data_import(file_pattern=...)` keeps companion files (.hex, .cfg, .csv) out; files are now imported in sorted order and
+  sub-folders are skipped.
+- Overlapping downloads repeat detections. `telem_data_import` now always warns how many detections repeat an earlier one (same tag, second
+  and power); `deduplicate=True` removes them (first copy kept). Off by default, so results are unchanged.
+- Checked on 100 real files (SRX600 dumps and legacy SRX800 exports, four seasons): detection and damaged-line counts equal an independent
+  line-by-line parse in all 93 files that carry their own channel table; the other 7 are headerless fragments that need `scan_table=`.
+
 ### Changed (1.2)
 - Speed, with output verified identical to the previous code on real data (2016 project, 5.3 million detections): classification of a
   whole receiver set 31 times faster (7.2 min to 14 s per round), training 53 times faster (12.9 min to 15 s), bouts vectorised (identical
