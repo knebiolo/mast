@@ -12,6 +12,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.2] - 2026-10-16
+
+### Fixed
+- **`bout` still needed gigabytes after several classification rounds.** The 1.2.1 change read only the `iter` column to find the last
+  round, but pandas reads whole rows from the file even when one column is requested (3.0 GB for a 5.4-million-row receiver; about 27 GB
+  for 48 million). The last round is now found from row coordinates plus the single `iter` column (0.36 GB, 2.5 times faster); `bout` on that
+  receiver peaks at 1.0 GB. The bouts are identical.
+
+---
+
 ## [1.2.1] - 2026-10-16
 
 ### Fixed
@@ -19,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the last round. The last round is now found from the `iter` column alone and only the needed columns of that round are read; the bouts
   are identical (checked on 1.5 million real detections). `classify_until_stable` makes multi-round tables normal, so this mattered.
 
-Note: `v1.2.0` was tagged on GitHub but never published to PyPI; 1.2.1 is the first PyPI release of the 1.2 changes.
+Note: `v1.2.0` and `v1.2.1` were tagged on GitHub but never published to PyPI; 1.2.2 is the first PyPI release of the 1.2 changes.
 
 ---
 
