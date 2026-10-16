@@ -60,3 +60,22 @@ def test_empty_receiver(tmp_path):
     classified = _classified(np.random.default_rng(1), rec="OTHER")
     project = _project(tmp_path, classified, {"150.0 1": 2.0})
     assert bout(project, "R1").presence_df.empty
+
+
+@pytest.mark.unit
+def test_only_the_last_classification_round_is_used(tmp_path):
+    rng = np.random.default_rng(9)
+    last = _classified(rng)
+    earlier = last.assign(iter=np.int32(1))
+    earlier.loc[earlier.index[::3], "test"] = np.int32(0)              # round 1 called a third of the detections false
+    middle = last.assign(iter=np.int32(2), epoch=last.epoch + 10_000)   # different detections: must not leak into the result
+    final = last.assign(iter=np.int32(3))
+    final.loc[final.index[::5], "test"] = np.int32(0)                  # the last round drops a fifth of them
+    classified = pd.concat([earlier, middle, final], ignore_index=True)
+    pulse = {"150.0 1": 2.0, "150.0 2": 3.0, "151.0 7": 8.0}
+    got = bout(_project(tmp_path, classified, pulse), "R1", eps_multiplier=5, lag_window=2, min_detections=1).presence_df
+    want = _oracle(final[final.test == 1], pulse, 5, 1)
+    key = ["freq_code", "epoch", "bout_no"]
+    got = got[key].sort_values(["freq_code", "epoch"]).reset_index(drop=True).astype({"freq_code": str, "bout_no": "int64"})
+    want = want[key].sort_values(["freq_code", "epoch"]).reset_index(drop=True).astype({"freq_code": str, "bout_no": "int64"})
+    pd.testing.assert_frame_equal(got, want)
