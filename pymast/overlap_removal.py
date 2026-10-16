@@ -238,56 +238,54 @@ class bout():
         
     def _detect_bouts(self):
         """
-        Run DBSCAN temporal clustering to identify bouts.
-        Called automatically during __init__.
+        Identify bouts: runs of detections of one tag whose successive gaps are at most `eps_multiplier` times its pulse interval.
+
+        This is exactly what DBSCAN(eps, min_samples=1) returns for one-dimensional data (two points are neighbours when their distance is
+        at most eps, so clusters are the runs between gaps larger than eps), computed in one vectorised pass over all tags instead of one
+        DBSCAN fit per tag. Bout numbers restart at 0 for each tag, as before. Called automatically during __init__.
         """
-        from sklearn.cluster import DBSCAN
-        import logging
-        
-        logger = logging.getLogger(__name__)
-        
-        print(f"[bout] Running DBSCAN bout detection for {self.rec_id}")
-        presence_list = []
-        
-        for fish in self.fishes:
-            fish_dat = self.data[self.data.freq_code == fish].copy()
-            
-            if len(fish_dat) == 0:
-                continue
-            
-            # Get pulse rate for this fish
-            try:
-                pulse_rate = self.tags.loc[fish, 'pulse_rate']
-            except (KeyError, AttributeError):
-                pulse_rate = 8.0  # Default if not found
-            
-            # Calculate epsilon: pulse_rate * multiplier
-            eps = pulse_rate * self.eps_multiplier
-            
-            # DBSCAN clustering on epoch (1D temporal data)
-            epochs = fish_dat[['epoch']].values
-            clustering = DBSCAN(eps=eps, min_samples=1).fit(epochs)
-            fish_dat['bout_no'] = clustering.labels_
-            
-            # Filter out noise points (label = -1, though shouldn't happen with min_samples=1)
-            fish_dat = fish_dat[fish_dat.bout_no != -1]
-            if self.min_detections > 1:     # keep only bouts with enough detections
-                fish_dat = fish_dat[fish_dat.groupby('bout_no').bout_no.transform('size') >= self.min_detections]
-            
-            # Assign to each detection (vectorised; one row per detection, same columns as before)
-            fish_dat = fish_dat[['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id', 'bout_no']].copy()
-            fish_dat['class'] = 'study'
-            fish_dat['det_lag'] = 0  # Not meaningful for DBSCAN, kept for compatibility
-            presence_list.append(fish_dat)
-        
-        # Store results
-        if presence_list:
-            self.presence_df = pd.concat(presence_list, ignore_index=True)
-            print(f"[bout] Detected {self.presence_df.bout_no.nunique()} bouts across {len(self.fishes)} fish")
+        print(f"[bout] Running bout detection for {self.rec_id}")
+        data = self.data
+        if len(data) == 0:
+            self.presence_df = pd.DataFrame()
+            print(f"[bout] No bouts detected for {self.rec_id}")
+            return
+        pulse = pd.Series(np.nan, index=data.index)
+        try:
+            rates = self.tags['pulse_rate']
+            if rates.index.has_duplicates:
+                rates = rates[~rates.index.duplicated(keep='first')]
+            pulse = data.freq_code.map(rates)
+        except (KeyError, AttributeError):
+            pass
+        pulse = pulse.fillna(8.0).to_numpy(dtype=float)          # 8 s when a tag is missing from the tag table, as before
+        eps = pulse * self.eps_multiplier
+
+        epoch = data.epoch.to_numpy()
+        fish = data.freq_code.to_numpy()
+        first_row = np.concatenate(([True], fish[1:] != fish[:-1]))
+        gap = np.concatenate(([np.inf], np.diff(epoch)))
+        gap[first_row] = np.inf
+        new_bout = first_row | (gap > eps)
+        running = np.cumsum(new_bout) - 1                          # bout counter over the whole table
+        first_index = np.flatnonzero(first_row)
+        per_fish_offset = np.repeat(running[first_index], np.diff(np.append(first_index, len(fish))))
+        presence = data.assign(bout_no=(running - per_fish_offset).astype('int64'))
+
+        if self.min_detections > 1:     # keep only bouts with enough detections
+            size = presence.groupby([presence.freq_code, presence.bout_no]).bout_no.transform('size')
+            presence = presence[size >= self.min_detections]
+        presence = presence[['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id', 'bout_no']].copy()
+        presence['class'] = 'study'
+        presence['det_lag'] = 0  # Not meaningful for DBSCAN, kept for compatibility
+        if len(presence):
+            self.presence_df = presence.reset_index(drop=True)
+            n_bouts = presence.groupby(['freq_code', 'bout_no']).ngroups
+            print(f"[bout] Detected {n_bouts} bouts across {presence.freq_code.nunique()} fish")
         else:
             self.presence_df = pd.DataFrame()
             print(f"[bout] No bouts detected for {self.rec_id}")
-    
+
     def presence(self):
         """
         Write bout results to /presence table in HDF5.

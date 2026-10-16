@@ -733,98 +733,76 @@ class radio_project():
         """
         '''A class object for a training dataframe and related data objects.'''
     
-        # Pull raw data 
-        train_dat = pd.read_hdf(self.db,
-                                'raw_data',
-                                where=f'(freq_code == "{freq_code}") & (rec_id == "{rec_id}")')
-        
-        # Data management
+        self.train_receiver(rec_id, freq_codes=[freq_code])
+
+    TRAINED_DTYPES = {'power': 'float32', 'time_stamp': 'datetime64[ns]', 'epoch': 'int64', 'freq_code': 'object', 'noise_ratio': 'float32',
+                      'scan_time': 'int32', 'channels': 'int32', 'rec_type': 'object', 'rec_id': 'object', 'detection': 'int32',
+                      'lag': 'float32', 'lag_diff': 'float32', 'det_hist': 'object', 'hit_ratio': 'float32', 'cons_det': 'int32',
+                      'cons_length': 'float32'}
+
+    def _train_fish_frame(self, train_dat, freq_code):
+        """Predictor variables and the detection class for one tag at one receiver (the body of the original `train`)."""
         train_dat['time_stamp'] = pd.to_datetime(train_dat.time_stamp)
-        train_dat['epoch'] = (train_dat.time_stamp.astype('int64') // 10**9).astype('int64')
+        train_dat['epoch'] = parsers._epoch_seconds(train_dat.time_stamp).values
         train_dat.sort_values(by='epoch', inplace=True)
-        
         train_dat.drop_duplicates(subset='time_stamp', keep='first', inplace=True)
-        
-        # Object variables
-        if pd.api.types.is_integer_dtype(self.receivers.index.dtype):   # numeric receiver ids (string ids are 'object' or 'str')
-            rec_id = np.int64(rec_id)
-        rec_type = self.receivers.at[rec_id, 'rec_type']
-    
-        # Detection class
-        if freq_code in self.study_tags:
-            plausible = 1
-        else:
-            plausible = 0
-    
-        # Get rate
-        if freq_code in self.tags.index:
-            pulse_rate = self.tags.at[freq_code, 'pulse_rate']
-        else:
-            pulse_rate = 673.
-    
-        mort_rate = 8888.
+
+        plausible = 1 if freq_code in self.study_tags else 0       # detection class: a tag that was deployed is plausible
+        pulse_rate = self.tags.at[freq_code, 'pulse_rate'] if freq_code in self.tags.index else 673.
         train_dat['detection'] = np.repeat(plausible, len(train_dat))
         train_dat['lag'] = train_dat.epoch.diff()
         train_dat['lag_diff'] = train_dat.lag.diff()
-        
-        # if freq_code in self.tags.index:
-        #     print ('check')
-            
-        # Apply the optimized detection history function to the entire dataset at once
+
         detection_history, hit_ratio_arr, cons_det_arr, max_count_arr = predictors.detection_history(
-            train_dat['epoch'].values,
-            pulse_rate,
-            self.det_count,
-            train_dat['channels'].values,
-            train_dat['scan_time'].values,
-        )
-    
-        # Convert detection history arrays to concatenated strings outside Numba
-        det_hist_string_arr = np.array([''.join(row.astype(str)) for row in detection_history])
-        
-        # Assign back to the DataFrame
-        train_dat['det_hist'] = det_hist_string_arr
+            train_dat['epoch'].values, pulse_rate, self.det_count, train_dat['channels'].values, train_dat['scan_time'].values)
+        train_dat['det_hist'] = (detection_history.astype(np.uint8) + 48).view(f'S{detection_history.shape[1]}').ravel().astype('U').astype(object)
         train_dat['hit_ratio'] = hit_ratio_arr
         train_dat['cons_det'] = cons_det_arr
         train_dat['cons_length'] = max_count_arr
-    
         train_dat.fillna(value=9999999, inplace=True)
-        
-        # Ensure data types are correct
+        return train_dat
+
+    def train_receiver(self, rec_id, freq_codes=None, write=True):
+        """Calculate the training predictors for every tag heard at one receiver, in a single pass.
+
+        Reads the receiver's detections once, applies the per-tag computation of `train` to each code, and appends one table to
+        `/trained`. Beacon and test tags are skipped, as in `get_fish(train=True)`. Orders of magnitude faster than calling `train`
+        per tag, which reads and writes the database once per tag.
+
+        Parameters
+        ----------
+        rec_id : str
+            Receiver to train on.
+        freq_codes : iterable of str, optional
+            Restrict to these codes (default: every code heard at the receiver except beacon and test tags).
+        write : bool, optional
+            Append to `/trained` (default); if False the table is returned instead.
+        """
+        if rec_id not in self.receivers.index and not (pd.api.types.is_integer_dtype(self.receivers.index.dtype) and np.int64(rec_id) in self.receivers.index):
+            raise ValueError(f"Receiver '{rec_id}' not found in receiver_data")
+        dat = pd.read_hdf(self.db, 'raw_data', where=f'rec_id == "{rec_id}"')
+        if freq_codes is not None:
+            dat = dat[dat.freq_code.isin(set(freq_codes))]
+        else:
+            skip = set(self.tags.index[self.tags.tag_type.astype(str).str.lower().isin(['test', 'beacon'])])
+            dat = dat[~dat.freq_code.isin(skip)]
+        frames = [self._train_fish_frame(group.copy(), freq_code) for freq_code, group in dat.groupby('freq_code', sort=True)]
+        if not frames:
+            logger.info(f"  nothing to train on at receiver {rec_id}")
+            return None
+        out = pd.concat(frames, ignore_index=True)
         try:
-            train_dat = train_dat.astype({'power': 'float32', 
-                                          'time_stamp': 'datetime64[ns]',
-                                          'epoch': 'int64',
-                                          'freq_code': 'object',
-                                          'noise_ratio': 'float32',
-                                          'scan_time': 'int32',
-                                          'channels': 'int32',
-                                          'rec_type': 'object',
-                                          'rec_id': 'object',
-                                          'detection': 'int32',
-                                          'lag': 'float32',
-                                          'lag_diff': 'float32',
-                                          'det_hist': 'object',
-                                          'hit_ratio': 'float32',
-                                          'cons_det': 'int32',
-                                          'cons_length': 'float32'})
-        except ValueError:
-            logger.debug(f"  Data type conversion issue for {freq_code} at {rec_id}")
-            
-        # Append to HDF5
+            out = out.astype(self.TRAINED_DTYPES)
+        except ValueError as exc:
+            raise ValueError(f"cannot convert the training table for receiver {rec_id} to the stored column types: {exc}") from exc
+        if not write:
+            return out
         with pd.HDFStore(self.db, mode='a') as store:
-            store.append(key='trained',
-                         value=train_dat, 
-                         format='table', 
-                         index=False,
-                         min_itemsize={'freq_code': 20,
-                                       'rec_type': 20,
-                                       'rec_id': 20,
-                                       'det_hist': 20},
-                         append=True, 
-                         chunksize=1000000)
-    
-        logger.info(f"✓ Training complete: {freq_code} at {rec_id} - Plausibility: {plausible:.2f}")
+            store.append(key='trained', value=out, format='table', index=False,
+                         min_itemsize={'freq_code': 20, 'rec_type': 20, 'rec_id': 20, 'det_hist': 20},
+                         append=True, chunksize=1000000)
+        logger.info(f"Training complete: {len(frames)} codes ({int(out.detection.sum())} plausible detections) at {rec_id}")
+        return None
 
     def training_summary(self,rec_type,site = None):
         logger.info(f"Generating training summary for {rec_type}")
