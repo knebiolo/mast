@@ -88,6 +88,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Checked on 100 real files (SRX600 dumps and legacy SRX800 exports, four seasons): detection and damaged-line counts equal an independent
   line-by-line parse in all 93 files that carry their own channel table; the other 7 are headerless fragments that need `scan_table=`.
 
+### Fixed (packaging and CI)
+- **Python 3.9**: `pip install pymast` resolved numpy 2.0.2, but PyTables 3.9.x is built against numpy 1.x, so `import tables` failed with
+  "numpy.dtype size changed". numpy is now capped below 2 on Python 3.9 (`pyproject.toml`, `requirements.txt`); 3.10 and later are unchanged.
+- **CI had been red since September** at the first flake8 step, so the test suite never ran there. Two causes: `test_ares_parser_basic` had
+  lost its decorator and `def` line in an old refactor (its body was unreachable code), and `scripts/07_time_to_event_model.py` called an
+  undefined name. Both fixed; the ARES parser test runs again. CI now passes on Python 3.9, 3.10 and 3.11.
+
 ### Changed (1.2)
 - Speed, with output verified identical to the previous code on real data (2016 project, 5.3 million detections): classification of a
   whole receiver set 31 times faster (7.2 min to 14 s per round), training 53 times faster (12.9 min to 15 s), bouts vectorised (identical
