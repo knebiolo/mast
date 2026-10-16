@@ -991,7 +991,7 @@ class radio_project():
                                           'rec_type':20,
                                           'rec_id':20})  
         
-    def create_training_data(self, rec_type=None, reclass_iter=None, rec_list=None):
+    def create_training_data(self, rec_type=None, reclass_iter=None, rec_list=None, columns=None):
         """
         Function to create a training dataset for the current round of classification.
         The function supports multiple pathways for generating training data, including 
@@ -1011,6 +1011,9 @@ class radio_project():
             A list of receiver IDs to filter the data by. If provided, the function 
             queries the HDF database using this list directly rather than the receiver 
             type (`rec_type`).
+        columns : list of str, optional
+            Predictor columns to return (plus `detection`). Reading only these keeps the training set small enough for seasons of tens of
+            millions of detections; the rows are exactly those returned without this option. Default: every column, as before.
     
         Returns
         -------
@@ -1025,6 +1028,8 @@ class radio_project():
         - Reclassification logic is based on contributions from T. Castro-Santos.
         """
         logger.debug(f"  Creating training data (rec_type={rec_type}, iter={reclass_iter}, rec_list={rec_list})")
+        if columns is not None:
+            return self._training_columns(rec_type, reclass_iter, rec_list, list(columns))
         
         if rec_list is not None:
             # Construct the query for multiple receiver IDs using the OR operator
@@ -1341,6 +1346,204 @@ class radio_project():
         """
         self.classify_receiver(rec_id, fields, training_data=training_data, reclass_iter=reclass_iter,
                                threshold_ratio=threshold_ratio, freq_codes=[freq_code], legacy=legacy)
+
+    def _training_columns(self, rec_type, reclass_iter, rec_list, columns):
+        """create_training_data restricted to `columns`; same rows as the full version."""
+        if rec_list is not None:
+            query = " | ".join(f'rec_id == "{r}"' for r in rec_list)
+        elif rec_type is not None:
+            query = f'rec_type == "{rec_type}"'
+        else:
+            raise ValueError("Either 'rec_type' or 'rec_list' must be provided to create training data.")
+        with pd.HDFStore(self.db, mode='r') as store:
+            train = store.select('trained', where=query, columns=['detection'] + columns)
+            if reclass_iter is not None:
+                train = train[train['detection'] == 0]
+                where = f'iter == {reclass_iter - 1} & test == 1'
+                if rec_list is not None:
+                    where += f' & ({query})'
+                trues = store.select('classified', where=where, columns=['test'] + columns).rename(columns={'test': 'detection'})
+                train = pd.concat([train, trues], ignore_index=True)
+        return train.reset_index(drop=True)
+
+    ROUNDS_COLUMNS = ['iter', 'rec_id', 'detections', 'true', 'false', 'flipped', 'flip_share', 'true_change']
+
+    def _read_table(self, key):
+        with pd.HDFStore(self.db, mode='r') as store:
+            return store.select(key) if '/' + key in store.keys() else None
+
+    def classify_until_stable(self, rec_ids=None, fields=('hit_ratio', 'cons_length', 'noise_ratio', 'lag_diff'), threshold_ratio=1.0,
+                              flip_tol=0.005, count_tol=0.01, max_iter=8, legacy=False, group_by='rec_type'):
+        """Classify, then reclassify, until the result is stable (the non-interactive form of `reclassify`).
+
+        Round 1 classifies the raw detections. Round k >= 2 trains on the known-false training detections plus the detections round k-1
+        called true, and classifies those. Receivers are grouped (by default by their `rec_type`) and each group is trained and classified
+        together. The loop stops when, for every receiver, fewer than `flip_tol` of the detections change class between two rounds and the
+        number called true moves by less than `count_tol`, or after `max_iter` rounds; in the latter case a warning says which receivers
+        were still changing. Rounds and per-receiver progress are stored in `/classification_rounds` and `/classification_progress`, so an
+        interrupted run resumes at the first unfinished receiver.
+
+        Self-training can keep shedding real detections round after round, so 'nothing changes' is not a safe stopping rule on its own:
+        read `expected_false_share` for each round as well.
+
+        Parameters
+        ----------
+        rec_ids : list of str, optional
+            Receivers to classify (default: every receiver with raw data).
+        fields : sequence of str
+            Predictors in the likelihood model.
+        threshold_ratio : float
+            Posterior ratio required to call a detection true (1.0 is the MAP rule).
+        flip_tol, count_tol : float
+            Stability tolerances described above.
+        max_iter : int
+            Maximum number of rounds.
+        legacy : bool
+            Reproduce PyMAST 1.1.x likelihood lookups (see `classification_tables`).
+        group_by : str
+            Column of `receivers` that defines groups pooled for training.
+
+        Returns
+        -------
+        pandas.DataFrame
+            One row per receiver per round: detections, true, false, flipped, flip_share and true_change.
+        """
+        import time
+        fields = list(fields)
+        if rec_ids is None:
+            with pd.HDFStore(self.db, mode='r') as store:
+                rec_ids = sorted(store.select_column('raw_data', 'rec_id').unique())
+        groups = {}
+        for rec in rec_ids:
+            if rec not in self.receivers.index:
+                raise ValueError(f"Receiver '{rec}' not found in receiver_data")
+            groups.setdefault(self.receivers.at[rec, group_by], []).append(rec)
+
+        rounds = self._read_table('classification_rounds')
+        rows = rounds.to_dict('records') if rounds is not None else []
+        it_done = max((int(r['iter']) for r in rows), default=0)
+        progress_table = self._read_table('classification_progress')
+        progress = {(int(r.iter), str(r.rec_id)) for r in progress_table.itertuples()} if progress_table is not None else set()
+        with pd.HDFStore(self.db, mode='a') as store:                # remove the rows of any receiver that was cut off mid-round
+            if '/classified' in store.keys():
+                store.remove('classified', where=f'iter > {it_done + 1}')
+                started = set(store.select('classified', where=f'iter == {it_done + 1}', columns=['rec_id']).rec_id.unique())
+                for rec in sorted(started):
+                    if (it_done + 1, rec) not in progress:
+                        logger.info(f"round {it_done + 1}: receiver {rec} was cut off; removing its partial rows")
+                        store.remove('classified', where=f'iter == {it_done + 1} & rec_id == "{rec}"')
+
+        def snapshot(rec, it):
+            with pd.HDFStore(self.db, mode='r') as store:
+                return store.select('classified', where=f'rec_id == "{rec}" & iter == {it}', columns=['freq_code', 'epoch', 'test'])
+
+        def is_stable(round_rows):
+            return all(r['flip_share'] < flip_tol and r['true_change'] < count_tol for r in round_rows)
+
+        if it_done > 1 and (it_done >= max_iter or is_stable([r for r in rows if int(r['iter']) == it_done])):
+            return pd.DataFrame(rows, columns=self.ROUNDS_COLUMNS)           # already finished: nothing to do
+
+        previous = {rec: (snapshot(rec, it_done) if it_done else None) for rec in rec_ids}
+        it = it_done
+        while True:
+            it += 1
+            label = None if it == 1 else it
+            started_at = time.time()
+            for group, recs in groups.items():
+                training = self.create_training_data(rec_type=None, reclass_iter=label, rec_list=recs, columns=fields)
+                classifier = self.classification_tables(training, fields, legacy=legacy)
+                del training
+                for rec in recs:
+                    if (it, rec) in progress:
+                        continue
+                    self.classify_receiver(rec, fields, classifier=classifier, reclass_iter=label, threshold_ratio=threshold_ratio, legacy=legacy)
+                    progress.add((it, rec))
+                    with pd.HDFStore(self.db, mode='a') as store:
+                        store.append('classification_progress', pd.DataFrame({'iter': [it], 'rec_id': [rec]}), format='table',
+                                     data_columns=True, min_itemsize={'rec_id': 20})
+            stable, new_rows = True, []
+            for rec in rec_ids:
+                now = snapshot(rec, it)
+                row = {'iter': it, 'rec_id': rec, 'detections': len(now), 'true': int((now.test == 1).sum()), 'false': int((now.test == 0).sum()),
+                       'flipped': np.nan, 'flip_share': np.nan, 'true_change': np.nan}
+                before = previous[rec]
+                if before is not None and len(now):
+                    joined = now.merge(before, on=['freq_code', 'epoch'], suffixes=('', '_prev'))
+                    row['flipped'] = int((joined.test != joined.test_prev).sum())
+                    row['flip_share'] = row['flipped'] / max(len(joined), 1)
+                    kept_before = int((before.test == 1).sum())
+                    row['true_change'] = abs(row['true'] - kept_before) / max(kept_before, 1)
+                    if not (row['flip_share'] < flip_tol and row['true_change'] < count_tol):
+                        stable = False
+                previous[rec] = now
+                new_rows.append(row)
+            rows.extend(new_rows)
+            with pd.HDFStore(self.db, mode='a') as store:
+                store.append('classification_rounds', pd.DataFrame(new_rows, columns=self.ROUNDS_COLUMNS).astype(
+                    {'iter': 'int32', 'rec_id': 'object', 'detections': 'int64', 'true': 'int64', 'false': 'int64', 'flipped': 'float64',
+                     'flip_share': 'float64', 'true_change': 'float64'}), format='table', data_columns=True, min_itemsize={'rec_id': 20})
+            logger.info(f"classification round {it} finished in {(time.time() - started_at) / 60:.1f} min; stable={stable and it > 1}")
+            if it > 1 and stable:
+                break
+            if it >= max_iter:
+                moving = sorted({r['rec_id'] for r in new_rows if not (r['flip_share'] < flip_tol and r['true_change'] < count_tol)})
+                warnings.warn(f"classify_until_stable stopped at max_iter={max_iter}; still changing: {moving}", RuntimeWarning)
+                break
+        return pd.DataFrame(rows, columns=self.ROUNDS_COLUMNS)
+
+    def expected_false_share(self, rec_ids=None):
+        """For each receiver and classification round: how many of the detections called true are probably noise.
+
+        PyMAST learns the false class from codes that were never deployed, so noise that happens to decode to a deployed code is never seen
+        as false. Valid codes at the study frequencies that were not deployed give an unbiased noise sample: the number of such detections,
+        scaled by (deployed codes / undeployed valid codes), estimates how many deployed-code detections are noise. The valid code range at
+        each frequency is taken as the smallest to largest code in the tag table (an assumption: receivers may accept more).
+
+        Report only. The estimate does not depend on the round (its numerator is fixed), so as detections are shed the share can only
+        rise: read it as 'is the noise estimate small or large at this receiver', and use `retained_cons_ge_k` / `expected_false_share_cons_ge_k`
+        to see what a minimum run length would remove.
+
+        Returns
+        -------
+        pandas.DataFrame
+            Per receiver and round: kept, kept_before_release, expected_false, expected_false_share, and for k = 3 and 5 the detections with
+            a run of at least k expected pulses and the expected false share among them.
+        """
+        tags = self.tags.reset_index()
+        parts = tags.freq_code.str.split(' ', expand=True)
+        tags['freq'], tags['code'] = parts[0], parts[1].astype(int)
+        study = tags[tags.tag_type == 'study']
+        span = tags.groupby('freq').code.agg(['min', 'max'])
+        study_freqs = sorted(set(study.freq))
+        n_valid = int(sum(span.loc[f, 'max'] - span.loc[f, 'min'] + 1 for f in study_freqs))
+        n_unused = n_valid - tags[tags.freq.isin(study_freqs)].freq_code.nunique()
+        if n_unused <= 0:
+            raise ValueError("every valid code at the study frequencies is deployed, so there is no noise sample to scale from")
+        ratio = study.freq_code.nunique() / n_unused
+        with pd.HDFStore(self.db, mode='r') as store:
+            trained = store.select('trained', columns=['freq_code', 'rec_id', 'detection', 'cons_length'])
+            if rec_ids is None:
+                rec_ids = sorted(store.select_column('trained', 'rec_id').unique())
+        pt = trained.freq_code.str.split(' ', expand=True)
+        trained['freq'], trained['code'] = pt[0], pt[1].astype(int)
+        unused = trained[(trained.detection == 0) & trained.freq.isin(study_freqs)]
+        unused = unused[[span.loc[f, 'min'] <= c <= span.loc[f, 'max'] for f, c in zip(unused.freq, unused.code)]]
+        release = self.tags['rel_date'] if 'rel_date' in self.tags.columns else None
+        rows = []
+        for rec in rec_ids:
+            with pd.HDFStore(self.db, mode='r') as store:
+                kept_all = store.select('classified', where=f'rec_id == "{rec}" & test == 1', columns=['iter', 'freq_code', 'time_stamp', 'cons_length'])
+            noise = unused[unused.rec_id == rec].cons_length.to_numpy()
+            for it, kept in kept_all.groupby('iter'):
+                row = {'iter': int(it), 'rec_id': rec, 'kept': len(kept), 'expected_false': ratio * len(noise),
+                       'kept_before_release': (int((kept.time_stamp < kept.freq_code.map(release)).sum()) if release is not None else np.nan)}
+                row['expected_false_share'] = row['expected_false'] / len(kept) if len(kept) else np.nan
+                for k in (3, 5):
+                    retained = int((kept.cons_length >= k).sum())
+                    row[f'retained_cons_ge_{k}'] = retained
+                    row[f'expected_false_share_cons_ge_{k}'] = ratio * float((noise >= k).sum()) / retained if retained else np.nan
+                rows.append(row)
+        return pd.DataFrame(rows)
 
     def classification_summary(self,rec_id,reclass_iter = None): 
         '''if this is not the initial classification we need the trues from the last 
