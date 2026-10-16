@@ -262,11 +262,16 @@ class radio_project():
     def initialize_hdf5(self):
         '''Initialize an HDF5 database for a simulation'''
         
-        hdf5 = h5py.File(self.db, 'a')
-        
-        # Create groups for organization (optional)
-        if 'project_setup' not in hdf5:
-            hdf5.create_group("project_setup")
+        # Create the group structure first and close the file again: pandas (PyTables) must not write
+        # to a file that h5py still has open (HDF5 1.14 refuses the second handle).
+        with h5py.File(self.db, 'a') as hdf5:
+            new_project = 'project_setup' not in hdf5
+            for group in ("project_setup", "raw_data", "trained", "classified",
+                          "presence", "overlapping", "recaptures"):
+                if group not in hdf5:
+                    hdf5.create_group(group)
+
+        if new_project:
             self.tags.to_hdf(self.db, key='/project_setup/tags', mode='a')
             self.receivers.to_hdf(self.db, key='/project_setup/receivers', mode='a')
             self.nodes.to_hdf(self.db, key='/project_setup/nodes', mode='a')
@@ -380,25 +385,6 @@ class radio_project():
                 print("Receivers table not found in database, creating it now.")
                 self.receivers.to_hdf(self.db, key='/project_setup/receivers', mode='a')
 
-        if 'raw_data' not in hdf5:
-            hdf5.create_group("raw_data")  
-            
-        if 'trained' not in hdf5:
-            hdf5.create_group("trained")
-            
-        if 'classified' not in hdf5:
-            hdf5.create_group("classified")
-            
-        if 'presence' not in hdf5:
-            hdf5.create_group("presence")
-            
-        if 'overlapping' not in hdf5:
-            hdf5.create_group('overlapping')
-            
-        if 'recaptures' not in hdf5:
-            hdf5.create_group('recaptures')
-            
-        hdf5.close()
 
     def _prompt(self, prompt_text, default="no"):
         """Centralized prompt helper — returns default ONLY when non_interactive is True.
@@ -747,98 +733,76 @@ class radio_project():
         """
         '''A class object for a training dataframe and related data objects.'''
     
-        # Pull raw data 
-        train_dat = pd.read_hdf(self.db,
-                                'raw_data',
-                                where=f'(freq_code == "{freq_code}") & (rec_id == "{rec_id}")')
-        
-        # Data management
+        self.train_receiver(rec_id, freq_codes=[freq_code])
+
+    TRAINED_DTYPES = {'power': 'float32', 'time_stamp': 'datetime64[ns]', 'epoch': 'int64', 'freq_code': 'object', 'noise_ratio': 'float32',
+                      'scan_time': 'int32', 'channels': 'int32', 'rec_type': 'object', 'rec_id': 'object', 'detection': 'int32',
+                      'lag': 'float32', 'lag_diff': 'float32', 'det_hist': 'object', 'hit_ratio': 'float32', 'cons_det': 'int32',
+                      'cons_length': 'float32'}
+
+    def _train_fish_frame(self, train_dat, freq_code):
+        """Predictor variables and the detection class for one tag at one receiver (the body of the original `train`)."""
         train_dat['time_stamp'] = pd.to_datetime(train_dat.time_stamp)
-        train_dat['epoch'] = (train_dat.time_stamp.astype('int64') // 10**9).astype('int64')
+        train_dat['epoch'] = parsers._epoch_seconds(train_dat.time_stamp).values
         train_dat.sort_values(by='epoch', inplace=True)
-        
         train_dat.drop_duplicates(subset='time_stamp', keep='first', inplace=True)
-        
-        # Object variables
-        if self.receivers.index.dtype != 'object':
-            rec_id = np.int64(rec_id)
-        rec_type = self.receivers.at[rec_id, 'rec_type']
-    
-        # Detection class
-        if freq_code in self.study_tags:
-            plausible = 1
-        else:
-            plausible = 0
-    
-        # Get rate
-        if freq_code in self.tags.index:
-            pulse_rate = self.tags.at[freq_code, 'pulse_rate']
-        else:
-            pulse_rate = 673.
-    
-        mort_rate = 8888.
+
+        plausible = 1 if freq_code in self.study_tags else 0       # detection class: a tag that was deployed is plausible
+        pulse_rate = self.tags.at[freq_code, 'pulse_rate'] if freq_code in self.tags.index else 673.
         train_dat['detection'] = np.repeat(plausible, len(train_dat))
         train_dat['lag'] = train_dat.epoch.diff()
         train_dat['lag_diff'] = train_dat.lag.diff()
-        
-        # if freq_code in self.tags.index:
-        #     print ('check')
-            
-        # Apply the optimized detection history function to the entire dataset at once
+
         detection_history, hit_ratio_arr, cons_det_arr, max_count_arr = predictors.detection_history(
-            train_dat['epoch'].values,
-            pulse_rate,
-            self.det_count,
-            train_dat['channels'].values,
-            train_dat['scan_time'].values,
-        )
-    
-        # Convert detection history arrays to concatenated strings outside Numba
-        det_hist_string_arr = np.array([''.join(row.astype(str)) for row in detection_history])
-        
-        # Assign back to the DataFrame
-        train_dat['det_hist'] = det_hist_string_arr
+            train_dat['epoch'].values, pulse_rate, self.det_count, train_dat['channels'].values, train_dat['scan_time'].values)
+        train_dat['det_hist'] = (detection_history.astype(np.uint8) + 48).view(f'S{detection_history.shape[1]}').ravel().astype('U').astype(object)
         train_dat['hit_ratio'] = hit_ratio_arr
         train_dat['cons_det'] = cons_det_arr
         train_dat['cons_length'] = max_count_arr
-    
         train_dat.fillna(value=9999999, inplace=True)
-        
-        # Ensure data types are correct
+        return train_dat
+
+    def train_receiver(self, rec_id, freq_codes=None, write=True):
+        """Calculate the training predictors for every tag heard at one receiver, in a single pass.
+
+        Reads the receiver's detections once, applies the per-tag computation of `train` to each code, and appends one table to
+        `/trained`. Beacon and test tags are skipped, as in `get_fish(train=True)`. Orders of magnitude faster than calling `train`
+        per tag, which reads and writes the database once per tag.
+
+        Parameters
+        ----------
+        rec_id : str
+            Receiver to train on.
+        freq_codes : iterable of str, optional
+            Restrict to these codes (default: every code heard at the receiver except beacon and test tags).
+        write : bool, optional
+            Append to `/trained` (default); if False the table is returned instead.
+        """
+        if rec_id not in self.receivers.index and not (pd.api.types.is_integer_dtype(self.receivers.index.dtype) and np.int64(rec_id) in self.receivers.index):
+            raise ValueError(f"Receiver '{rec_id}' not found in receiver_data")
+        dat = pd.read_hdf(self.db, 'raw_data', where=f'rec_id == "{rec_id}"')
+        if freq_codes is not None:
+            dat = dat[dat.freq_code.isin(set(freq_codes))]
+        else:
+            skip = set(self.tags.index[self.tags.tag_type.astype(str).str.lower().isin(['test', 'beacon'])])
+            dat = dat[~dat.freq_code.isin(skip)]
+        frames = [self._train_fish_frame(group.copy(), freq_code) for freq_code, group in dat.groupby('freq_code', sort=True)]
+        if not frames:
+            logger.info(f"  nothing to train on at receiver {rec_id}")
+            return None
+        out = pd.concat(frames, ignore_index=True)
         try:
-            train_dat = train_dat.astype({'power': 'float32', 
-                                          'time_stamp': 'datetime64[ns]',
-                                          'epoch': 'int64',
-                                          'freq_code': 'object',
-                                          'noise_ratio': 'float32',
-                                          'scan_time': 'int32',
-                                          'channels': 'int32',
-                                          'rec_type': 'object',
-                                          'rec_id': 'object',
-                                          'detection': 'int32',
-                                          'lag': 'float32',
-                                          'lag_diff': 'float32',
-                                          'det_hist': 'object',
-                                          'hit_ratio': 'float32',
-                                          'cons_det': 'int32',
-                                          'cons_length': 'float32'})
-        except ValueError:
-            logger.debug(f"  Data type conversion issue for {freq_code} at {rec_id}")
-            
-        # Append to HDF5
+            out = out.astype(self.TRAINED_DTYPES)
+        except ValueError as exc:
+            raise ValueError(f"cannot convert the training table for receiver {rec_id} to the stored column types: {exc}") from exc
+        if not write:
+            return out
         with pd.HDFStore(self.db, mode='a') as store:
-            store.append(key='trained',
-                         value=train_dat, 
-                         format='table', 
-                         index=False,
-                         min_itemsize={'freq_code': 20,
-                                       'rec_type': 20,
-                                       'rec_id': 20,
-                                       'det_hist': 20},
-                         append=True, 
-                         chunksize=1000000)
-    
-        logger.info(f"✓ Training complete: {freq_code} at {rec_id} - Plausibility: {plausible:.2f}")
+            store.append(key='trained', value=out, format='table', index=False,
+                         min_itemsize={'freq_code': 20, 'rec_type': 20, 'rec_id': 20, 'det_hist': 20},
+                         append=True, chunksize=1000000)
+        logger.info(f"Training complete: {len(frames)} codes ({int(out.detection.sum())} plausible detections) at {rec_id}")
+        return None
 
     def training_summary(self,rec_type,site = None):
         logger.info(f"Generating training summary for {rec_type}")
@@ -1027,7 +991,7 @@ class radio_project():
                                           'rec_type':20,
                                           'rec_id':20})  
         
-    def create_training_data(self, rec_type=None, reclass_iter=None, rec_list=None):
+    def create_training_data(self, rec_type=None, reclass_iter=None, rec_list=None, columns=None):
         """
         Function to create a training dataset for the current round of classification.
         The function supports multiple pathways for generating training data, including 
@@ -1047,6 +1011,9 @@ class radio_project():
             A list of receiver IDs to filter the data by. If provided, the function 
             queries the HDF database using this list directly rather than the receiver 
             type (`rec_type`).
+        columns : list of str, optional
+            Predictor columns to return (plus `detection`). Reading only these keeps the training set small enough for seasons of tens of
+            millions of detections; the rows are exactly those returned without this option. Default: every column, as before.
     
         Returns
         -------
@@ -1061,6 +1028,8 @@ class radio_project():
         - Reclassification logic is based on contributions from T. Castro-Santos.
         """
         logger.debug(f"  Creating training data (rec_type={rec_type}, iter={reclass_iter}, rec_list={rec_list})")
+        if columns is not None:
+            return self._training_columns(rec_type, reclass_iter, rec_list, list(columns))
         
         if rec_list is not None:
             # Construct the query for multiple receiver IDs using the OR operator
@@ -1198,210 +1167,394 @@ class radio_project():
                 logger.warning("Invalid input, please enter 'yes' or 'no'")
 
 
+    CLASSIFIED_DTYPES = {'freq_code': 'object', 'epoch': 'int64', 'rec_id': 'object', 'time_stamp': 'datetime64[ns]', 'power': 'float32',
+                         'noise_ratio': 'float32', 'scan_time': 'int32', 'channels': 'int32', 'rec_type': 'object', 'lag': 'float32',
+                         'lag_diff': 'float32', 'det_hist': 'object', 'hit_ratio': 'float32', 'cons_det': 'int32', 'cons_length': 'float32',
+                         'likelihood_T': 'float32', 'likelihood_F': 'float32', 'posterior_T': 'float32', 'posterior_F': 'float32',
+                         'test': 'int32', 'iter': 'int32'}
+    CLASSIFY_INPUT_COLUMNS = ['freq_code', 'epoch', 'rec_id', 'time_stamp', 'power', 'noise_ratio', 'scan_time', 'channels', 'rec_type']
+
+    def classification_tables(self, training_data, fields, legacy=False):
+        """Build, once per classification round, everything `classify_receiver` needs from the training data.
+
+        Parameters
+        ----------
+        training_data : pandas.DataFrame
+            Output of `create_training_data`: a `detection` column (1 true, 0 false) and one column per field.
+        fields : list of str
+            Predictors used by the likelihood model.
+        legacy : bool, optional
+            Reproduce PyMAST 1.1.x lookups exactly (floating-point observations are not cast to the training dtype, so many hit-ratio
+            values silently receive the default likelihood). Default False.
+
+        Returns
+        -------
+        tuple
+            (tables, priors): a LikelihoodTable per field and the (prior_true, prior_false) pair.
+        """
+        if len(training_data) == 0:
+            raise ValueError("training data is empty: no detections to learn true and false classes from. Check that the receivers in "
+                             "rec_list/rec_type were imported and trained (project.train) before classifying")
+        missing = [f for f in list(fields) + ['detection'] if f not in training_data.columns]
+        if missing:
+            raise ValueError(f"training data lacks columns {missing}; it has {list(training_data.columns)}")
+        labels = training_data.detection.values
+        if labels.min() == labels.max():
+            raise ValueError("training data holds only one class (all detections are "
+                             f"{'true' if labels[0] else 'false'}); both true and false examples are needed to classify")
+        tables = {f: naive_bayes.LikelihoodTable(training_data[f].values, labels, match_training_dtype=not legacy) for f in fields}
+        return tables, naive_bayes.calculate_priors(labels)
+
+    def _classify_fish_frame(self, class_dat, freq_code, fields, tables, priors, reclass_iter, threshold_ratio):
+        """Predictors, likelihoods, posteriors and the true/false call for the detections of one fish at one receiver."""
+        try:
+            pulse_rate = self.tags.at[freq_code, 'pulse_rate']
+        except KeyError:
+            pulse_rate = 9999.
+        class_dat = class_dat[self.CLASSIFY_INPUT_COLUMNS].drop_duplicates()
+        if len(class_dat) == 0:
+            return None
+        class_dat['time_stamp'] = pd.to_datetime(class_dat['time_stamp'])
+        class_dat.sort_values(by='time_stamp', inplace=True)
+        class_dat['epoch'] = parsers._epoch_seconds(class_dat.time_stamp).values
+        class_dat = class_dat.drop_duplicates(subset='time_stamp')
+
+        class_dat['lag'] = class_dat.epoch.diff()
+        class_dat['lag_diff'] = class_dat.lag.diff()
+        class_dat.fillna(value=99999999, inplace=True)
+
+        detection_history, hit_ratio_arr, cons_det_arr, max_count_arr = predictors.detection_history(
+            class_dat['epoch'].values, pulse_rate, self.det_count, class_dat['channels'].values, class_dat['scan_time'].values)
+        # '0'/'1' string per detection, built from bytes rather than a Python join per row
+        class_dat['det_hist'] = (detection_history.astype(np.uint8) + 48).view(f'S{detection_history.shape[1]}').ravel().astype('U').astype(object)
+        class_dat['hit_ratio'] = hit_ratio_arr
+        class_dat['cons_det'] = cons_det_arr
+        class_dat['cons_length'] = max_count_arr
+
+        hit_ratio, power, lag, con_len, noise = naive_bayes.bin_predictors(
+            class_dat.hit_ratio, class_dat.power, class_dat.lag_diff, class_dat.cons_length, class_dat.noise_ratio)
+        binned_predictors = {'hit_ratio': hit_ratio, 'power': power, 'lag_diff': lag, 'cons_length': con_len, 'noise_ratio': noise}
+
+        likelihoods = {True: dict(), False: dict()}
+        for assumption in (True, False):
+            for field in fields:
+                likelihoods[assumption][field] = tables[field].lookup(assumption, class_dat[field].values)
+        likelihood_T = np.repeat(1., len(class_dat))
+        for pred in likelihoods[True]:
+            likelihood_T = likelihood_T * likelihoods[True][pred]
+        likelihood_F = np.repeat(1., len(class_dat))
+        for pred in likelihoods[False]:
+            likelihood_F = likelihood_F * likelihoods[False][pred]
+
+        observation_arrays = [binned_predictors[f] if f not in ('cons_det', 'series_hit') else class_dat[f].values for f in fields]
+        evidence = naive_bayes.calculate_evidence(observation_arrays)
+        prior_arrays = {True: np.repeat(priors[0], evidence.shape), False: np.repeat(priors[1], evidence.shape)}
+        posterior_T = naive_bayes.calculate_posterior(prior_arrays, evidence, likelihoods, True)
+        posterior_F = naive_bayes.calculate_posterior(prior_arrays, evidence, likelihoods, False)
+        classification = naive_bayes.classify_with_threshold(posterior_T, posterior_F, threshold_ratio)
+
+        class_dat['likelihood_T'] = likelihood_T
+        class_dat['likelihood_F'] = likelihood_F
+        class_dat['posterior_T'] = posterior_T
+        class_dat['posterior_F'] = posterior_F
+        class_dat['test'] = classification
+        class_dat['iter'] = np.repeat(1 if reclass_iter is None else reclass_iter, len(class_dat))
+        return class_dat.astype(self.CLASSIFIED_DTYPES)
+
+    def classify_receiver(self, rec_id, fields, training_data=None, reclass_iter=None, threshold_ratio=None,
+                          freq_codes=None, classifier=None, legacy=False, write=True):
+        """Classify every fish detected at one receiver in a single pass.
+
+        Reads the receiver's detections once, applies the same per-fish computation as `classify`, and appends one table to
+        `/classified`. Use `classification_tables` once per round and pass the result as `classifier` to avoid rebuilding the
+        likelihood tables for every receiver.
+
+        Parameters
+        ----------
+        rec_id : str
+            Receiver to classify.
+        fields : list of str
+            Predictors in the likelihood model.
+        training_data : pandas.DataFrame, optional
+            Needed unless `classifier` is given.
+        reclass_iter : int, optional
+            None for the initial classification (reads `/raw_data`); k >= 2 reclassifies the detections called true in round k-1.
+        threshold_ratio : float, optional
+            Posterior ratio required to call a detection true (default 1.0, the MAP rule). Earlier versions ignored this argument.
+        freq_codes : iterable of str, optional
+            Restrict to these tags (default: every study tag detected at the receiver).
+        classifier : tuple, optional
+            Result of `classification_tables`.
+        legacy : bool, optional
+            See `classification_tables`.
+        write : bool, optional
+            Append the result to `/classified` (default). If False the table is returned instead of written.
+
+        Returns
+        -------
+        pandas.DataFrame or None
+            The classified detections when `write` is False, otherwise None.
+        """
+        if rec_id not in self.receivers.index:
+            raise ValueError(f"Receiver '{rec_id}' not found in receiver_data")
+        threshold_ratio = 1.0 if threshold_ratio is None else threshold_ratio
+        if classifier is None:
+            if training_data is None:
+                raise ValueError("give either training_data or a classifier built by classification_tables")
+            classifier = self.classification_tables(training_data, fields, legacy=legacy)
+        tables, priors = classifier
+        if reclass_iter is None:
+            dat = pd.read_hdf(self.db, 'raw_data', where=f'rec_id == "{rec_id}"')
+        else:
+            dat = pd.read_hdf(self.db, 'classified', where=f'(rec_id == "{rec_id}") & (iter == {reclass_iter - 1}) & (test == 1)')
+        dat = dat[self.CLASSIFY_INPUT_COLUMNS]
+        study = set(self.tags.index[self.tags.tag_type.astype(str).str.lower() == 'study'])
+        wanted = study if freq_codes is None else set(freq_codes)
+        dat = dat[dat.freq_code.isin(wanted)]
+        frames = []
+        for freq_code, group in dat.groupby('freq_code', sort=True):
+            result = self._classify_fish_frame(group, freq_code, fields, tables, priors, reclass_iter, threshold_ratio)
+            if result is not None:
+                frames.append(result)
+        if not frames:
+            logger.info(f"  nothing to classify for receiver {rec_id} (iter {reclass_iter})")
+            return None
+        out = pd.concat(frames, ignore_index=True)
+        if not write:
+            return out
+        with pd.HDFStore(self.db, mode='a') as store:
+            store.append(key='classified', value=out, format='table', index=False,
+                         min_itemsize={'freq_code': 20, 'rec_type': 20, 'rec_id': 20, 'det_hist': 20},
+                         append=True, data_columns=True, chunksize=1000000)
+        logger.debug(f"    classified {len(out)} detections of {len(frames)} fish at {rec_id}: {int(out.test.sum())} true")
+        return None
+
     def classify(self,
                  freq_code,
                  rec_id,
                  fields,
                  training_data,
-                 reclass_iter = None,
-                 threshold_ratio = None):
-        logger.debug(f"  Classifying {freq_code} at {rec_id} (iter: {reclass_iter})")
-        
-        # get rates
-        try:
-            pulse_rate = self.tags.at[freq_code,'pulse_rate']
-        except KeyError: 
-            pulse_rate = 9999.
-        try:
-            mort_rate = self.tags.at[freq_code,'mort_rate']
-        except KeyError:
-            mort_rate = 9999.
-        
-        # get data
-        if reclass_iter == None:
-            class_dat = pd.read_hdf(self.db, 
-                                    'raw_data',
-                                    where = f'(freq_code == "{freq_code}") & (rec_id == "{rec_id}")')
-            
-            columns = ['freq_code','epoch','rec_id','time_stamp','power','noise_ratio','scan_time','channels','rec_type']
-            class_dat = class_dat[columns]
+                 reclass_iter=None,
+                 threshold_ratio=None,
+                 legacy=False):
+        """Classify one fish at one receiver (kept for compatibility).
 
+        Builds the likelihood tables from `training_data` on every call, which is slow when called in a loop; use `classify_receiver`
+        with `classification_tables` for whole receivers. Differences from PyMAST 1.1.x: `threshold_ratio` is honoured (it was
+        ignored and 1.0 always used), and floating-point observations are matched to the training dtype (pass legacy=True to restore
+        the old lookups).
+        """
+        self.classify_receiver(rec_id, fields, training_data=training_data, reclass_iter=reclass_iter,
+                               threshold_ratio=threshold_ratio, freq_codes=[freq_code], legacy=legacy)
+
+    def _training_columns(self, rec_type, reclass_iter, rec_list, columns):
+        """create_training_data restricted to `columns`; same rows as the full version."""
+        if rec_list is not None:
+            query = " | ".join(f'rec_id == "{r}"' for r in rec_list)
+        elif rec_type is not None:
+            query = f'rec_type == "{rec_type}"'
         else:
-            last_class = reclass_iter - 1
-            class_dat = pd.read_hdf(self.db,
-                                    'classified',
-                                    where = f'(freq_code == "{freq_code}") & (rec_id == "{rec_id}") & (iter == {last_class} & (test == 1))')
+            raise ValueError("Either 'rec_type' or 'rec_list' must be provided to create training data.")
+        with pd.HDFStore(self.db, mode='r') as store:
+            train = store.select('trained', where=query, columns=['detection'] + columns)
+            if reclass_iter is not None:
+                train = train[train['detection'] == 0]
+                where = f'iter == {reclass_iter - 1} & test == 1'
+                if rec_list is not None:
+                    where += f' & ({query})'
+                trues = store.select('classified', where=where, columns=['test'] + columns).rename(columns={'test': 'detection'})
+                train = pd.concat([train, trues], ignore_index=True)
+        return train.reset_index(drop=True)
 
-            columns = ['freq_code','epoch','rec_id','time_stamp','power','noise_ratio','scan_time','channels','rec_type']
-            class_dat = class_dat[columns]
+    ROUNDS_COLUMNS = ['iter', 'rec_id', 'detections', 'true', 'false', 'flipped', 'flip_share', 'true_change']
 
-        class_dat = class_dat.drop_duplicates()
-        
-        if len(class_dat) > 0:
-            # do some data management when importing training dataframe
-            class_dat['time_stamp'] = pd.to_datetime(class_dat['time_stamp'])
-            class_dat['epoch'] = (class_dat.time_stamp.astype('int64') // 10**9).astype('int64')
+    def _read_table(self, key):
+        with pd.HDFStore(self.db, mode='r') as store:
+            return store.select(key) if '/' + key in store.keys() else None
 
-            class_dat.sort_values(by = 'time_stamp', inplace = True)
-            class_dat['epoch'] = class_dat.epoch.values.astype(np.int64)
-            class_dat = class_dat.drop_duplicates(subset = 'time_stamp')
-            
-            # calculate predictors
-            class_dat['lag'] = class_dat.epoch.diff()
-            class_dat['lag_diff'] = class_dat.lag.diff()
-            class_dat.fillna(value = 99999999, inplace = True)
-            
-            # Apply the optimized detection history function to the entire dataset at once
-            detection_history, hit_ratio_arr, cons_det_arr, max_count_arr = predictors.detection_history(
-                class_dat['epoch'].values,
-                pulse_rate,
-                self.det_count,
-                class_dat['channels'].values,
-                class_dat['scan_time'].values
-            )
-        
-            # Convert detection history arrays to concatenated strings outside Numba
-            det_hist_string_arr = np.array([''.join(row.astype(str)) for row in detection_history])
-            
-            # Assign back to the DataFrame
-            class_dat['det_hist'] = det_hist_string_arr
-            class_dat['hit_ratio'] = hit_ratio_arr
-            class_dat['cons_det'] = cons_det_arr
-            class_dat['cons_length'] = max_count_arr
-            
-            # class_dat['series_hit'] = predictors.series_hit(class_dat.lag.values,
-            #                                                 pulse_rate,
-            #                                                 mort_rate,
-            #                                                 'A')
-            
-            # categorize predictors
-            hit_ratio, power, lag, con_len, noise \
-                = naive_bayes.bin_predictors(class_dat.hit_ratio,
-                                             class_dat.power,
-                                             class_dat.lag_diff,
-                                             class_dat.cons_length,
-                                             class_dat.noise_ratio)
-                
-            binned_predictors = {'hit_ratio':hit_ratio,
-                                 'power':power,
-                                 'lag_diff':lag,
-                                 'cons_length':con_len,
-                                 'noise_ratio':noise}
-    
-            # calculate prior - from training data
-            prior = naive_bayes.calculate_priors(training_data.detection.values)
-            
-            # calculate likelihoods - also from training data
-            likelihoods = {True:dict(),False:dict()}
-            labeled_array = training_data.detection.values
-            
-            # loop over assumptions and fields
-            for assumption in [True, False]:
-                for field in fields:
-                    # get observation array 
-                    observation_array = training_data[field].values
-    
-                    # calculate likelihood
-                    likelihood = naive_bayes.calculate_likelihood(observation_array, 
-                                                                  labeled_array, 
-                                                                  assumption, 
-                                                                  class_dat[field])
-    
-                    # add it to the dictionary
-                    likelihoods[assumption][field] = likelihood
-            
-            likelihood_T = np.repeat(1., len(class_dat))  
-            for pred in likelihoods[True]:
-                likelihood_T = likelihood_T * likelihoods[True][pred]
-    
-            likelihood_F = np.repeat(1., len(class_dat))  
-            for pred in likelihoods[False]:
-                likelihood_F = likelihood_F * likelihoods[False][pred]
-                
-                
-            # calculate the evidence
-            observation_arrays = []
-            # for each field, calculate the probability of observing each bin
-            for field in fields:
-                if field != 'cons_det' and field != 'series_hit': 
-                    observation_arrays.append(binned_predictors[field])   
-                else:
-                    observation_arrays.append(class_dat[field].values)   
-    
-            evidence = naive_bayes.calculate_evidence(observation_arrays)
-           
-            # calculate posteriors
-            posterior_T = naive_bayes.calculate_posterior({True:np.repeat(prior[0],evidence.shape),
-                                                False:np.repeat(prior[1],evidence.shape)},
-                                               evidence,
-                                               likelihoods,
-                                               True)
-            posterior_F = naive_bayes.calculate_posterior({True:np.repeat(prior[0],evidence.shape),
-                                                False:np.repeat(prior[1],evidence.shape)},
-                                               evidence,
-                                               likelihoods,
-                                               False)
-    
-            # Classify
-            classification = naive_bayes.classify_with_threshold(posterior_T,
-                                                                 posterior_F,
-                                                                 1.0)
-            
-            # now add these arrays to the dataframe and export to hdf5
-            class_dat['likelihood_T'] = likelihood_T
-            class_dat['likelihood_F'] = likelihood_F
-            class_dat['posterior_T'] = posterior_T
-            class_dat['posterior_F'] = posterior_F
-            class_dat['test'] = classification
-            if reclass_iter == None:
-                reclass_iter = 1
-            class_dat['iter'] = np.repeat(reclass_iter,len(class_dat))
-    
-            # keep it tidy cuz hdf is fragile
-            class_dat = class_dat.astype({'freq_code': 'object',
-                                          'epoch': 'int64',
-                                          'rec_id': 'object',
-                                          'time_stamp': 'datetime64[ns]',
-                                          'power': 'float32', 
-                                          'noise_ratio': 'float32',
-                                          'scan_time': 'int32',
-                                          'channels': 'int32',
-                                          'rec_type': 'object',
-                                          'lag': 'float32',
-                                          'lag_diff': 'float32',
-                                          'det_hist': 'object',
-                                          'hit_ratio': 'float32',
-                                          'cons_det': 'int32',
-                                          'cons_length': 'float32',
-                                          'likelihood_T': 'float32',
-                                          'likelihood_F': 'float32',
-                                          'posterior_T': 'float32',
-                                          'posterior_F': 'float32',
-                                          'test': 'int32',
-                                          'iter': 'int32'})
-            
+    def classify_until_stable(self, rec_ids=None, fields=('hit_ratio', 'cons_length', 'noise_ratio', 'lag_diff'), threshold_ratio=1.0,
+                              flip_tol=0.005, count_tol=0.01, max_iter=8, legacy=False, group_by='rec_type'):
+        """Classify, then reclassify, until the result is stable (the non-interactive form of `reclassify`).
+
+        Round 1 classifies the raw detections. Round k >= 2 trains on the known-false training detections plus the detections round k-1
+        called true, and classifies those. Receivers are grouped (by default by their `rec_type`) and each group is trained and classified
+        together. The loop stops when, for every receiver, fewer than `flip_tol` of the detections change class between two rounds and the
+        number called true moves by less than `count_tol`, or after `max_iter` rounds; in the latter case a warning says which receivers
+        were still changing. Rounds and per-receiver progress are stored in `/classification_rounds` and `/classification_progress`, so an
+        interrupted run resumes at the first unfinished receiver.
+
+        Self-training can keep shedding real detections round after round, so 'nothing changes' is not a safe stopping rule on its own:
+        read `expected_false_share` for each round as well.
+
+        Parameters
+        ----------
+        rec_ids : list of str, optional
+            Receivers to classify (default: every receiver with raw data).
+        fields : sequence of str
+            Predictors in the likelihood model.
+        threshold_ratio : float
+            Posterior ratio required to call a detection true (1.0 is the MAP rule).
+        flip_tol, count_tol : float
+            Stability tolerances described above.
+        max_iter : int
+            Maximum number of rounds.
+        legacy : bool
+            Reproduce PyMAST 1.1.x likelihood lookups (see `classification_tables`).
+        group_by : str
+            Column of `receivers` that defines groups pooled for training.
+
+        Returns
+        -------
+        pandas.DataFrame
+            One row per receiver per round: detections, true, false, flipped, flip_share and true_change.
+        """
+        import time
+        fields = list(fields)
+        if rec_ids is None:
+            with pd.HDFStore(self.db, mode='r') as store:
+                rec_ids = sorted(store.select_column('raw_data', 'rec_id').unique())
+        groups = {}
+        for rec in rec_ids:
+            if rec not in self.receivers.index:
+                raise ValueError(f"Receiver '{rec}' not found in receiver_data")
+            groups.setdefault(self.receivers.at[rec, group_by], []).append(rec)
+
+        rounds = self._read_table('classification_rounds')
+        rows = rounds.to_dict('records') if rounds is not None else []
+        it_done = max((int(r['iter']) for r in rows), default=0)
+        progress_table = self._read_table('classification_progress')
+        progress = {(int(r.iter), str(r.rec_id)) for r in progress_table.itertuples()} if progress_table is not None else set()
+        with pd.HDFStore(self.db, mode='a') as store:                # remove the rows of any receiver that was cut off mid-round
+            if '/classified' in store.keys():
+                store.remove('classified', where=f'iter > {it_done + 1}')
+                started = set(store.select('classified', where=f'iter == {it_done + 1}', columns=['rec_id']).rec_id.unique())
+                for rec in sorted(started):
+                    if (it_done + 1, rec) not in progress:
+                        logger.info(f"round {it_done + 1}: receiver {rec} was cut off; removing its partial rows")
+                        store.remove('classified', where=f'iter == {it_done + 1} & rec_id == "{rec}"')
+
+        def snapshot(rec, it):
+            with pd.HDFStore(self.db, mode='r') as store:
+                return store.select('classified', where=f'rec_id == "{rec}" & iter == {it}', columns=['freq_code', 'epoch', 'test'])
+
+        def is_stable(round_rows):
+            return all(r['flip_share'] < flip_tol and r['true_change'] < count_tol for r in round_rows)
+
+        if it_done > 1 and (it_done >= max_iter or is_stable([r for r in rows if int(r['iter']) == it_done])):
+            return pd.DataFrame(rows, columns=self.ROUNDS_COLUMNS)           # already finished: nothing to do
+
+        previous = {rec: (snapshot(rec, it_done) if it_done else None) for rec in rec_ids}
+        it = it_done
+        while True:
+            it += 1
+            label = None if it == 1 else it
+            started_at = time.time()
+            for group, recs in groups.items():
+                training = self.create_training_data(rec_type=None, reclass_iter=label, rec_list=recs, columns=fields)
+                classifier = self.classification_tables(training, fields, legacy=legacy)
+                del training
+                for rec in recs:
+                    if (it, rec) in progress:
+                        continue
+                    self.classify_receiver(rec, fields, classifier=classifier, reclass_iter=label, threshold_ratio=threshold_ratio, legacy=legacy)
+                    progress.add((it, rec))
+                    with pd.HDFStore(self.db, mode='a') as store:
+                        store.append('classification_progress', pd.DataFrame({'iter': [it], 'rec_id': [rec]}), format='table',
+                                     data_columns=True, min_itemsize={'rec_id': 20})
+            stable, new_rows = True, []
+            for rec in rec_ids:
+                now = snapshot(rec, it)
+                row = {'iter': it, 'rec_id': rec, 'detections': len(now), 'true': int((now.test == 1).sum()), 'false': int((now.test == 0).sum()),
+                       'flipped': np.nan, 'flip_share': np.nan, 'true_change': np.nan}
+                before = previous[rec]
+                if before is not None and len(now):
+                    joined = now.merge(before, on=['freq_code', 'epoch'], suffixes=('', '_prev'))
+                    row['flipped'] = int((joined.test != joined.test_prev).sum())
+                    row['flip_share'] = row['flipped'] / max(len(joined), 1)
+                    kept_before = int((before.test == 1).sum())
+                    row['true_change'] = abs(row['true'] - kept_before) / max(kept_before, 1)
+                    if not (row['flip_share'] < flip_tol and row['true_change'] < count_tol):
+                        stable = False
+                previous[rec] = now
+                new_rows.append(row)
+            rows.extend(new_rows)
             with pd.HDFStore(self.db, mode='a') as store:
-                store.append(key = 'classified',
-                             value = class_dat, 
-                             format = 'table', 
-                             index = False,
-                             min_itemsize = {'freq_code':20,
-                                             'rec_type':20,
-                                             'rec_id':20,
-                                             'det_hist':20},
-                             append = True, 
-                             data_columns = True,
-                             chunksize = 1000000)
-            
-            # export
-            #class_dat.to_csv(os.path.join(self.output_dir,'freq_code_%s_rec_%s_class_%s.csv'%(freq_code, rec_id, reclass_iter)))
-            
-            logger.debug(f"    ✓ {freq_code} at {rec_id}: {sum(classification)} true, {len(classification)-sum(classification)} false")
-            # next step looks at results
-        
-        # else:
-        #     print ('there are no recoreds to classify for fish %s at %s'%(freq_code, rec_id))
-        
+                store.append('classification_rounds', pd.DataFrame(new_rows, columns=self.ROUNDS_COLUMNS).astype(
+                    {'iter': 'int32', 'rec_id': 'object', 'detections': 'int64', 'true': 'int64', 'false': 'int64', 'flipped': 'float64',
+                     'flip_share': 'float64', 'true_change': 'float64'}), format='table', data_columns=True, min_itemsize={'rec_id': 20})
+            logger.info(f"classification round {it} finished in {(time.time() - started_at) / 60:.1f} min; stable={stable and it > 1}")
+            if it > 1 and stable:
+                break
+            if it >= max_iter:
+                moving = sorted({r['rec_id'] for r in new_rows if not (r['flip_share'] < flip_tol and r['true_change'] < count_tol)})
+                warnings.warn(f"classify_until_stable stopped at max_iter={max_iter}; still changing: {moving}", RuntimeWarning)
+                break
+        return pd.DataFrame(rows, columns=self.ROUNDS_COLUMNS)
+
+    def expected_false_share(self, rec_ids=None):
+        """For each receiver and classification round: how many of the detections called true are probably noise.
+
+        PyMAST learns the false class from codes that were never deployed, so noise that happens to decode to a deployed code is never seen
+        as false. Valid codes at the study frequencies that were not deployed give an unbiased noise sample: the number of such detections,
+        scaled by (deployed codes / undeployed valid codes), estimates how many deployed-code detections are noise. The valid code range at
+        each frequency is taken as the smallest to largest code in the tag table (an assumption: receivers may accept more).
+
+        Report only. The estimate does not depend on the round (its numerator is fixed), so as detections are shed the share can only
+        rise: read it as 'is the noise estimate small or large at this receiver', and use `retained_cons_ge_k` / `expected_false_share_cons_ge_k`
+        to see what a minimum run length would remove.
+
+        Returns
+        -------
+        pandas.DataFrame
+            Per receiver and round: kept, kept_before_release, expected_false, expected_false_share, and for k = 3 and 5 the detections with
+            a run of at least k expected pulses and the expected false share among them.
+        """
+        tags = self.tags.reset_index()
+        parts = tags.freq_code.str.split(' ', expand=True)
+        tags['freq'], tags['code'] = parts[0], parts[1].astype(int)
+        study = tags[tags.tag_type == 'study']
+        span = tags.groupby('freq').code.agg(['min', 'max'])
+        study_freqs = sorted(set(study.freq))
+        n_valid = int(sum(span.loc[f, 'max'] - span.loc[f, 'min'] + 1 for f in study_freqs))
+        n_unused = n_valid - tags[tags.freq.isin(study_freqs)].freq_code.nunique()
+        if n_unused <= 0:
+            raise ValueError("every valid code at the study frequencies is deployed, so there is no noise sample to scale from")
+        ratio = study.freq_code.nunique() / n_unused
+        with pd.HDFStore(self.db, mode='r') as store:
+            trained = store.select('trained', columns=['freq_code', 'rec_id', 'detection', 'cons_length'])
+            if rec_ids is None:
+                rec_ids = sorted(store.select_column('trained', 'rec_id').unique())
+        pt = trained.freq_code.str.split(' ', expand=True)
+        trained['freq'], trained['code'] = pt[0], pt[1].astype(int)
+        unused = trained[(trained.detection == 0) & trained.freq.isin(study_freqs)]
+        unused = unused[[span.loc[f, 'min'] <= c <= span.loc[f, 'max'] for f, c in zip(unused.freq, unused.code)]]
+        release = self.tags['rel_date'] if 'rel_date' in self.tags.columns else None
+        # one streaming pass over the classified table: tally, per receiver and round, what was kept
+        tally = {}
+        wanted = set(rec_ids)
+        with pd.HDFStore(self.db, mode='r') as store:
+            for chunk in store.select('classified', where='test == 1', columns=['iter', 'rec_id', 'freq_code', 'time_stamp', 'cons_length'],
+                                      chunksize=2_000_000):
+                chunk = chunk[chunk.rec_id.isin(wanted)]
+                if chunk.empty:
+                    continue
+                chunk = chunk.assign(ge3=chunk.cons_length >= 3, ge5=chunk.cons_length >= 5)
+                chunk['pre'] = (chunk.time_stamp < chunk.freq_code.map(release)) if release is not None else False
+                for (it, rec), g in chunk.groupby(['iter', 'rec_id']):
+                    t = tally.setdefault((int(it), rec), [0, 0, 0, 0])
+                    t[0] += len(g); t[1] += int(g.ge3.sum()); t[2] += int(g.ge5.sum()); t[3] += int(g.pre.sum())
+        rows = []
+        for (it, rec), (kept, ge3, ge5, pre) in sorted(tally.items(), key=lambda kv: (kv[0][1], kv[0][0])):
+            noise = unused[unused.rec_id == rec].cons_length.to_numpy()
+            row = {'iter': it, 'rec_id': rec, 'kept': kept, 'expected_false': ratio * len(noise),
+                   'kept_before_release': pre if release is not None else np.nan,
+                   'expected_false_share': ratio * len(noise) / kept if kept else np.nan}
+            for k, retained in ((3, ge3), (5, ge5)):
+                row[f'retained_cons_ge_{k}'] = retained
+                row[f'expected_false_share_cons_ge_{k}'] = ratio * float((noise >= k).sum()) / retained if retained else np.nan
+            rows.append(row)
+        return pd.DataFrame(rows)
+
     def classification_summary(self,rec_id,reclass_iter = None): 
         '''if this is not the initial classification we need the trues from the last 
         last classification and falses from the first'''
@@ -1745,8 +1898,7 @@ class radio_project():
                     rec_dat = dd.read_hdf(self.db, key='classified')
                     rec_dat = rec_dat[rec_dat['rec_id'] == rec].compute()
                 else:
-                    rec_dat = pd.read_hdf(self.db, key='classified')
-                    rec_dat = rec_dat[rec_dat['rec_id'] == rec]
+                    rec_dat = pd.read_hdf(self.db, key='classified', where=f'rec_id == "{rec}"')   # filter while reading, not after
                 
                 # Convert 'timestamp' column to datetime
                 rec_dat['time_stamp'] = pd.to_datetime(rec_dat['time_stamp'])
@@ -1776,8 +1928,7 @@ class radio_project():
                         presence_data = dd.read_hdf(self.db, key='presence')
                         presence_data = presence_data[presence_data['rec_id'] == rec]
                     else:
-                        presence_data = pd.read_hdf(self.db, key='presence')
-                        presence_data = presence_data[presence_data['rec_id'] == rec]
+                        presence_data = pd.read_hdf(self.db, key='presence', where=f'rec_id == "{rec}"')
                     presence_exists = True
                 except (KeyError, FileNotFoundError, ValueError):
                     presence_exists = False
@@ -1801,8 +1952,7 @@ class radio_project():
                         overlap_data = dd.read_hdf(self.db, key='overlapping')
                         overlap_data = overlap_data[overlap_data['rec_id'] == rec]
                     else:
-                        overlap_data = pd.read_hdf(self.db, key='overlapping')
-                        overlap_data = overlap_data[overlap_data['rec_id'] == rec]
+                        overlap_data = pd.read_hdf(self.db, key='overlapping', where=f'rec_id == "{rec}"')
                     overlap_exists = True
                 except (KeyError, FileNotFoundError, ValueError):
                     overlap_exists = False
@@ -1829,8 +1979,11 @@ class radio_project():
     
                 # Merge with presence data
                 if presence_exists:
-                    rec_dat = rec_dat.merge(presence_data, on=['freq_code', 'epoch', 'rec_id'], how='left')
-                    rec_dat['bout_no'] = rec_dat['bout_no'].fillna(0).astype(int)
+                    # Keep only detections that belong to a bout: bout numbers start at 0, so filling a missing
+                    # bout with 0 would silently attach bout-less detections (for example those dropped by a
+                    # minimum bout size) to a real bout.
+                    rec_dat = rec_dat.merge(presence_data, on=['freq_code', 'epoch', 'rec_id'], how='inner')
+                    rec_dat['bout_no'] = rec_dat['bout_no'].astype(int)
                 else:
                     rec_dat['bout_no'] = 0
     

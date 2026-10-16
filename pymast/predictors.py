@@ -249,6 +249,28 @@ def max_contiguous_sequence(arr):
     return max(map(len, ''.join(map(str, arr)).split('0')))
 
 
+def max_contiguous_runs(history):
+    """Longest run of consecutive 1's in each row of a 0/1 matrix (vectorised `max_contiguous_sequence`).
+
+    Parameters
+    ----------
+    history : numpy.ndarray, shape (n, m)
+        Binary detection-history matrix.
+
+    Returns
+    -------
+    numpy.ndarray, shape (n,)
+        Longest run per row; 0 for a row of zeros.
+    """
+    history = np.asarray(history)
+    run = np.zeros(history.shape[0], dtype=np.int64)
+    best = np.zeros(history.shape[0], dtype=np.int64)
+    for j in range(history.shape[1]):
+        run = (run + 1) * (history[:, j] != 0)
+        np.maximum(best, run, out=best)
+    return best
+
+
 def detection_history(epoch, pulse_rate, num_detects, num_channels, scan_time):
     """
     Calculate maximum contiguous sequence of expected detections.
@@ -296,27 +318,35 @@ def detection_history(epoch, pulse_rate, num_detects, num_channels, scan_time):
     max_contiguous_sequence : Helper function for finding longest run
     series_hit : Simpler in-series detection check
     """
+    epoch = np.asarray(epoch)
+    n = len(epoch)
     shifts = np.arange(-num_detects, num_detects + 1)
-
-    # Create shifted epochs for each detection window (NaNs for out-of-range shifts)
-    shifted_df = pd.DataFrame({f'Shift_{s}': pd.Series(epoch).shift(s) for s in (-shifts)})
-    shifted_epochs = shifted_df.to_numpy()
-
-    # Expand arrays for vectorized operations
     m = len(shifts)
-    epoch_expanded        = np.tile(epoch[:, None],        (1, m))
-    scan_time_expanded    = np.tile(scan_time[:, None],    (1, m))
-    num_channels_expanded = np.tile(num_channels[:, None], (1, m))
 
-    # Expected epoch per shift
+    # Shifted epochs for each detection window; NaN where the shifted index falls outside the series.
+    # Column j holds epoch[i - shifts[j]] (a pandas shift by -shifts[j] in the original implementation).
+    shifted_epochs = np.full((n, m), np.nan)
+    for j, sft in enumerate(-shifts):
+        if sft >= 0:
+            if sft < n:
+                shifted_epochs[sft:, j] = epoch[:n - sft]
+        else:
+            if -sft < n:
+                shifted_epochs[:n + sft, j] = epoch[-sft:]
+
+    pulse_rate = np.asarray(pulse_rate, dtype=float)
+    scan_time = np.asarray(scan_time, dtype=float)
+    num_channels = np.asarray(num_channels)
+    pr = pulse_rate[:, None] if pulse_rate.ndim else pulse_rate
+    st = scan_time[:, None] if scan_time.ndim else scan_time
+    nc = num_channels[:, None] if num_channels.ndim else num_channels
+    ep = epoch[:, None]
+
+    # Expected epoch per shift (broadcasting replaces the np.tile copies of the original)
     expected_epoch = np.where(
-        num_channels_expanded == 1,
-        epoch_expanded + shifts * pulse_rate,
-        np.where(
-            scan_time_expanded > 2 * pulse_rate,
-            epoch_expanded + shifts * pulse_rate,
-            epoch_expanded + shifts * scan_time_expanded * num_channels_expanded
-        )
+        nc == 1,
+        ep + shifts * pr,
+        np.where(st > 2 * pr, ep + shifts * pr, ep + shifts * st * nc)
     )
 
     # Window size relative to pulse rate
@@ -325,16 +355,11 @@ def detection_history(epoch, pulse_rate, num_detects, num_channels, scan_time):
         np.where(pulse_rate > 10, 1, pulse_rate),
         scan_time / 2.0
     )
-    window_size_expanded = np.tile(window_size[:, None], (1, m))
+    ws = window_size[:, None] if np.ndim(window_size) else window_size
 
-    # Elementwise window limits
-    lower_limits = expected_epoch - window_size_expanded
-    upper_limits = expected_epoch + window_size_expanded
-
-    # *** FIX: elementwise compare, not all-to-all ***
     detection_history = (
-        (shifted_epochs >= lower_limits) &
-        (shifted_epochs <= upper_limits)
+        (shifted_epochs >= expected_epoch - ws) &
+        (shifted_epochs <= expected_epoch + ws)
     ).astype(np.int32)
 
     # Ensure current epoch marked
@@ -342,14 +367,7 @@ def detection_history(epoch, pulse_rate, num_detects, num_channels, scan_time):
 
     # Metrics
     hit_ratio = detection_history.sum(axis=1) / detection_history.shape[1]
-    cons_det  = (detection_history[:, 1:-1].sum(axis=1) > 1).astype(np.int32)
-
-    # Max contiguous sequence of 1s (assumes you have max_contiguous_sequence)
-    max_count = np.array([max_contiguous_sequence(hist) for hist in detection_history])
+    cons_det = (detection_history[:, 1:-1].sum(axis=1) > 1).astype(np.int32)
+    max_count = max_contiguous_runs(detection_history)
 
     return detection_history, hit_ratio, cons_det, max_count
-
-    
-
-
-                             

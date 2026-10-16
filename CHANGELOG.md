@@ -7,6 +7,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `bout(..., min_detections=1)`: drop bouts with fewer detections than this after clustering. The default keeps
+  every bout (unchanged behaviour); a value such as the project's `detection_count` requires a sustained presence.
+  It is applied after clustering because DBSCAN's `min_samples` cannot express this for receivers that scan several
+  frequencies (a Lotek SRX800 hears a tag at most about three times in a 15 s window).
+
+### Fixed
+- **pandas 3**: positional access on label-indexed Series (`row[1][0]`, `next_row[0]`) in the SRX600/SRX800/SRX1200
+  header parsers raised `KeyError: 0`; replaced with `.iloc[0]`. `train()` tested the receiver index with
+  `dtype != 'object'`, which is true for pandas 3's string dtype, so string receiver ids were treated as numeric.
+- **HDF5 1.14**: `initialize_hdf5` kept an h5py handle open while pandas wrote the setup tables to the same file
+  (lock error, then "truncated file"). The groups are now created and the file closed before pandas writes.
+- **SRX800/SRX600 importers** accept `ant_to_rec_dict=None` (every antenna belongs to `rec_id`), as `orion_import`
+  already did; previously `TypeError: 'NoneType' object is not iterable`.
+- **`epoch` dtype**: the SRX800/SRX600 importers cast `epoch` to `float32` (about two minutes of resolution at current
+  epoch values) while every other importer stores `int64`; appending to a project that already held Orion data failed
+  with "Cannot serialize the column [epoch]". Now `int64`.
+- **SRX800/SRX600** raise a clear `ValueError` when the `** Data Segment **` marker is missing (for example a
+  "Code_log data" listing) instead of `UnboundLocalError: dataRow`.
+- **`orion_import`** with `ant_to_rec_dict` filtered `Ant == 1` for every antenna instead of the loop variable.
+- **`make_recaptures_table`** read the whole `classified`, `presence` and `overlapping` tables once per receiver; it now
+  filters while reading (about 10x faster on a 20-million-row project). It also left-merged bouts and filled missing
+  bout numbers with 0, but bout numbers start at 0, so detections without a bout were attached to a real bout; it now
+  keeps only detections that belong to a bout.
+
+### Changed
+- `bout._detect_bouts` builds the presence table with DataFrames instead of one Python dict per detection (iterrows
+  over millions of detections was the bottleneck); output columns and values are unchanged.
+
+### Added (1.2 performance and correctness work)
+- `radio_project.classify_receiver`, `classification_tables`: classify every tag at a receiver in one read and one write, with the
+  likelihood tables built once per round. `classify()` is now a thin wrapper.
+- `radio_project.train_receiver`: training predictors for every tag at a receiver in one read and one write; `train()` is a wrapper.
+- `radio_project.classify_until_stable`: the non-interactive form of `reclassify`. Repeats classification until, for every receiver, fewer
+  than `flip_tol` of detections change class and the number called true moves by less than `count_tol` (or `max_iter` rounds, with a warning
+  naming receivers still changing). Rounds and per-receiver progress are stored in the project database, so an interrupted run resumes.
+- `radio_project.expected_false_share`: estimates how many detections called true are noise, from valid-but-undeployed codes, per receiver and
+  round. Self-training can keep shedding real detections round after round, so "nothing changes" is not a safe stopping rule on its own.
+- `naive_bayes.LikelihoodTable`; `predictors.max_contiguous_runs`; `create_training_data(columns=...)`.
+
+### Fixed (1.2)
+- **Overlap reduction mixed up detections that share a row label.** Detections reach the overlap step with non-unique row labels (every import
+  file and every classified tag is appended with its own 0..n index; on a real 2016 project 79 to 93 percent of the rows at two receivers
+  shared a label). Rows were looked up by label, so a bout's posterior statistics came from other tags' rows and every row sharing a flagged
+  label was marked overlapping: a tag that never overlapped anything was removed along with the one that did. Labels are now reset to positions.
+  **Results of earlier `overlap_reduction` runs on such projects should be redone.** On the 2016 project the share of tailrace bout detections
+  removed fell from 81 and 90 percent to 50 and 72 percent at the two largest receivers (this comparison also includes the small
+  classification change below).
+- **Naive Bayes lookups silently missed.** Training values are stored as float32 and the observed values are computed as float64, and a value such
+  as 1/11 is not equal in the two types, so most `hit_ratio` observations missed the lookup table and received the default likelihood (35 percent
+  found for one fish). Observations are now cast to the training dtype. `legacy=True` (on `classification_tables`, `classify_receiver`,
+  `classify`, `classify_until_stable`) reproduces the old lookups exactly. On the 2016 project the effect on the final kept detections is small
+  (0.2 percent), the main difference is faster convergence.
+- **`epoch` was computed as `astype('int64') // 10**9`**, which is only right for nanosecond datetimes. pandas 3 parses date strings to
+  microsecond or second resolution, so Orion, ARES, VR2 and SRX1200 epochs came out 1000 or 10**9 times too small (breaking lag, hit ratio and
+  noise ratio). A single helper now gives whole seconds at any resolution.
+- `classify()` ignored `threshold_ratio` (always 1.0). It is now honoured; the default is unchanged.
+- Clear errors for an empty or single-class training set, missing predictor columns and unknown receivers (a bare `ZeroDivisionError` before).
+
+### Changed (1.2)
+- Speed, with output verified identical to the previous code on real data (2016 project, 5.3 million detections): classification of a
+  whole receiver set 31 times faster (7.2 min to 14 s per round), training 53 times faster (12.9 min to 15 s), bouts vectorised (identical
+  bouts on 1.5 million detections), overlap reduction for one receiver pair from 18 min to under 30 s. A repeat-classification round on a
+  17-million-detection season went from hours (swap-bound) to about 2.5 minutes.
+- `bout`: gaps larger than eps start a new bout, in one vectorised pass (exactly what DBSCAN with `min_samples=1` returns in one dimension).
+  The "Detected N bouts" message now counts bouts per tag.
+- `predictors.detection_history` is vectorised (no per-row string join or tile copies); identical output.
+
 ### Planned
 - R package wrapper
 

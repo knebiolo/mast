@@ -183,7 +183,7 @@ class bout():
     overlap_reduction : Resolves overlapping detections between bouts
     formatter.time_to_event : Uses bout presence for TTE analysis
     """
-    def __init__(self, radio_project, rec_id, eps_multiplier=5, lag_window=9):
+    def __init__(self, radio_project, rec_id, eps_multiplier=5, lag_window=9, min_detections=1):
         """
         Initialize bout detection for a specific receiver.
         
@@ -194,12 +194,19 @@ class bout():
                                  Default 5 = ~40-50 sec for typical tags
             lag_window (int): Time window in seconds for lag calculations
                              Default 9 seconds (kept for compatibility, not used in DBSCAN)
+            min_detections (int): Smallest number of detections a bout must contain to be kept.
+                             Default 1 keeps every bout, including single heard pulses; use the
+                             project's detection_count (for example 5) to require a sustained presence.
+                             Applied after clustering, so it works for receivers that scan several
+                             frequencies (a Lotek SRX800 hears a tag at most about three times in a
+                             15 s window, which DBSCAN's min_samples cannot express).
         """
         from sklearn.cluster import DBSCAN
         
         self.db = radio_project.db
         self.rec_id = rec_id
         self.eps_multiplier = eps_multiplier
+        self.min_detections = min_detections
         self.lag_window = lag_window
         self.tags = radio_project.tags
         
@@ -231,61 +238,54 @@ class bout():
         
     def _detect_bouts(self):
         """
-        Run DBSCAN temporal clustering to identify bouts.
-        Called automatically during __init__.
+        Identify bouts: runs of detections of one tag whose successive gaps are at most `eps_multiplier` times its pulse interval.
+
+        This is exactly what DBSCAN(eps, min_samples=1) returns for one-dimensional data (two points are neighbours when their distance is
+        at most eps, so clusters are the runs between gaps larger than eps), computed in one vectorised pass over all tags instead of one
+        DBSCAN fit per tag. Bout numbers restart at 0 for each tag, as before. Called automatically during __init__.
         """
-        from sklearn.cluster import DBSCAN
-        import logging
-        
-        logger = logging.getLogger(__name__)
-        
-        print(f"[bout] Running DBSCAN bout detection for {self.rec_id}")
-        presence_list = []
-        
-        for fish in self.fishes:
-            fish_dat = self.data[self.data.freq_code == fish].copy()
-            
-            if len(fish_dat) == 0:
-                continue
-            
-            # Get pulse rate for this fish
-            try:
-                pulse_rate = self.tags.loc[fish, 'pulse_rate']
-            except (KeyError, AttributeError):
-                pulse_rate = 8.0  # Default if not found
-            
-            # Calculate epsilon: pulse_rate * multiplier
-            eps = pulse_rate * self.eps_multiplier
-            
-            # DBSCAN clustering on epoch (1D temporal data)
-            epochs = fish_dat[['epoch']].values
-            clustering = DBSCAN(eps=eps, min_samples=1).fit(epochs)
-            fish_dat['bout_no'] = clustering.labels_
-            
-            # Filter out noise points (label = -1, though shouldn't happen with min_samples=1)
-            fish_dat = fish_dat[fish_dat.bout_no != -1]
-            
-            # Assign to each detection
-            for idx, row in fish_dat.iterrows():
-                presence_list.append({
-                    'freq_code': row['freq_code'],
-                    'epoch': row['epoch'],
-                    'time_stamp': row['time_stamp'],
-                    'power': row['power'],
-                    'rec_id': row['rec_id'],
-                    'bout_no': row['bout_no'],
-                    'class': 'study',
-                    'det_lag': 0  # Not meaningful for DBSCAN, kept for compatibility
-                })
-        
-        # Store results
-        if presence_list:
-            self.presence_df = pd.DataFrame(presence_list)
-            print(f"[bout] Detected {self.presence_df.bout_no.nunique()} bouts across {len(self.fishes)} fish")
+        print(f"[bout] Running bout detection for {self.rec_id}")
+        data = self.data
+        if len(data) == 0:
+            self.presence_df = pd.DataFrame()
+            print(f"[bout] No bouts detected for {self.rec_id}")
+            return
+        pulse = pd.Series(np.nan, index=data.index)
+        try:
+            rates = self.tags['pulse_rate']
+            if rates.index.has_duplicates:
+                rates = rates[~rates.index.duplicated(keep='first')]
+            pulse = data.freq_code.map(rates)
+        except (KeyError, AttributeError):
+            pass
+        pulse = pulse.fillna(8.0).to_numpy(dtype=float)          # 8 s when a tag is missing from the tag table, as before
+        eps = pulse * self.eps_multiplier
+
+        epoch = data.epoch.to_numpy()
+        fish = data.freq_code.to_numpy()
+        first_row = np.concatenate(([True], fish[1:] != fish[:-1]))
+        gap = np.concatenate(([np.inf], np.diff(epoch)))
+        gap[first_row] = np.inf
+        new_bout = first_row | (gap > eps)
+        running = np.cumsum(new_bout) - 1                          # bout counter over the whole table
+        first_index = np.flatnonzero(first_row)
+        per_fish_offset = np.repeat(running[first_index], np.diff(np.append(first_index, len(fish))))
+        presence = data.assign(bout_no=(running - per_fish_offset).astype('int64'))
+
+        if self.min_detections > 1:     # keep only bouts with enough detections
+            size = presence.groupby([presence.freq_code, presence.bout_no]).bout_no.transform('size')
+            presence = presence[size >= self.min_detections]
+        presence = presence[['freq_code', 'epoch', 'time_stamp', 'power', 'rec_id', 'bout_no']].copy()
+        presence['class'] = 'study'
+        presence['det_lag'] = 0  # Not meaningful for DBSCAN, kept for compatibility
+        if len(presence):
+            self.presence_df = presence.reset_index(drop=True)
+            n_bouts = presence.groupby(['freq_code', 'bout_no']).ngroups
+            print(f"[bout] Detected {n_bouts} bouts across {presence.freq_code.nunique()} fish")
         else:
             self.presence_df = pd.DataFrame()
             print(f"[bout] No bouts detected for {self.rec_id}")
-    
+
     def presence(self):
         """
         Write bout results to /presence table in HDF5.
@@ -454,6 +454,61 @@ class bout():
         plt.show()
         
         return bouts
+
+
+def _column_at(frame, column, indices):
+    """Values of `column` at the rows labelled `indices`; a positional array lookup when the index is 0..n-1 (the common case here)."""
+    index = frame.index
+    if isinstance(index, pd.RangeIndex) and index.start == 0 and index.step == 1:
+        return frame[column].to_numpy()[np.asarray(indices, dtype=np.int64)]
+    return frame.loc[indices, column].to_numpy()
+
+
+def _bout_summaries(fish_recaps, bout_table, expansion):
+    """Detections inside each bout window, with the window's mean posterior and median power.
+
+    For every bout (a row of `bout_table` with `min_epoch` and `max_epoch`, widened by `expansion` seconds each side) this returns the index
+    labels of the detections of one tag that fall inside the window, the mean `posterior_T` and the median `power`. The detections are sorted
+    once and each window is found by binary search, so the cost is linear in detections plus bouts; the original built a boolean mask over
+    all of the tag's detections for every bout, which is quadratic for a tag with many bouts.
+
+    Parameters
+    ----------
+    fish_recaps : pandas.DataFrame
+        Detections of one tag at one receiver, with `epoch` and optionally `posterior_T` and `power`; the index labels identify rows.
+    bout_table : pandas.DataFrame
+        Bouts of that tag, with `min_epoch` and `max_epoch`.
+    expansion : float
+        Seconds added either side of each bout (0 or None for none).
+
+    Returns
+    -------
+    list of dict
+        One per bout, in order, with keys `min_epoch`, `max_epoch` (expanded), `indices` (numpy array of index labels), `posterior`, `median_power`.
+    """
+    lo = bout_table['min_epoch'].to_numpy()
+    hi = bout_table['max_epoch'].to_numpy()
+    if expansion and expansion > 0:
+        lo, hi = lo - expansion, hi + expansion
+    n = len(bout_table)
+    if fish_recaps.empty:
+        return [{'min_epoch': lo[i], 'max_epoch': hi[i], 'indices': np.array([], dtype=fish_recaps.index.dtype), 'posterior': np.nan,
+                 'median_power': np.nan} for i in range(n)]
+    epoch = fish_recaps['epoch'].to_numpy()
+    order = np.argsort(epoch, kind='stable')
+    epoch = epoch[order]
+    labels = fish_recaps.index.to_numpy()[order]
+    posterior = fish_recaps['posterior_T'].to_numpy()[order] if 'posterior_T' in fish_recaps.columns else None
+    power = fish_recaps['power'].to_numpy()[order] if 'power' in fish_recaps.columns else None
+    first = np.searchsorted(epoch, lo, side='left')
+    last = np.searchsorted(epoch, hi, side='right')
+    out = []
+    for i in range(n):
+        a, b = first[i], max(last[i], first[i])
+        out.append({'min_epoch': lo[i], 'max_epoch': hi[i], 'indices': labels[a:b],
+                    'posterior': pd.Series(posterior[a:b]).mean(skipna=True) if posterior is not None else np.nan,
+                    'median_power': pd.Series(power[a:b]).median() if power is not None else np.nan})
+    return out
 
 
 class overlap_reduction:
@@ -720,8 +775,8 @@ class overlap_reduction:
         parent_mark_idx,
         child_mark_idx,
     ):
-        p_posteriors = parent_dat.loc[p_indices, 'posterior_T'].values if 'posterior_T' in parent_dat.columns else []
-        c_posteriors = child_dat.loc[c_indices, 'posterior_T'].values if 'posterior_T' in child_dat.columns else []
+        p_posteriors = _column_at(parent_dat, 'posterior_T', p_indices) if 'posterior_T' in parent_dat.columns else []
+        c_posteriors = _column_at(child_dat, 'posterior_T', c_indices) if 'posterior_T' in child_dat.columns else []
 
         if len(p_posteriors) == 0 or len(c_posteriors) == 0:
             decisions['keep_both'] += 1
@@ -1073,38 +1128,18 @@ class overlap_reduction:
                     raise RuntimeError(
                         f"Failed to read classified detections for rec_id '{node}': {exc}"
                     ) from exc
+            recaps = recaps.reset_index(drop=True)      # row labels are then positions, so index lists are cheap integer arrays
             node_recap_cache[node] = recaps  # Cache for later use
             
             node_bout_index[node] = {}
             node_bout_trees[node] = {}
             if bouts.empty or recaps.empty:
                 continue
-            # ensure epoch dtype numeric for comparisons
-            recaps_epoch = recaps['epoch']
             for fish_id, fish_bouts in bouts.groupby('freq_code'):
                 r_fish = recaps[recaps['freq_code'] == fish_id]
-                bout_list = []
-                intervals = []
-                for b_idx, bout_row in fish_bouts.reset_index(drop=True).iterrows():
-                    min_epoch = bout_row['min_epoch']
-                    max_epoch = bout_row['max_epoch']
-                    if bout_expansion and bout_expansion > 0:
-                        min_epoch = min_epoch - bout_expansion
-                        max_epoch = max_epoch + bout_expansion
-
-                    if not r_fish.empty:
-                        mask = (r_fish['epoch'] >= min_epoch) & (r_fish['epoch'] <= max_epoch)
-                        in_df = r_fish.loc[mask]
-                        indices = in_df.index.tolist()
-                        posterior = in_df['posterior_T'].mean(skipna=True) if 'posterior_T' in in_df.columns else np.nan
-                        median_power = in_df['power'].median() if 'power' in in_df.columns else np.nan
-                    else:
-                        indices = []
-                        posterior = np.nan
-                        median_power = np.nan
-
-                    bout_list.append({'min_epoch': min_epoch, 'max_epoch': max_epoch, 'indices': indices, 'posterior': posterior, 'median_power': median_power})
-                    intervals.append((min_epoch, max_epoch, b_idx))
+                fish_bouts = fish_bouts.reset_index(drop=True)
+                bout_list = _bout_summaries(r_fish, fish_bouts, bout_expansion)
+                intervals = [(info['min_epoch'], info['max_epoch'], b_idx) for b_idx, info in enumerate(bout_list)]
 
                 node_bout_index[node][fish_id] = bout_list
                 # build IntervalTree for this fish (only include intervals with numeric bounds)
@@ -1199,7 +1234,7 @@ class overlap_reduction:
                     p_power = p_info['median_power']
 
                     # skip bouts with insufficient detections
-                    if (not p_indices) or len(p_indices) < min_detections:
+                    if len(p_indices) == 0 or len(p_indices) < min_detections:
                         decisions['keep_both'] += 1
                         skip_reasons['parent_too_small'] += 1
                         continue
@@ -1248,7 +1283,7 @@ class overlap_reduction:
                         c_power = c_info['median_power']
 
                         # require minimum detections on both
-                        if (not c_indices) or len(c_indices) < min_detections:
+                        if len(c_indices) == 0 or len(c_indices) < min_detections:
                             decisions['keep_both'] += 1
                             skip_reasons['child_too_small'] += 1
                             continue

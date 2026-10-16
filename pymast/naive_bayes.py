@@ -81,6 +81,61 @@ def calculate_priors(labeled_array):
 
     return (prior_true, prior_false)
 
+class LikelihoodTable:
+    """Laplace-smoothed likelihoods of one discrete predictor under True and False, built once from the training data.
+
+    `calculate_likelihood` rebuilds this table (a sort of the whole training column) for every fish at every receiver, which dominates the
+    cost of classification when the training set is large. This class does that work once per classification round; `lookup` is then a
+    binary search per observation. Values are identical to `calculate_likelihood`:
+
+        P(value | assumption) = (count(value, assumption) + laplace) / (n(assumption) + laplace * n_unique)
+
+    and values never seen in training get laplace / (n(assumption) + laplace * n_unique).
+
+    Parameters
+    ----------
+    training_obs : array_like
+        Observed values of the predictor in the training data.
+    labeled_array : array_like
+        Truth value (1/True or 0/False) of each training row.
+    laplace : float, optional
+        Smoothing parameter (default 1).
+    match_training_dtype : bool, optional
+        If True (default), floating-point observations are cast to the dtype of the training column before the lookup. Training values are
+        stored as float32 and observed values are computed as float64, and a value such as 1/11 is not equal in the two types, so without
+        the cast most hit-ratio observations miss the table and silently receive the default likelihood. Set False to reproduce the
+        behaviour of PyMAST 1.1.x exactly.
+    """
+
+    def __init__(self, training_obs, labeled_array, laplace=1, match_training_dtype=True):
+        training_obs = np.asarray(training_obs)
+        labels = np.asarray(labeled_array)
+        if training_obs.shape != labels.shape:
+            raise ValueError(f"training observations {training_obs.shape} and labels {labels.shape} differ in shape")
+        if training_obs.size == 0:
+            raise ValueError("cannot build a likelihood table from an empty training set")
+        self.dtype = training_obs.dtype
+        self.match_training_dtype = match_training_dtype
+        self.values, inverse = np.unique(training_obs, return_inverse=True)
+        total_unique = len(self.values)
+        self._likelihood, self._default = {}, {}
+        for assumption in (True, False):
+            chosen = labels == assumption
+            denominator = int(chosen.sum()) + laplace * total_unique
+            counts = np.bincount(inverse[chosen], minlength=total_unique)
+            self._likelihood[assumption] = (counts + laplace) / denominator
+            self._default[assumption] = laplace / denominator
+
+    def lookup(self, assumption, observations):
+        """Likelihood of each observation given the truth value `assumption` (True or False)."""
+        obs = np.asarray(observations)
+        if self.match_training_dtype and obs.dtype.kind == "f" and self.dtype.kind == "f" and obs.dtype != self.dtype:
+            obs = obs.astype(self.dtype)
+        position = np.minimum(np.searchsorted(self.values, obs), len(self.values) - 1)
+        found = self.values[position] == obs
+        return np.where(found, self._likelihood[assumption][position], self._default[assumption])
+
+
 def calculate_likelihood(training_obs, labeled_array, assumption, classification_obs, laplace=1):
     """
     Calculate the likelihood of each value in the classification dataset given a 
