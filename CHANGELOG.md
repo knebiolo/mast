@@ -12,6 +12,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.1] - 2026-10-16
+
+### Fixed
+- **`bout` used tens of gigabytes after several classification rounds.** It read every round of every column for the receiver and then kept
+  the last round. The last round is now found from the `iter` column alone and only the needed columns of that round are read; the bouts
+  are identical (checked on 1.5 million real detections). `classify_until_stable` makes multi-round tables normal, so this mattered.
+
+Note: `v1.2.0` was tagged on GitHub but never published to PyPI; 1.2.1 is the first PyPI release of the 1.2 changes.
+
+---
+
 ## [1.2.0] - 2026-10-16
 
 ### Added
