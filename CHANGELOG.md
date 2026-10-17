@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`time_to_event` timed everything in 128 second steps.** It cast epoch seconds (about 1.5 billion) to float32, which cannot resolve better than
+  128 s at that size, so every `time_delta`, `time_0` and `time_1` was a multiple of 128 s and many short intervals came out as zero length (169 of
+  1,141 in one 2019 season). Epoch and lag are now float64 and the summary uses 64-bit integers; durations are exact to the second.
+- **`time_to_event` failed on a tag table without `length`, `rel_loc` or `cap_loc`.** Those columns are now optional. Asking to filter on
+  `rel_loc` or `cap_loc` when the tag table lacks the column raises a clear error instead of a `KeyError`.
+
 ### Planned
 - R package wrapper
 
