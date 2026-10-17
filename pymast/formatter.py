@@ -688,11 +688,19 @@ class time_to_event():
         if 'pulse_rate' not in self.recap_data.columns:
             self.recap_data['pulse_rate'] = np.nan
             
+        # tag columns that are not needed here are dropped if present; a project whose tag table lacks them is fine
         self.recap_data.drop(columns = ['pulse_rate',
                                         'tag_type',
                                         'length'],
                              axis = 'columns',
+                             errors = 'ignore',
                              inplace = True)
+        # release and capture locations are optional; asking to filter on one that the tag table does not have is an error
+        for loc_name, loc_value in (('rel_loc', rel_loc), ('cap_loc', cap_loc)):
+            if loc_name not in self.recap_data.columns:
+                if loc_value is not None:
+                    raise ValueError(f"[TTE] {loc_name}={loc_value!r} was requested but the tag table has no '{loc_name}' column")
+                self.recap_data[loc_name] = np.nan
         # store requested species filter on the instance; apply later in data_prep
         self.species = species
         if "species" not in self.recap_data.columns:
@@ -712,9 +720,9 @@ class time_to_event():
 
         self.recap_data = self.recap_data.astype({'freq_code':'object', 
                                                   'rec_id':'object', 
-                                                  'epoch':'float32', 
+                                                  'epoch':'float64',   # float32 cannot hold epoch seconds: it resolves only 128 s at 1.5e9
                                                   'time_stamp':'datetime64[ns]', 
-                                                  'lag':'float32', 
+                                                  'lag':'float64', 
                                                   'cap_loc':'object', 
                                                   'rel_loc':'object', 
                                                   'state':'int32'})
@@ -1085,15 +1093,15 @@ class time_to_event():
                                                                   'end_state':'int32',
                                                                   'presence':'int32',
                                                                   'time_stamp':'datetime64[ns]',
-                                                                  'time_delta':'int32',
+                                                                  'time_delta':'int64',
                                                                   'first_obs':'int32',
-                                                                  'time_0':'int32',
-                                                                  'time_1':'int32',
+                                                                  'time_0':'int64',
+                                                                  'time_1':'int64',
                                                                   'transition':'object'})
                                                                   
         self.master_state_table['dur'] = (
-            self.master_state_table['time_1'].astype('int32') - 
-            self.master_state_table['time_0'].astype('int32')
+            self.master_state_table['time_1'].astype('int64') - 
+            self.master_state_table['time_0'].astype('int64')
         )
         
         self.unique_fish_count = len(self.master_state_table['freq_code'].unique())
